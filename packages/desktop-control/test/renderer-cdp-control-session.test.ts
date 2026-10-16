@@ -149,6 +149,37 @@ describe("Renderer CDP Control Session", () => {
     session.close();
   });
 
+  it("keeps the primary session when overlay CDP connect fails", async () => {
+    const primary = rendererClient();
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      overlayHookSource: "overlay hook only",
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      operations: {
+        listTargets: vi.fn(async () => [
+          target("page-1"),
+          target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+        ]),
+        connect: vi.fn(async (webSocketDebuggerUrl: string) => {
+          if (webSocketDebuggerUrl.includes("overlay")) {
+            throw new Error("overlay closed between list and connect");
+          }
+          return primary;
+        }),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+
+    expect(session.snapshot.binding).toEqual(readyBinding());
+    expect(primary.close).not.toHaveBeenCalled();
+    session.close();
+  });
+
   it("re-injects the hook-only overlay bundle when a reload drops the hook", async () => {
     const primary = rendererClient();
     const overlay = rendererClient();

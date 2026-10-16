@@ -5,9 +5,7 @@ import {
   AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION,
   THREAD_REALTIME_EXISTING_CALL_GATE,
   auditedAppInitialAssetPresent,
-  durableOnlyClientOwnsCall,
   installCpaLiveVoiceHook,
-  nativeClientOwnsCall,
   readCpaLiveVoiceHookConfig,
   statsigClients,
   wrapCheckGate,
@@ -50,14 +48,7 @@ describe("CPA live-voice durable-only predicate", () => {
     expect(AUDITED_CLIENT_OWNS_CALL_FIXTURE).toContain(
       `Gc(e,\`${THREAD_REALTIME_EXISTING_CALL_GATE}\`)`,
     );
-    expect(nativeClientOwnsCall("durable", false, false)).toBe(true);
-    expect(nativeClientOwnsCall("local", true, true)).toBe(true);
-    expect(nativeClientOwnsCall("local", true, false)).toBe(false);
-  });
-
-  it("forcing the gate off yields durable-only ownership", () => {
-    expect(nativeClientOwnsCall("durable", true, false)).toBe(durableOnlyClientOwnsCall("durable"));
-    expect(nativeClientOwnsCall("local", true, false)).toBe(durableOnlyClientOwnsCall("local"));
+    expect(AUDITED_CLIENT_OWNS_CALL_FIXTURE).toContain("threadRealtimeExistingCall");
   });
 });
 

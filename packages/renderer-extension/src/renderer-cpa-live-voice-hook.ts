@@ -45,18 +45,6 @@ function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null;
 }
 
-export function nativeClientOwnsCall(
-  hostId: string,
-  existingCallSupported: boolean,
-  gateEnabled: boolean,
-): boolean {
-  return hostId === "durable" || (existingCallSupported && gateEnabled);
-}
-
-export function durableOnlyClientOwnsCall(hostId: string): boolean {
-  return hostId === "durable";
-}
-
 export function readCpaLiveVoiceHookConfig(globalObject: object): CpaLiveVoiceHookConfig | null {
   const value = (globalObject as Record<string, unknown>)[CPA_LIVE_VOICE_HOOK_GLOBAL];
   if (!isRecord(value) || value.enabled !== true) return null;

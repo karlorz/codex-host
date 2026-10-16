@@ -303,11 +303,19 @@ async function installOverlayHooks(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!overlayHookSource) return;
-  const overlays = selectAvatarOverlayRendererTargets(
-    await operations.listTargets(endpoint, signal),
-  );
-  for (const overlay of overlays) {
-    await installOverlayHook(overlay, overlayHookSource, operations);
+  try {
+    const overlays = selectAvatarOverlayRendererTargets(
+      await operations.listTargets(endpoint, signal),
+    );
+    for (const overlay of overlays) {
+      try {
+        await installOverlayHook(overlay, overlayHookSource, operations);
+      } catch {
+        // Overlay CDP is a voice sidecar. A disappearing overlay must not abort primary Host.
+      }
+    }
+  } catch {
+    // Target discovery for overlay is also best-effort.
   }
 }
 

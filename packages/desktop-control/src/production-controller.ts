@@ -243,18 +243,19 @@ export async function runDesktopController(
   const createSession = async (): Promise<RendererCdpControlSession> => {
     status.installing();
     startupTrace("reading Renderer bundle");
-    const rendererSource = await dependencies.readRenderer(options.rendererPath);
-    if (rendererSource.trim().length === 0) throw new Error("production Renderer Bundle is empty");
+    const rendererRead = dependencies.readRenderer(options.rendererPath);
     const bootstrap = cpaLiveVoiceHookBootstrap();
-    let overlayHookSource: string | undefined;
-    if (bootstrap) {
-      const overlayPath = path.join(path.dirname(options.rendererPath), "cpa-live-voice-hook.js");
-      const overlayBundle = await dependencies.readRenderer(overlayPath);
-      if (overlayBundle.trim().length === 0) {
-        throw new Error("CPA live-voice overlay hook bundle is empty");
-      }
-      overlayHookSource = `${bootstrap}${overlayBundle}`;
-    }
+    const overlayPath = bootstrap
+      ? path.join(path.dirname(options.rendererPath), "cpa-live-voice-hook.js")
+      : undefined;
+    const [rendererSource, overlayBundle] = overlayPath
+      ? await Promise.all([rendererRead, dependencies.readRenderer(overlayPath)])
+      : [await rendererRead, undefined];
+    if (rendererSource.trim().length === 0) throw new Error("production Renderer Bundle is empty");
+    const overlayHookSource =
+      bootstrap && overlayBundle && overlayBundle.trim().length > 0
+        ? `${bootstrap}${overlayBundle}`
+        : undefined;
     startupTrace("installing Renderer Session");
     const installed = await installProductionSession(
       {
