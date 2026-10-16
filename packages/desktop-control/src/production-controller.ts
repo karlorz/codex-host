@@ -15,6 +15,7 @@ import {
   createRendererStatusReporter,
   type DesktopControllerStatusDocument,
 } from "./controller-status.js";
+import { cpaLiveVoiceHookBootstrap } from "./cpa-live-voice-hook.js";
 import {
   installRendererCdpControlSession,
   type RendererCdpControlSession,
@@ -38,6 +39,7 @@ export interface DesktopControllerDependencies {
   install(options: {
     rendererCdpEndpoint: string;
     rendererSource: string;
+    overlayHookSource?: string;
     enabledAgents?: readonly string[];
     timeoutMs: number;
     signal?: AbortSignal;
@@ -243,11 +245,22 @@ export async function runDesktopController(
     startupTrace("reading Renderer bundle");
     const rendererSource = await dependencies.readRenderer(options.rendererPath);
     if (rendererSource.trim().length === 0) throw new Error("production Renderer Bundle is empty");
+    const bootstrap = cpaLiveVoiceHookBootstrap();
+    let overlayHookSource: string | undefined;
+    if (bootstrap) {
+      const overlayPath = path.join(path.dirname(options.rendererPath), "cpa-live-voice-hook.js");
+      const overlayBundle = await dependencies.readRenderer(overlayPath);
+      if (overlayBundle.trim().length === 0) {
+        throw new Error("CPA live-voice overlay hook bundle is empty");
+      }
+      overlayHookSource = `${bootstrap}${overlayBundle}`;
+    }
     startupTrace("installing Renderer Session");
     const installed = await installProductionSession(
       {
         rendererCdpEndpoint: options.rendererCdpEndpoint,
-        rendererSource: `${RENDERER_CSP_BOOTSTRAP}\n${rendererSource}`,
+        rendererSource: `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${rendererSource}`,
+        ...(overlayHookSource ? { overlayHookSource } : {}),
         // External Agents are discovered from each target Host after installation.
         timeoutMs: PRODUCTION_INSTALL_TIMEOUT_MS,
         signal,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createRendererCdpControlSession,
+  selectAvatarOverlayRendererTargets,
   selectPrimaryRendererTarget,
 } from "../src/renderer-cdp-control-session.js";
 import type { CdpTarget } from "../src/cdp-client.js";
@@ -62,6 +63,14 @@ describe("Renderer CDP Control Session", () => {
     expect(
       selectPrimaryRendererTarget([target("overlay", "app://-/avatar-overlay.html")]),
     ).toBeNull();
+    expect(
+      selectAvatarOverlayRendererTargets([
+        target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+        target("legacy", "app://-/avatar-overlay.html"),
+        first,
+        target("query", "app://-/index.html?window=second"),
+      ]).map((item) => item.id),
+    ).toEqual(["overlay", "legacy"]);
   });
 
   it("registers future-document injection before evaluating the current document", async () => {
@@ -92,6 +101,97 @@ describe("Renderer CDP Control Session", () => {
       },
     ]);
     expect(session.snapshot.binding).toEqual(readyBinding());
+    session.close();
+  });
+
+  it("injects the hook-only source into the avatar overlay page", async () => {
+    const primary = rendererClient();
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(false);
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      overlayHookSource: "overlay hook only",
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      operations: {
+        listTargets: vi.fn(async () => [
+          target("page-1"),
+          target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+        ]),
+        connect: vi.fn(async (webSocketDebuggerUrl: string) =>
+          webSocketDebuggerUrl.includes("overlay") ? overlay : primary,
+        ),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+
+    expect(primary.commands).toEqual(
+      expect.arrayContaining([
+        {
+          method: "Page.addScriptToEvaluateOnNewDocument",
+          params: { source: "production renderer" },
+        },
+      ]),
+    );
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source: "overlay hook only" } },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: "overlay hook only", awaitPromise: true },
+      },
+    ]);
+    session.close();
+  });
+
+  it("re-injects the hook-only overlay bundle when a reload drops the hook", async () => {
+    const primary = rendererClient();
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(false);
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      overlayHookSource: "overlay hook only",
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      operations: {
+        listTargets: vi.fn(async () => [
+          target("page-1"),
+          target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+        ]),
+        connect: vi.fn(async (webSocketDebuggerUrl: string) =>
+          webSocketDebuggerUrl.includes("overlay") ? overlay : primary,
+        ),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+
+    overlay.commands.length = 0;
+    await session.ensureInstalled();
+
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source: "overlay hook only" } },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: "overlay hook only", awaitPromise: true },
+      },
+    ]);
+    expect(
+      overlay.commands.some(
+        ({ params }) =>
+          params?.source === "production renderer" || params?.expression === "production renderer",
+      ),
+    ).toBe(false);
     session.close();
   });
 

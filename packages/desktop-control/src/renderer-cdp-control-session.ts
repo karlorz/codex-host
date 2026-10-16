@@ -6,6 +6,7 @@ import {
   type CdpTarget,
   cdpExceptionMessage,
 } from "./cdp-client.js";
+import { CPA_LIVE_VOICE_HOOK_GLOBAL } from "./cpa-live-voice-hook.js";
 import {
   installRendererDraftPrewarmPolicyDirect,
   type RendererDraftPrewarmPolicyStatus,
@@ -49,6 +50,7 @@ export interface RendererCdpControlSession {
 export interface InstallRendererCdpControlOptions {
   rendererCdpEndpoint: string;
   rendererSource: string;
+  overlayHookSource?: string;
   enabledAgents?: readonly string[];
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -124,6 +126,19 @@ function isPrimaryRendererUrl(value: string): boolean {
   }
 }
 
+function isAvatarOverlayRendererUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "app:" || url.hostname !== "-") return false;
+    if (url.pathname === "/avatar-overlay.html") return true;
+    return (
+      url.pathname === "/index.html" && url.searchParams.get("initialRoute") === "/avatar-overlay"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function selectPrimaryRendererTarget(
   targets: readonly CdpTarget[],
   preferredTargetId?: string,
@@ -132,6 +147,10 @@ export function selectPrimaryRendererTarget(
     (target) => target.type === "page" && isPrimaryRendererUrl(target.url),
   );
   return candidates.find((target) => target.id === preferredTargetId) ?? candidates.at(0) ?? null;
+}
+
+export function selectAvatarOverlayRendererTargets(targets: readonly CdpTarget[]): CdpTarget[] {
+  return targets.filter((item) => item.type === "page" && isAvatarOverlayRendererUrl(item.url));
 }
 
 class RendererAdapterReadinessError extends Error {
@@ -249,6 +268,49 @@ async function waitForBinding(
   throw new Error(`Production Renderer binding did not become ready${detail}`);
 }
 
+async function overlayHookAlreadyEnabled(renderer: RendererCdpClient): Promise<boolean> {
+  try {
+    const value = await renderer.evaluate<unknown>(
+      `globalThis.${CPA_LIVE_VOICE_HOOK_GLOBAL}?.enabled === true`,
+    );
+    return value === true;
+  } catch {
+    return false;
+  }
+}
+
+async function installOverlayHook(
+  target: CdpTarget,
+  overlayHookSource: string,
+  operations: RendererCdpControlOperations,
+): Promise<void> {
+  const renderer = await operations.connect(target.webSocketDebuggerUrl);
+  try {
+    await renderer.command("Runtime.enable");
+    await renderer.command("Page.enable");
+    if (await overlayHookAlreadyEnabled(renderer)) return;
+    await renderer.command("Page.addScriptToEvaluateOnNewDocument", { source: overlayHookSource });
+    await evaluateSource(renderer, overlayHookSource);
+  } finally {
+    renderer.close();
+  }
+}
+
+async function installOverlayHooks(
+  endpoint: string,
+  overlayHookSource: string | undefined,
+  operations: RendererCdpControlOperations,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!overlayHookSource) return;
+  const overlays = selectAvatarOverlayRendererTargets(
+    await operations.listTargets(endpoint, signal),
+  );
+  for (const overlay of overlays) {
+    await installOverlayHook(overlay, overlayHookSource, operations);
+  }
+}
+
 async function installTarget(
   target: CdpTarget,
   rendererSource: string,
@@ -279,6 +341,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     private renderer: RendererCdpClient,
     private readonly rendererCdpEndpoint: string,
     private readonly rendererSource: string,
+    private readonly overlayHookSource: string | undefined,
     private readonly enabledAgents: readonly string[] | undefined,
     private readonly timeoutMs: number,
     private readonly pollIntervalMs: number,
@@ -311,37 +374,36 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
       this.renderer.close();
       this.renderer = replacement.renderer;
       this.currentSnapshot = replacement.snapshot;
-      return this.currentSnapshot;
+    } else {
+      try {
+        const existing = await readBinding(this.renderer);
+        if (existing === null) await evaluateSource(this.renderer, this.rendererSource);
+        // A Host switch can temporarily leave the Adapter installing. Reconcile
+        // native owners before validating readiness; that is not a lost CDP page.
+        const draftPrewarmPolicy = await this.operations.installDraftPrewarmPolicy(this.renderer);
+        const binding = await waitForBinding(
+          this.renderer,
+          this.enabledAgents,
+          this.timeoutMs,
+          this.pollIntervalMs,
+        );
+        this.currentSnapshot = { target, draftPrewarmPolicy, binding };
+      } catch {
+        const replacement = await installTarget(
+          target,
+          this.rendererSource,
+          this.enabledAgents,
+          this.timeoutMs,
+          this.pollIntervalMs,
+          this.operations,
+        );
+        this.renderer.close();
+        this.renderer = replacement.renderer;
+        this.currentSnapshot = replacement.snapshot;
+      }
     }
-
-    try {
-      const existing = await readBinding(this.renderer);
-      if (existing === null) await evaluateSource(this.renderer, this.rendererSource);
-      // A Host switch can temporarily leave the Adapter installing. Reconcile
-      // native owners before validating readiness; that is not a lost CDP page.
-      const draftPrewarmPolicy = await this.operations.installDraftPrewarmPolicy(this.renderer);
-      const binding = await waitForBinding(
-        this.renderer,
-        this.enabledAgents,
-        this.timeoutMs,
-        this.pollIntervalMs,
-      );
-      this.currentSnapshot = { target, draftPrewarmPolicy, binding };
-      return this.currentSnapshot;
-    } catch {
-      const replacement = await installTarget(
-        target,
-        this.rendererSource,
-        this.enabledAgents,
-        this.timeoutMs,
-        this.pollIntervalMs,
-        this.operations,
-      );
-      this.renderer.close();
-      this.renderer = replacement.renderer;
-      this.currentSnapshot = replacement.snapshot;
-      return this.currentSnapshot;
-    }
+    await installOverlayHooks(this.rendererCdpEndpoint, this.overlayHookSource, this.operations);
+    return this.currentSnapshot;
   }
 
   async activateDesktop(): Promise<number> {
@@ -391,10 +453,17 @@ export async function createRendererCdpControlSession(
     pollIntervalMs,
     operations,
   );
+  await installOverlayHooks(
+    options.rendererCdpEndpoint,
+    options.overlayHookSource,
+    operations,
+    options.signal,
+  );
   return new InstalledRendererCdpControlSession(
     installed.renderer,
     options.rendererCdpEndpoint,
     options.rendererSource,
+    options.overlayHookSource,
     enabledAgents,
     timeoutMs,
     pollIntervalMs,
