@@ -274,7 +274,7 @@ CodexHost does it differently:
 
 - **Desktop:** extends the official Codex Desktop via CDP / Electron Inspector — no rebuilt chat UI, no patched installer.
 - **Protocol:** a CLI Shim sits in front of the official app-server and passes native Codex requests through untouched.
-- **Harnesses:** each Harness is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs, approvals, and questions all render in Codex Desktop's native UI.
+- **Harnesses:** each Harness is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs and approvals render in Codex Desktop's native UI. Questions use native Desktop cards or shared codexhost cards according to their fields; see Feature Status.
 - **Orchestration:** delegated tasks run as independent native sessions in the target Harness; the caller can wait for the result or let it run in the background.
 
 </details>
