@@ -2,6 +2,8 @@
 
 CodexHost enables Grok's ChatGPT-backed `cua_repl` surfaces from two independent switches. Nobody edits `~/.grok/config.toml` by hand.
 
+Computer Use turn-boundary release requires the patched grokgod Grok build with `0026-cua-turn-end-release`, including its Mac Sky native release bridge. Stock Grok does not supply that cleanup path. See [Computer Use release](computer-use-release.md). MCP Always allow independently requires patch `0025-mcp-elicitation-persist`; see [MCP elicitation](mcp-elicitation.md).
+
 ## Surfaces
 
 - **Codex Desktop → Settings → Connections → Grok** and **codexhost console → Connections** show one card with two switches: **Computer Use** and **In-app browser**. The Harness list and Harness CLI version block stay as they are.

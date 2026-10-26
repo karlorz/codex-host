@@ -619,6 +619,102 @@ test("ordinary Chat composers remain untouched", async ({ page }) => {
   expect(await dispatchInputIntents(page)).toEqual(unmodifiedInputResults);
 });
 
+for (const marker of ["data-codex-composer-request-navigation", "data-codex-composer-request"]) {
+  test(`native questions keep their Other editor and actions free of Host controls (${marker})`, async ({
+    page,
+  }) => {
+    await page.setContent(`
+      <form id="question-composer" data-codex-composer-root>
+        <section ${marker}>
+          <div id="options"><button type="button">Option A</button><button type="button">Option B</button></div>
+          <div id="answer-row" style="display:flex;min-width:0;gap:8px">
+            <textarea aria-label="Other answer" style="flex:1;min-width:0"></textarea>
+            <button type="submit">Submit</button>
+          </div>
+        </section>
+      </form>
+      <form id="chat-composer" data-codex-composer-root><div contenteditable="true" role="textbox">chat draft</div><button type="submit" aria-label="Send">Send</button></form>
+    `);
+    await page.addScriptTag({ content: browserBundle });
+    await expect(page.locator("#chat-composer [data-codexhost-agent-control]")).toHaveCount(1);
+    await expect(page.locator("#question-composer [data-codexhost-agent-control]")).toHaveCount(0);
+    await expect(page.locator("#question-composer [data-codexhost-model-control]")).toHaveCount(0);
+    await expect(page.locator("#question-composer [data-codexhost-usage-control]")).toHaveCount(0);
+    await expect(page.locator("#options").locator(":scope > *")).toHaveCount(2);
+    await page.getByLabel("Other answer").fill("single other");
+    await expect(page.getByLabel("Other answer")).toHaveValue("single other");
+    await expect(page.locator("#answer-row").locator(":scope > *")).toHaveCount(2);
+    const result = await page.locator("#question-composer").evaluate((form) => {
+      const editor = form.querySelector("textarea");
+      const button = form.querySelector('button[type="submit"]');
+      if (!editor || !button) throw Error("Missing native question controls");
+      let received = 0;
+      for (const [target, event] of [
+        [editor, new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })],
+        [form, new Event("submit", { bubbles: true, cancelable: true })],
+        [button, new MouseEvent("click", { bubbles: true, cancelable: true })],
+      ] as const) {
+        target.addEventListener(
+          event.type,
+          (e) => {
+            received++;
+            e.preventDefault();
+          },
+          { once: true },
+        );
+        target.dispatchEvent(event);
+      }
+      return received;
+    });
+    expect(result).toBe(3);
+  });
+}
+
+test("a Composer entering a native question removes Host controls and restores them afterwards", async ({
+  page,
+}) => {
+  await page.setContent(
+    '<form data-codex-composer-root><div contenteditable="true" role="textbox">draft</div><button type="submit" aria-label="Send">Send</button></form>',
+  );
+  await page.addScriptTag({ content: browserBundle });
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(1);
+  await page.locator("form").evaluate((form) => {
+    const request = document.createElement("section");
+    request.setAttribute("data-codex-composer-request-navigation", "");
+    request.innerHTML =
+      '<textarea aria-label="Other answer"></textarea><button type="submit">Submit</button>';
+    form.prepend(request);
+  });
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(0);
+  await expect(page.locator("[data-codexhost-model-control]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit", exact: true })).toBeEnabled();
+  await page.getByLabel("Other answer").fill("answer");
+  await page
+    .locator("[data-codex-composer-request-navigation]")
+    .evaluate((request) => request.remove());
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(1);
+  await expect(page.locator('[role="textbox"]')).toHaveText("draft");
+});
+
+test("a reused Composer responds to native request marker changes without replacing its children", async ({
+  page,
+}) => {
+  await page.setContent(
+    '<form data-codex-composer-root><div contenteditable="true" role="textbox">draft</div><button type="submit" aria-label="Send">Send</button></form>',
+  );
+  await page.addScriptTag({ content: browserBundle });
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(1);
+  await page
+    .locator("form")
+    .evaluate((form) => form.setAttribute("data-codex-composer-request-navigation", ""));
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(0);
+  await page
+    .locator("form")
+    .evaluate((form) => form.removeAttribute("data-codex-composer-request-navigation"));
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(1);
+  await expect(page.locator('[role="textbox"]')).toHaveText("draft");
+});
+
 for (const inline of [false, true]) {
   test(`a composer stops affecting input when its marker is removed (inline: ${inline})`, async ({
     page,

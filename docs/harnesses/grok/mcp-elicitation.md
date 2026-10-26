@@ -16,7 +16,7 @@ An in-turn form becomes a Host approval with Allow once and Deny. Host Runtime l
 
 Allow once maps to native accept. Desktop deny or UI dismiss maps to native decline. Turn cancellation, Session close, process fault, and native `interaction_resolved` (`tool_call_id`) map to native cancel and close the Desktop card once.
 
-When the patched Grok offer includes `persist: ["always"]` (or `session` plus `always`), Desktop adds **Always allow**. That maps to `{ outcome: "accept", content: {}, persist: "always" }`. Allow once still omits persist. **Allow this conversation** is not shown: native `session` lifetime is not proven to match a Grok conversation.
+With grokgod patch `0025-mcp-elicitation-persist`, native MCP persist offers cross ACP and selected scopes return as MCP `_meta.persist`. When that patched Grok offer includes `persist: ["always"]` (or `session` plus `always`), Desktop adds **Always allow**. That maps to `{ outcome: "accept", content: {}, persist: "always" }`. Allow once still omits persist. **Allow this conversation** is not shown: native `session` lifetime is not proven to match a Grok conversation.
 
 Unpatched Grok (no persist field) keeps Allow once / Deny only. Auto and Always approve permission modes do not auto-accept elicitation.
 

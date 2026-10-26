@@ -50,6 +50,7 @@ import {
 import type { RendererSettingsLocale } from "./settings/localization.js";
 import type { RendererAdapterStatus } from "./versioned-renderer-adapter.js";
 import { isOrbitComposer } from "./renderer-composer-kind.js";
+import { isNativeComposerRequest } from "./renderer-composer-request.js";
 import {
   mountRendererHarnessCommandControl,
   type RendererHarnessCommandControl,
@@ -173,10 +174,12 @@ function isTrailingActionNode(element: Element): boolean {
 }
 
 export function sendButtonWithin(root: Element): HTMLButtonElement | null {
-  return (
-    [...root.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
-      isComposerSubmitButton(button),
-    ) ?? null
+  return composerButtonsWithin(root).find((button) => isComposerSubmitButton(button)) ?? null;
+}
+
+export function composerButtonsWithin(root: Element): HTMLButtonElement[] {
+  return [...root.querySelectorAll<HTMLButtonElement>("button")].filter(
+    (button) => !isNativeComposerRequest(button),
   );
 }
 
@@ -226,6 +229,7 @@ export function composerForEditor(editor: Element): Element | null {
 }
 
 export function composerForElement(element: Element): Element | null {
+  if (isNativeComposerRequest(element)) return null;
   const composer = element.closest(CODEX_COMPOSER_SELECTOR);
   return composer && !isOrbitComposer(composer) ? composer : null;
 }
@@ -416,8 +420,8 @@ export function inspectRendererComposerContract(
     const editors = [...composer.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(
       contractElementVisible,
     );
-    const allButtons = [...composer.querySelectorAll<HTMLButtonElement>("button")];
-    const sendButton = sendButtonWithin(composer) ?? allButtons.at(-1) ?? null;
+    const allButtons = composerButtonsWithin(composer);
+    const sendButton = allButtons.find(isComposerSubmitButton) ?? allButtons.at(-1) ?? null;
     if (editors.length === 1 && sendButton !== null) result.activeComposerCount += 1;
     if (sendButton) {
       result.sendButtonCount += 1;
@@ -529,7 +533,7 @@ export function creditsPlacementAnchor(control: ComposerAgentControl): HTMLEleme
  * the Composer also contains our own controls, so skip their buttons.
  */
 function lastNativeButtonWithin(composer: Element): HTMLButtonElement | null {
-  const buttons = [...composer.querySelectorAll<HTMLButtonElement>("button")];
+  const buttons = composerButtonsWithin(composer);
   for (let index = buttons.length - 1; index >= 0; index -= 1) {
     const button = buttons[index];
     if (button && !isInsideOwnedRendererControl(button, composer)) return button;
@@ -553,7 +557,12 @@ function isInsideOwnedRendererControl(element: Element, composer: Element): bool
  */
 export function refreshSendButton(control: ComposerAgentControl): HTMLButtonElement | null {
   const current = control.sendButton;
-  if (current?.isConnected && control.composer.contains(current)) return current;
+  if (
+    current?.isConnected &&
+    control.composer.contains(current) &&
+    !isNativeComposerRequest(current)
+  )
+    return current;
   // Only a Composer that was mounted through the unlabelled fallback keeps
   // using it; otherwise a Stop/Attach button would be mistaken for send.
   const replacement =

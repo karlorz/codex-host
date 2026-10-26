@@ -530,6 +530,7 @@ describe("Renderer Composer DOM behavior", () => {
         disabled,
         isConnected: connected,
         parentElement: null,
+        closest: () => null,
       }) as unknown as HTMLButtonElement;
     const fakeControl = (sendButton: HTMLButtonElement, liveButtons: HTMLButtonElement[]) => {
       const composer = {
@@ -593,6 +594,7 @@ describe("Renderer Composer DOM behavior", () => {
       const stale = { ...button(false), type: "button" } as unknown as HTMLButtonElement;
       const owned = {
         type: "button",
+        closest: () => null,
         disabled: false,
         isConnected: true,
         hasAttribute: (name: string) => name === "data-codexhost-agent-control",
@@ -600,6 +602,7 @@ describe("Renderer Composer DOM behavior", () => {
       } as unknown as HTMLButtonElement;
       const action = {
         type: "button",
+        closest: () => null,
         disabled: false,
         isConnected: true,
         hasAttribute: () => false,
@@ -616,6 +619,7 @@ describe("Renderer Composer DOM behavior", () => {
       const stale = button(false);
       const stop = {
         type: "button",
+        closest: () => null,
         disabled: false,
         isConnected: true,
         hasAttribute: () => false,
@@ -1176,6 +1180,7 @@ describe("Renderer Composer DOM behavior", () => {
     const send = {
       type: "submit",
       isConnected: true,
+      closest: () => null,
       hasAttribute: () => false,
       getAttribute: (name: string) => (name === "aria-label" ? "Send" : null),
       contains: () => false,
@@ -1228,6 +1233,7 @@ describe("Renderer Composer DOM behavior", () => {
     const send = {
       type: "submit",
       isConnected: true,
+      closest: () => null,
       hasAttribute: () => false,
       getAttribute: (name: string) => (name === "aria-label" ? "Send" : null),
       contains: () => false,

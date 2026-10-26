@@ -12,6 +12,7 @@ import {
   type GrokMcpElicitFormRequest,
   type GrokMcpElicitResponse,
 } from "../src/grok-elicitation.js";
+import type { GrokQuestionRequest, GrokQuestionResponse } from "../src/grok-questions.js";
 import type { HarnessOutput, HostEvent } from "@codexhost/harness-adapter";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -103,6 +104,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     null;
   #onElicitation: ((request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>) | null =
     null;
+  #onQuestion: ((request: GrokQuestionRequest) => Promise<GrokQuestionResponse>) | null = null;
   #resolve: ((response: PromptResponse) => void) | null = null;
   #compactResolve: ((result: GrokCompactResult) => void) | null = null;
   #compactOnEvent: ((event: GrokTransportEvent) => void) | null = null;
@@ -184,6 +186,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     onEvent: (event: GrokTransportEvent) => void,
     onPermission: (request: GrokPermissionRequest) => Promise<RequestPermissionResponse>,
     onElicitation: (request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>,
+    onQuestion: (request: GrokQuestionRequest) => Promise<GrokQuestionResponse>,
   ): Promise<PromptResponse> {
     this.lastPromptText = text;
     this.#activePromptText = text;
@@ -191,6 +194,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     this.#onEvent = onEvent;
     this.#onPermission = onPermission;
     this.#onElicitation = onElicitation;
+    this.#onQuestion = onQuestion;
     return new Promise((resolve) => {
       this.#resolve = resolve;
     });
@@ -236,6 +240,19 @@ class FakeGrokTransport implements GrokAcpTransportLike {
         options,
       },
       options,
+    });
+  }
+
+  question(timeout?: GrokQuestionRequest["timeout"]): Promise<GrokQuestionResponse> {
+    if (!this.#onQuestion) throw new Error("No active Grok Prompt");
+    return this.#onQuestion({
+      sessionId: this.sessionId,
+      toolCallId: "native-question",
+      mode: "default",
+      ...(timeout ? { timeout } : {}),
+      questions: [
+        { question: "Which letter?", options: [{ label: "Alpha", description: "First" }] },
+      ],
     });
   }
 
@@ -1021,6 +1038,135 @@ describe("Grok Adapter ACP projection", () => {
     await adapter.close();
   });
 
+  it.each([false, true])(
+    "routes native questions through the public Session after permission resolution=%s",
+    async (permissionResolved) => {
+      const transport = new FakeGrokTransport();
+      const { adapter, session } = await openedSession(transport);
+      const iterator = session.outputs[Symbol.asyncIterator]();
+      try {
+        await session.execute({
+          type: "turn.start",
+          turnId: hostTurnIdSchema.parse("question-turn"),
+          input: [{ type: "text", text: "Ask me" }],
+        });
+        expect((await nextEvent(iterator)).type).toBe("turn.started");
+        if (permissionResolved)
+          transport.event({ type: "interaction.resolved", toolCallId: "native-question" });
+        const timeout = {
+          deadlineUnixMs: Date.now() + 120000,
+          action: "recommended" as const,
+          resetOnActivity: true,
+        };
+        const reset = vi.fn(async () => timeout);
+        Object.assign(transport, { questionActivity: reset });
+        const answer = transport.question(timeout);
+        const output = await nextOutput(iterator);
+        if (output.kind !== "interaction" || output.interaction.type !== "question")
+          throw new Error("Expected Question");
+        expect(await session.questionActivity?.(output.interaction.interactionId)).toEqual({
+          ok: true,
+          value: timeout,
+        });
+        expect(reset).toHaveBeenCalledWith("native-question");
+        expect(
+          await session.execute({
+            type: "interaction.respond",
+            interactionId: output.interaction.interactionId,
+            response: { type: "approval", actionId: "allow-once" },
+          }),
+        ).toMatchObject({ ok: false, error: { code: "invalidRequest" } });
+        expect(
+          await session.execute({
+            type: "interaction.respond",
+            interactionId: output.interaction.interactionId,
+            response: { type: "question", answers: { q0: ["Alpha"] } },
+          }),
+        ).toMatchObject({ ok: true });
+        await expect(answer).resolves.toEqual({
+          outcome: "accepted",
+          answers: { "Which letter?": ["Alpha"] },
+        });
+        expect(await nextEvent(iterator)).toMatchObject({
+          type: "interaction.closed",
+          reason: "responded",
+        });
+        transport.finish();
+        while ((await nextEvent(iterator)).type !== "turn.completed") {
+          /* drain native settlement */
+        }
+      } finally {
+        await adapter.close();
+      }
+    },
+  );
+
+  it.each(["withdraw", "cancel", "close", "finish", "fault"] as const)(
+    "closes native questions once on %s and rejects a late answer",
+    async (action) => {
+      const transport = new FakeGrokTransport();
+      let fault: ((error: GrokTransportError) => void) | undefined;
+      const adapter = new GrokAdapter(
+        { closeTimeoutMs: 5 },
+        {
+          randomUUID: (() => {
+            let id = 0;
+            return () => `question-${++id}`;
+          })(),
+          createTransport: (options) => {
+            fault = options.onFault;
+            return transport;
+          },
+          fetchCredits: async () => null,
+        },
+      );
+      try {
+        const opened = await adapter.open({ kind: "create", cwd: "/synthetic" });
+        if (!opened.ok) throw new Error(opened.error.message);
+        const session = opened.value;
+        const iterator = session.outputs[Symbol.asyncIterator]();
+        const turnId = hostTurnIdSchema.parse("question-turn");
+        await session.execute({
+          type: "turn.start",
+          turnId,
+          input: [{ type: "text", text: "Ask me" }],
+        });
+        await nextEvent(iterator);
+        const answer = transport.question();
+        const output = await nextOutput(iterator);
+        if (output.kind !== "interaction") throw new Error("Expected Question");
+        if (action === "withdraw")
+          transport.event({ type: "interaction.resolved", toolCallId: "native-question" });
+        else if (action === "cancel") await session.execute({ type: "turn.cancel", turnId });
+        else if (action === "close") await session.close();
+        else if (action === "fault")
+          fault?.(new GrokTransportError("processExited", "synthetic fault"));
+        else transport.finish();
+        await expect(answer).resolves.toEqual({ outcome: "cancelled" });
+        expect(
+          await session.execute({
+            type: "interaction.respond",
+            interactionId: output.interaction.interactionId,
+            response: { type: "question", answers: { q0: ["Alpha"] } },
+          }),
+        ).toMatchObject({ ok: false });
+        const events: HostEvent[] = [];
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done) break;
+          if (next.value.kind === "event") events.push(next.value.event);
+          if (action === "withdraw" || action === "cancel") {
+            transport.finish();
+          }
+          if (next.value.kind === "event" && next.value.event.type === "turn.completed") break;
+        }
+        expect(events.filter((event) => event.type === "interaction.closed")).toHaveLength(1);
+      } finally {
+        await adapter.close();
+      }
+    },
+  );
+
   it("projects Clock MCP elicitation as allow-once/deny and accepts with empty content", async () => {
     const transport = new FakeGrokTransport();
     const { adapter, session } = await openedSession(transport);
@@ -1151,7 +1297,7 @@ describe("Grok Adapter ACP projection", () => {
     });
     const output = await nextOutput(iterator);
     if (output.kind !== "interaction") throw new Error("Expected Grok MCP elicitation Approval");
-    transport.event({ type: "elicitation.resolved", toolCallId: "elicit-clock-withdraw" });
+    transport.event({ type: "interaction.resolved", toolCallId: "elicit-clock-withdraw" });
     await expect(elicit).resolves.toEqual(grokMcpElicitCancel());
     expect((await nextEvent(iterator)).type).toBe("interaction.closed");
     await expect(

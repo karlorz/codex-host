@@ -74,6 +74,13 @@ import type {
   TurnSteerCommand,
 } from "./text-session.js";
 
+interface FakeQuestionOptions {
+  itemId?: HostItemId;
+  title?: string;
+  expiresAt?: string;
+  autoResolution?: HostQuestionInteraction["autoResolution"];
+}
+
 interface ActiveFakeTurn {
   command: TurnStartCommand;
   items: Map<HostItemId, HostItem>;
@@ -182,7 +189,7 @@ export class FakeHarnessSession implements HarnessSession {
   #nextApproval: { title: string; description?: string } | null = null;
   #nextQuestion: {
     question: HostQuestion;
-    options: { itemId?: HostItemId; title?: string; expiresAt?: string };
+    options: FakeQuestionOptions;
   } | null = null;
   #nextRejection: HarnessError | null = null;
   #state: HarnessSessionState;
@@ -361,10 +368,7 @@ export class FakeHarnessSession implements HarnessSession {
     this.#nextApproval = { title, ...(description ? { description } : {}) };
   }
 
-  askQuestionOnNextTurn(
-    question: HostQuestion,
-    options: { itemId?: HostItemId; title?: string; expiresAt?: string } = {},
-  ): void {
+  askQuestionOnNextTurn(question: HostQuestion, options: FakeQuestionOptions = {}): void {
     this.#nextQuestion = { question, options };
   }
 
@@ -672,10 +676,7 @@ export class FakeHarnessSession implements HarnessSession {
     return itemId;
   }
 
-  askQuestion(
-    question: HostQuestion,
-    options: { itemId?: HostItemId; title?: string; expiresAt?: string } = {},
-  ): HostInteractionId {
+  askQuestion(question: HostQuestion, options: FakeQuestionOptions = {}): HostInteractionId {
     const active = this.#requireActive();
     const interactionId = this.#nextInteractionId();
     const interaction: HostQuestionInteraction = {
@@ -686,6 +687,7 @@ export class FakeHarnessSession implements HarnessSession {
       ...(options.itemId ? { itemId: options.itemId } : {}),
       ...(options.title ? { title: options.title } : {}),
       ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      ...(options.autoResolution ? { autoResolution: options.autoResolution } : {}),
     };
     active.interactions.set(interactionId, interaction);
     this.#channel.emit({ kind: "interaction", interaction });

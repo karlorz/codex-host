@@ -20,6 +20,7 @@ import type {
   NativeCheckpointRef,
   NativeSessionRef,
   NativeTurnRef,
+  QuestionAutoResolution,
 } from "@codexhost/shared-contracts";
 
 import type { HostUsage, HostUsageRequest } from "./usage.js";
@@ -203,6 +204,8 @@ export interface HostQuestionInteraction {
   title?: string;
   questions: HostQuestion[];
   expiresAt?: string;
+  /** Display-only native deadline; the Harness owns expiry and its result. */
+  autoResolution?: QuestionAutoResolution;
 }
 
 export type HostApprovalEffect = "allowOnce" | "allowForSession" | "allowAlways" | "deny";
@@ -609,6 +612,10 @@ export interface HarnessSession {
   readonly initialUsage: HostUsage | null;
   readonly outputs: AsyncIterable<HarnessOutput>;
   readonly commands?: HarnessCommandCapability;
+  /** Real question-card activity. Only return a deadline acknowledged by the native timer. */
+  questionActivity?(
+    interactionId: HostInteractionId,
+  ): Promise<HarnessResult<QuestionAutoResolution | null>>;
 
   /**
    * Fresh capabilities for transports whose synchronous property is only an open-time snapshot.

@@ -25,6 +25,9 @@ export function validateHostQuestionResponse(
   }
   for (const question of interaction.questions) {
     const answers = response.answers[question.id] ?? [];
+    if (new Set(answers).size !== answers.length) {
+      return invalidRequest("Question Response contains duplicate answers");
+    }
     if (!question.optional && answers.length === 0) {
       return invalidRequest("Question Response omits a required answer");
     }

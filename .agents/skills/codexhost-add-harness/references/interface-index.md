@@ -61,6 +61,7 @@
 | `readSnapshot()` | ✓ | 只读的历史快照 | [历史](spec-history.md#只读快照) |
 | `close()` | ✓ | 幂等，并结束 outputs | [会话核心](spec-session-core.md#命令并发与错误) |
 | `refreshUsage()` | | 主动刷新用量 | [用量](spec-usage-accounts.md#会话用量快照) |
+| `questionActivity(interactionId)` | | 转发真实提问卡片活动，仅返回原生计时器确认的截止时间 | [输出](spec-output-interactions.md#question) |
 
 ## 公共命令（`execute`）
 
@@ -100,3 +101,7 @@ Item 的种类：`agentMessage`、`reasoning`、`commandExecution`、`toolExecut
 | `@codexhost/harness-adapter/plugin` | `HarnessPluginContext`、`HarnessPluginModule` 等类型 |
 | `@codexhost/harness-discovery` | `resolveHarnessExecutable`、`commandInvocation`、`withNodeRuntimeOnPath`、`createHarnessInstaller`、`createInstallationManager`、`npmInstallation`、`fetchInstallationText`、`newerInstallationVersion`、`versionFromOutput` |
 | `@codexhost/shared-contracts` | 各种 schema；`encodeHarnessPluginRoute` / `decodeHarnessPluginRoute`；`localizeHarnessPresentation` |
+
+Desktop 共享提问产品投影：`shared-contracts` 导出 `THREAD_QUESTIONS_LIST_METHOD`、`THREAD_QUESTION_RESPOND_METHOD`、`THREAD_QUESTION_ACTIVITY_METHOD` 及对应 schema；活动同步使用可选 HarnessSession.questionActivity。Adapter 继续发出 `HostQuestionInteraction` 与 `multiple`，回复仍为 `interaction.respond` 的答案数组。
+
+可选 `HostQuestionInteraction.autoResolution` 只读展示 Harness 原生截止时间与超时动作，不替代 `expiresAt` 或触发 Host 自动回复。包含多选或允许 Other 的选择题的问题组使用 Composer 上方共享卡片，保留普通聊天输入框。
