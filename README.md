@@ -166,7 +166,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 ## Feature Status
 
-Harnesses integrate with Codex Desktop's native UI according to their capabilities; see the matrix below.
+This matrix describes this fork's external Harness integrations in Codex Desktop, including native UI and shared codexhost question cards. Support depends on each plugin's native protocol, required patches and verified Desktop behavior; see the limits below.
 
 <details>
 <summary>Show full feature matrix</summary>
@@ -188,6 +188,8 @@ Harnesses integrate with Codex Desktop's native UI according to their capabiliti
 | Edit previous message | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Live voice chat | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
 | Multi-select questions | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
+| Question timeout countdown | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
+| Question timeout reset on activity | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | Subagents | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | ◐ | — | — | — | — |
 | Computer Use / in-app browser | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | Generated images | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
@@ -196,6 +198,7 @@ Legend: ✅ supported integration · ◐ partial, degraded, or saved intent only
 
 - **Live voice chat** uses this fork's version-audited Desktop hook and a configured gateway. The Host `thread/realtime/*` path and new-chat Harness inheritance are generic. Claude Code has a documented attended Desktop call; Grok is ◐ because verification covers a real gateway call and an isolated Host trial with the public plugin, rather than installed Desktop button acceptance. Other Harnesses are unverified (?). See [CPA live-voice Desktop hook](docs/operations/cpa-live-voice-desktop-hook.md).
 - **Multi-select questions** use a shared codexhost checkbox card when an Adapter emits `multiple: true`; selected values return as an array. Single-choice groups that allow Other use the same card above the Composer so the normal chat message box remains available; other single-choice/text groups keep native Desktop cards. Grok now preserves its native multi-select flag and every selected label. The shared Host/browser paths have regression coverage; an attended installed Desktop test returned Alpha and Beta together. Other Adapter cells remain ◐ where native end-to-end multi-select has not been verified. OMP describes separate single-choice/text interactions; Pi remains single-choice and Antigravity rejects multi-select. See [Grok native questions](docs/harnesses/grok/questions.md), [Antigravity questions](docs/harnesses/antigravity/antigravity-question-interaction-postmortem.md) and [OMP interactions](docs/harnesses/omp/omp-interactions.md).
+- **Question countdown and activity reset** are currently exposed only by the Grok plugin and only on shared question cards. Text-only groups retain native Desktop cards without this countdown or activity forwarding. Countdown requires grokgod patch `0027`; acknowledged reset additionally requires `0028` and native `timeout_reset_on_activity = true`. Both rows are ◐ for these surface and build limits; other plugins do not currently expose them (—). These rows describe external Harness integration, not the native Codex model’s question tool. See [Grok native questions](docs/harnesses/grok/questions.md).
 - **Grok build and questions**: this fork uses a patched **grokgod Grok build**; patch-dependent behavior is not a stock-Grok guarantee. The Host handles native `_x.ai/ask_user_question` separately from MCP consent, including single-choice, text, Other and multi-select answers. Questions / cancellation stays ◐ because native plan-only actions remain limited. Patch `0011-ask-question-timeout-action` owns configurable native timeout selection/reset; the Host does not invent a Grok timer or auto-answer. The display-only countdown additionally requires grokgod patch `0027-ask-question-timeout-metadata`; builds without native deadline metadata show no countdown. Activity resets and synchronized countdown updates additionally require `0028-ask-question-activity-ack` and native `timeout_reset_on_activity = true`. Trusted card interaction and later window focus regain reset the native budget; the display follows its acknowledgement; hover and initial display do not. See [Grok native questions](docs/harnesses/grok/questions.md).
 - **Grok MCP approval — Always allow** requires grokgod patch `0025-mcp-elicitation-persist` to forward the native persist offer and return the selected scope as MCP `_meta.persist`. Desktop offers it only when the request includes `always`; unpatched Grok has Allow once / Deny only. Allow this conversation is not exposed because native session lifetime is not qualified. See [Grok MCP elicitation](docs/harnesses/grok/mcp-elicitation.md).
 - **Subagents**: ✅ native status plus a read-only child transcript · ◐ native status only. Pi requires the supported `pi-subagents` extension protocol; OMP requires RPC subagent subscription support. These cells describe plugin projection, not whether an upstream Harness can run subagents internally.
@@ -271,7 +274,7 @@ CodexHost does it differently:
 
 - **Desktop:** extends the official Codex Desktop via CDP / Electron Inspector — no rebuilt chat UI, no patched installer.
 - **Protocol:** a CLI Shim sits in front of the official app-server and passes native Codex requests through untouched.
-- **Harnesses:** each Harness is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs, approvals, and questions all render in Codex Desktop's native UI.
+- **Harnesses:** each Harness is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs and approvals render in Codex Desktop's native UI. Questions use native Desktop cards or shared codexhost cards according to their fields; see Feature Status.
 - **Orchestration:** delegated tasks run as independent native sessions in the target Harness; the caller can wait for the result or let it run in the background.
 
 </details>

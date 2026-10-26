@@ -166,7 +166,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 ## 功能状态
 
-各 Harness 根据自身能力接入 Codex Desktop 原生界面，具体支持情况见下表。
+此矩阵描述本 fork 的外部 Harness 在 Codex Desktop 中的接入，包括原生界面与共享 codexhost 提问卡片。支持范围取决于插件原生协议、所需补丁及已验证的 Desktop 行为；限制见下方说明。
 
 <details>
 <summary>查看完整功能矩阵</summary>
@@ -188,6 +188,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 | 修订上一条消息 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 实时语音 | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
 | 多选提问 | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
+| 提问超时倒计时 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
+| 提问交互重置超时 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | 子代理 | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | ◐ | — | — | — | — |
 | Computer Use / 内置浏览器 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | 生成图片 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
@@ -196,6 +198,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 - **实时语音**使用本 fork 按 Desktop 版本审计的 hook 与已配置的 gateway。Host 的 `thread/realtime/*` 和新会话继承所选 Harness 的路径是通用的。Claude Code 有已记录的有人值守 Desktop 通话；Grok 标为 ◐，因为验证覆盖真实 gateway 通话和公共插件的隔离 Host 试验，尚不等于已安装 Desktop 按钮验收。其他 Harness 未验证（?）。详见 [CPA live-voice Desktop hook](../operations/cpa-live-voice-desktop-hook.md)。
 - **多选提问**：Adapter 发出 `multiple: true` 时使用共享 codexhost 复选框卡片，选中值以数组回传；允许 Other 的单选组也使用 Composer 上方的共享卡片，保留普通聊天输入框；其他单选/文本组仍使用原生 Desktop 卡片。Grok 保留原生多选标记及全部选中标签。共享 Host/浏览器路径有回归测试，安装版 Desktop 人工测试已同时回传 Alpha 与 Beta。其他 Adapter 的原生多选全链路未验证时仍标为 ◐。OMP 使用独立单选/文本交互；Pi 固定单选，Antigravity 拒绝多选。详见 [Grok 原生提问](../harnesses/grok/questions.md)、[Antigravity 提问交互复盘](../harnesses/antigravity/antigravity-question-interaction-postmortem.md) 与 [OMP 交互](../harnesses/omp/omp-interactions.md)。
+- **提问倒计时与活动重置**目前仅由 Grok 插件在共享提问卡片上提供。纯文本问题组保留原生 Desktop 卡片，不显示该倒计时或转发该活动。倒计时需 grokgod 补丁 `0027`；确认式重置还需 `0028` 与原生 `timeout_reset_on_activity = true`。两行因界面与构建限制标为 ◐，其他插件目前未提供（—）。这些行描述外部 Harness 接入，不代表原生 Codex 模型提问工具的能力。详见 [Grok 原生提问](../harnesses/grok/questions.md)。
 - **Grok 构建与提问**：本 fork 使用补丁版 **grokgod Grok build**；补丁依赖行为不能视为 stock Grok 的能力保证。Host 独立处理原生 `_x.ai/ask_user_question`，与 MCP 同意审批分开，支持单选、文本、Other 与多选答案。提问 / 取消仍标为 ◐，因为原生 Plan 专属操作仍受限。补丁 `0011-ask-question-timeout-action` 管理可配置的原生超时选择/重置；Host 不自设 Grok 计时器或自动作答。只读倒计时额外依赖 grokgod 补丁 `0027-ask-question-timeout-metadata`；未提供原生截止时间的构建不显示倒计时。活动重置及倒计时同步额外依赖 `0028-ask-question-activity-ack` 与原生 `timeout_reset_on_activity = true`；可信卡片交互及后续窗口重新获得焦点会重置原生时限，显示跟随原生确认更新；悬停与首次显示不重置。详见 [Grok 原生提问](../harnesses/grok/questions.md)。
 - **Grok MCP 审批 — Always allow**依赖 grokgod 补丁 `0025-mcp-elicitation-persist`，转发原生 persist 选项，并将选中的范围作为 MCP `_meta.persist` 回传。只有请求包含 `always` 时 Desktop 才提供该选项；未打补丁的 Grok 只有 Allow once / Deny。原生 session 生命周期尚未核实，因此不提供 Allow this conversation。详见 [Grok MCP elicitation](../harnesses/grok/mcp-elicitation.md)。
 - **子代理**：✅ 原生状态加只读子 Transcript · ◐ 只有原生状态。Pi 需要受支持的 `pi-subagents` 扩展协议；OMP 需要 RPC 子代理订阅支持。这些单元格描述插件投影，不表示上游 Harness 内部能否运行子代理。
@@ -271,7 +274,7 @@ CodexHost 的做法不同：
 
 - **Desktop 侧**：通过 CDP / Electron Inspector 增强官方 Codex Desktop，不重做聊天界面，也不修改官方安装包
 - **协议侧**：通过 CLI Shim 接入官方 app-server，原生 Codex 请求原样转发，不受影响
-- **Harness 侧**：优先使用各自的原生接口（Pi 走 RPC，Claude Code 走 Agent SDK），没有原生接口的通过 [ACP](https://agentclientprotocol.com/) 接入；流式输出、工具状态、Diff、审批和提问统一投影到 Codex Desktop 的原生界面
+- **Harness 侧**：优先使用各自的原生接口（Pi 走 RPC，Claude Code 走 Agent SDK），没有原生接口的通过 [ACP](https://agentclientprotocol.com/) 接入；流式输出、工具状态、Diff 和审批投影到 Codex Desktop 原生界面；提问根据字段使用原生 Desktop 卡片或共享 codexhost 卡片，详见功能状态
 - **编排侧**：委派任务在目标 Harness 中作为独立的原生会话运行，发起方可以选择等待结果或让它在后台运行
 
 </details>

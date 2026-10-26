@@ -162,7 +162,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 ## 기능 상태
 
-각 Harness는 자체 기능에 따라 Codex Desktop 기본 UI와 통합됩니다. 지원 범위는 아래 표를 참조하세요.
+이 매트릭스는 기본 UI와 공유 codexhost 질문 카드를 포함하여 이 fork의 외부 Harness가 Codex Desktop에 통합되는 범위를 설명합니다. 지원 범위는 각 플러그인의 원시 프로토콜, 필수 패치 및 검증된 Desktop 동작에 따라 달라집니다. 제한 사항은 아래 설명을 참조하세요.
 
 <details>
 <summary>전체 기능 매트릭스 보기</summary>
@@ -184,6 +184,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 | 이전 메시지 수정 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 실시간 음성 | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
 | 다중 선택 질문 | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
+| 질문 시간 초과 카운트다운 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
+| 질문 활동에 따른 시간 제한 재설정 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | 서브에이전트 | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | ◐ | — | — | — | — |
 | Computer Use / 인앱 브라우저 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | 생성 이미지 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
@@ -192,6 +194,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 - **실시간 음성**은 이 fork의 Desktop 버전별로 검토된 hook과 설정된 gateway를 사용합니다. Host의 `thread/realtime/*` 경로와 새 채팅의 Harness 선택 상속은 범용입니다. Claude Code에는 기록된 유인 Desktop 통화 검증이 있습니다. Grok은 실제 gateway 통화와 공개 플러그인의 격리된 Host 시험까지 검증되었으며 설치된 Desktop 버튼 검증과는 다르므로 ◐입니다. 나머지 Harness는 미검증(?)입니다. 설명: [CPA live-voice Desktop hook](../operations/cpa-live-voice-desktop-hook.md).
 - **다중 선택 질문**: Adapter가 `multiple: true`를 보내면 공유 codexhost 체크박스 카드를 사용하고 선택한 값을 배열로 반환합니다. Other를 허용하는 단일 선택 그룹도 Composer 위의 공유 카드를 사용하여 일반 채팅 입력란을 유지합니다. 다른 단일 선택/텍스트 그룹은 원시 Desktop 카드를 유지합니다. Grok은 원시 다중 선택 플래그와 선택한 모든 레이블을 보존합니다. 공유 Host/브라우저 경로에는 회귀 테스트가 있으며 설치된 Desktop 수동 테스트에서 Alpha와 Beta가 함께 반환되었습니다. 다른 Adapter는 원시 다중 선택 전체 경로를 검증하기 전까지 ◐를 유지합니다. OMP는 별도의 단일 선택/텍스트 상호작용을 사용하며 Pi는 단일 선택, Antigravity는 다중 선택을 거부합니다. 설명: [Grok 원시 질문](../harnesses/grok/questions.md), [Antigravity 질문 회고](../harnesses/antigravity/antigravity-question-interaction-postmortem.md), [OMP 상호작용](../harnesses/omp/omp-interactions.md).
+- **질문 카운트다운과 활동 재설정**은 현재 Grok 플러그인의 공유 질문 카드에서만 제공됩니다. 텍스트 전용 그룹은 원시 Desktop 카드를 유지하며 이 카운트다운이나 활동 전달을 제공하지 않습니다. 카운트다운에는 grokgod 패치 `0027`이 필요하고, 확인 응답을 받는 재설정에는 `0028` 및 원시 `timeout_reset_on_activity = true`도 필요합니다. UI와 빌드 제한 때문에 두 행은 ◐이며 다른 플러그인은 현재 이를 제공하지 않습니다(—). 이 행은 외부 Harness 통합을 설명하며 원시 Codex 모델의 질문 도구 기능을 뜻하지 않습니다. 설명: [Grok 원시 질문](../harnesses/grok/questions.md).
 - **Grok 빌드와 질문**: 이 fork는 패치된 **grokgod Grok build**를 사용하며 패치 의존 동작은 stock Grok의 기능 보장이 아닙니다. Host는 원시 `_x.ai/ask_user_question`을 MCP 동의 승인과 별도로 처리하며 단일 선택, 텍스트, Other 및 다중 선택 답변을 지원합니다. 원시 Plan 전용 동작이 제한되어 질문 / 취소는 ◐입니다. `0011-ask-question-timeout-action` 패치가 원시 시간 초과 선택/재설정을 관리하며 Host는 Grok 타이머나 자동 응답을 만들지 않습니다. 표시 전용 카운트다운에는 grokgod 패치 `0027-ask-question-timeout-metadata`가 추가로 필요하며, 원시 마감 시간 메타데이터가 없으면 표시하지 않습니다. 활동 재설정과 카운트다운 동기화에는 `0028-ask-question-activity-ack` 및 원시 `timeout_reset_on_activity = true`가 추가로 필요합니다. 신뢰할 수 있는 카드 상호 작용 및 이후 창 포커스 복귀는 원시 제한 시간을 재설정하며 표시는 원시 확인을 따릅니다. 마우스 호버와 최초 표시는 재설정하지 않습니다. 설명: [Grok 원시 질문](../harnesses/grok/questions.md).
 - **Grok MCP 승인 — Always allow**에는 grokgod의 `0025-mcp-elicitation-persist` 패치가 필요합니다. 원시 persist 제안을 전달하고 선택한 범위를 MCP `_meta.persist`로 반환합니다. 요청이 `always`를 포함할 때만 Desktop이 이 옵션을 제공합니다. 패치하지 않은 Grok에는 Allow once / Deny만 있습니다. 원시 session 수명이 검증되지 않아 Allow this conversation은 제공하지 않습니다. 설명: [Grok MCP elicitation](../harnesses/grok/mcp-elicitation.md).
 - **서브에이전트**: ✅ 원시 상태와 읽기 전용 하위 Transcript · ◐ 원시 상태만. Pi에는 지원되는 `pi-subagents` 확장 프로토콜이 필요하며 OMP에는 RPC 서브에이전트 구독 지원이 필요합니다. 셀은 플러그인의 투영을 나타내며 상위 Harness 내부에서 서브에이전트를 실행할 수 있는지와는 별개입니다.
@@ -267,7 +270,7 @@ CodexHost는 다른 방식을 택합니다.
 
 - **Desktop 측**: CDP / Electron Inspector로 공식 Codex Desktop을 확장하며, 채팅 UI를 다시 만들거나 공식 설치 프로그램을 수정하지 않습니다
 - **프로토콜 측**: CLI Shim으로 공식 app-server에 연결하며, 네이티브 Codex 요청은 그대로 전달되어 영향을 받지 않습니다
-- **Harness 측**: 각 Harness의 네이티브 인터페이스를 우선 사용하고(Pi는 RPC, Claude Code는 Agent SDK), 네이티브 인터페이스가 없으면 [ACP](https://agentclientprotocol.com/)로 연결합니다. 스트리밍 출력, 도구 상태, Diff, 승인, 질문은 모두 Codex Desktop 네이티브 UI에 투영됩니다
+- **Harness 측**: 각 Harness의 네이티브 인터페이스를 우선 사용하고(Pi는 RPC, Claude Code는 Agent SDK), 네이티브 인터페이스가 없으면 [ACP](https://agentclientprotocol.com/)로 연결합니다. 스트리밍 출력, 도구 상태, Diff, 승인은 Codex Desktop 네이티브 UI에 투영됩니다. 질문은 필드에 따라 원시 Desktop 카드 또는 공유 codexhost 카드를 사용합니다. 기능 상태를 참조하세요
 - **오케스트레이션 측**: 위임된 작업은 대상 Harness에서 독립적인 네이티브 세션으로 실행되며, 시작한 쪽은 결과를 기다리거나 백그라운드에서 실행하도록 선택할 수 있습니다
 
 </details>
