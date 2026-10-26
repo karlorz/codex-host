@@ -66,6 +66,8 @@
 
 使用 `validateHostQuestionResponse()` 校验必填项、选项范围、单值/多值和取消语义。取消不能同时携带答案；secret 答案不写入诊断。
 
+`autoResolution` 展示原生截止时间和动作，与 Host 过期字段 `expiresAt` 分开。原生支持活动重置时可提供 `HarnessSession.questionActivity(interactionId)` 并标记 `autoResolution.resetOnActivity: true`；只接受当前待答问题的真实活动，在原生计时器确认重置后返回新截止时间，否则返回 null。活动请求不提交答案、不取消问题，不由 Host 读取配置或计算新时限。
+
 ### 共同生命周期
 
 ```text

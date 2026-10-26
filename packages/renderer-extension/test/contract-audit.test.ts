@@ -21,6 +21,7 @@ describe("Renderer contract audit inspectors", () => {
     } as unknown as HTMLElement;
     const send = {
       type: "submit",
+      closest: () => null,
       parentElement: { children: [], parentElement: null },
       hasAttribute: () => false,
       getAttribute: () => null,

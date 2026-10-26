@@ -293,6 +293,12 @@ Desktop 使用同一浏览器安全的解析函数展示菜单、当前选择和
 
 仅放开运行中配置选择：初始化/Turn 接收过程、并行配置写入和历史读取的一致性保护仍保留；第二个 Turn、历史变更、关闭/故障和 Permission Mode 的既有约束不变。Antigravity 按启动该 CLI 进程时的 Model 计算当前 Turn 用量，后续配置选择不会重标已运行请求。
 
+## 多选提问的 Desktop 产品投影
+
+Harness Question 的 `multiple` 与答案数组保持原有公共契约。包含 `multiple: true` 或允许 Other 的选择题的问题组通过共享 `codexhost/thread/questions/list` 与 `codexhost/thread/question/respond` RPC 由 Renderer 复选框卡片承载，其余单选/文本组继续走原生卡片。允许 Other 的单选卡片也放在 Composer 上方，保留普通聊天输入框。可选 `autoResolution` 仅展示 Harness 提供的截止时间和动作，不触发 Host 过期、取消或自动选择；`expiresAt` 保留原有 Host 过期语义。可选 `HarnessSession.questionActivity()` 只转发真实卡片活动并返回原生确认的截止时间；`codexhost/thread/question/activity` 校验待答问题的 Thread、Turn 与 Interaction，原生确认前不重置显示。只有 `autoResolution.resetOnActivity: true` 才发送，250ms 合并点击、键盘、输入、滚动与后续窗口焦点恢复，排除悬停、首次显示与合成事件。RPC 校验 Host 所属的 Thread、Turn、Interaction 与答案；原生撤回、取消、会话结束和既有过期处理共用原有待答问题状态。Renderer 仅轮询当前可见外部 Composer 的目标 Host，卡片放在 Composer 外，避免输入框被识别为原生聊天编辑器。没有按 Harness ID 的公共分支，也不向 Renderer 暴露 Adapter SDK。
+
+这属于共享 Desktop 产品能力，不改变原生 Codex 模型提问工具。Host 与 Renderer 需匹配部署；旧插件仍使用原 Question 契约。Grok 原生字段与 answers/annotations 转换由 Grok Adapter 负责，详见 [原生提问](../harnesses/grok/questions.md)。
+
 ## 运行中调整方向
 
 外部 Thread 的「调整方向」使用公共 `turn.cancel` → 等待旧轮终态 → `turn.start`，不要求插件新增 steer 命令。Host 负责替换协调，Renderer 复用正常发送展示；官方 Codex Thread 保留原生 steer。执行、版本化绑定、输入限制和验证边界见[外部 Thread 调整方向](external-thread-steering.md)。

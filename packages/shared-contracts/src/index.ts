@@ -20,6 +20,7 @@ export {
   type ConsoleOpenResult,
 } from "./console.js";
 import { WORKSPACE_CONTRACT_VERSION } from "./version.js";
+export * from "./thread-questions.js";
 export {
   IDLE_RELEASE_SETTINGS_METHOD,
   IDLE_RELEASE_TIMEOUT_MINUTES_MAX,

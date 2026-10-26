@@ -56,7 +56,7 @@
 | B7 | 回滚最后一轮 | 原生有则必做 | P1 | `history.rollbackLastTurn` + `open({kind:"rollbackLastTurn"})` | 声明 false | [身份与历史](spec-history.md#rollback去掉最后一个完整-turn) |
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | Item：`commandExecution`、`toolExecution`、`fileChange`（含 diff）、`reasoning`、`contextCompaction` | 原生没有对应内容时不产生该 Item | [输出与交互](spec-output-interactions.md#原生内容映射) |
 | B9 | 审批 | 原生有则必做 | P0 | `HostApprovalInteraction` + `execute(interaction.respond)` | 不伪造审批 UI | [输出与交互](spec-output-interactions.md#双向-interaction) |
-| B10 | 提问 | 原生有则必做 | P0 | `HostQuestionInteraction` | 不退化成普通文本，也不自动作答 | 同上 |
+| B10 | 提问 | 原生有则必做 | P0 | `HostQuestionInteraction` | 不退化成普通文本，也不自动作答；多选保留 multiple 与答案数组，由共享 Renderer 卡片承载；活动重置使用可选 questionActivity 并仅返回原生确认的截止时间 | 同上 |
 | B11 | 原生 Subagent | 原生有则必做 | P2 | `capabilities.subagents` + `subagentDelegation` Item + `subagent.*` 事件 + `adapter.subagents.readSnapshot` | 不声明该能力 | [输出与交互](spec-output-interactions.md#autonomous-turn-与原生-subagent) |
 | B12 | 自主 Turn | 原生有则必做 | P1 | `capabilities.autonomousTurns.observe` + `turn.autonomous.started` | 记录限制；不静默丢弃后台结果 | 同上 |
 | B13 | 会话用量 | 原生有则必做 | P1 | `initialUsage`、`session.usage.changed`、`refreshUsage()` | Usage 为 null | [用量与账号](spec-usage-accounts.md#会话用量快照) |

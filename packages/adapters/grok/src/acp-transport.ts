@@ -5,7 +5,11 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 
 import { sanitizeDiagnosticTail } from "@codexhost/harness-adapter";
-import type { HarnessPermissionModeId } from "@codexhost/shared-contracts";
+import {
+  questionAutoResolutionSchema,
+  type QuestionAutoResolution,
+  type HarnessPermissionModeId,
+} from "@codexhost/shared-contracts";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
@@ -63,6 +67,13 @@ import {
   GrokPermissionConfirmation,
   grokPermissionLogFilter,
 } from "./permission-confirmation.js";
+import {
+  GROK_ASK_USER_QUESTION_METHOD,
+  GROK_QUESTION_ACTIVITY_METHOD,
+  parseGrokQuestionRequest,
+  type GrokQuestionRequest,
+  type GrokQuestionResponse,
+} from "./grok-questions.js";
 
 export type GrokTransportFaultKind =
   "notInstalled" | "authenticationRequired" | "unavailable" | "protocolError" | "processExited";
@@ -155,7 +166,7 @@ export type GrokTransportEvent =
       resultSummary?: string;
       metadata?: Record<string, unknown>;
     }
-  | { type: "elicitation.resolved"; toolCallId: string; metadata?: Record<string, unknown> };
+  | { type: "interaction.resolved"; toolCallId: string; metadata?: Record<string, unknown> };
 
 export interface GrokPermissionRequest {
   request: RequestPermissionRequest;
@@ -208,6 +219,7 @@ interface ActivePrompt {
   onEvent(event: GrokTransportEvent): void;
   onPermission(request: GrokPermissionRequest): Promise<RequestPermissionResponse>;
   onElicitation(request: GrokMcpElicitFormRequest): Promise<GrokMcpElicitResponse>;
+  onQuestion(request: GrokQuestionRequest): Promise<GrokQuestionResponse>;
 }
 
 interface ActiveCompact {
@@ -354,7 +366,7 @@ function transportEvent(
   const resolvedToolCallId = grokElicitationResolvedToolCallId(extension);
   if (resolvedToolCallId) {
     return {
-      type: "elicitation.resolved",
+      type: "interaction.resolved",
       toolCallId: resolvedToolCallId,
       ...(metadata ? { metadata } : {}),
     };
@@ -750,6 +762,33 @@ export class GrokAcpTransport {
     }
   }
 
+  async questionActivity(toolCallId: string): Promise<QuestionAutoResolution | null> {
+    if (
+      !this.#connection ||
+      !this.#sessionId ||
+      !this.#activePrompt ||
+      this.#closed ||
+      this.#closing
+    )
+      return null;
+    try {
+      const raw = await withTimeout(
+        this.#connection.request(GROK_QUESTION_ACTIVITY_METHOD, {
+          sessionId: this.#sessionId,
+          toolCallId,
+        }),
+        3000,
+        "Grok question activity",
+      );
+      if (!isRecord(raw) || !("timeout" in raw))
+        throw new GrokTransportError("protocolError", "Invalid Grok activity acknowledgement");
+      return raw.timeout === null ? null : questionAutoResolutionSchema.parse(raw.timeout);
+    } catch (error) {
+      if (isGrokMethodNotFound(error)) return null;
+      throw error;
+    }
+  }
+
   async #rewindSession(params: GrokRewindParams): Promise<void> {
     if (!this.#connection) throw new GrokTransportError("unavailable", "Grok ACP is unavailable");
     try {
@@ -902,6 +941,7 @@ export class GrokAcpTransport {
     onEvent: ActivePrompt["onEvent"],
     onPermission: ActivePrompt["onPermission"],
     onElicitation: ActivePrompt["onElicitation"],
+    onQuestion: ActivePrompt["onQuestion"] = async () => ({ outcome: "cancelled" }),
   ): Promise<PromptResponse> {
     const connection = this.#connection;
     if (!connection || !this.#sessionId || this.#closed || this.#closing) {
@@ -910,7 +950,7 @@ export class GrokAcpTransport {
     if (this.#activePrompt) throw new Error("Grok ACP Session already has an active Prompt");
     if (this.#permissionConfirmation)
       throw new GrokTransportError("unavailable", "Grok ACP Session has an active operation");
-    const active = { onEvent, onPermission, onElicitation };
+    const active = { onEvent, onPermission, onElicitation, onQuestion };
     this.#activePrompt = active;
     try {
       return await connection.prompt({
@@ -1136,6 +1176,23 @@ export class GrokAcpTransport {
     method: string,
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    const activePrompt =
+      !this.#closed && !this.#closing && this.#replay === null && this.#activeCompact === null
+        ? this.#activePrompt
+        : null;
+    if (method === GROK_ASK_USER_QUESTION_METHOD) {
+      let request: GrokQuestionRequest;
+      try {
+        request = parseGrokQuestionRequest(params);
+      } catch (error) {
+        throw RequestError.invalidParams(
+          undefined,
+          error instanceof Error ? error.message : "Invalid Grok question",
+        );
+      }
+      if (!activePrompt || request.sessionId !== this.#sessionId) return { outcome: "cancelled" };
+      return { ...(await activePrompt.onQuestion(request)) };
+    }
     if (method !== GROK_MCP_ELICIT_METHOD) {
       throw RequestError.methodNotFound(method);
     }
@@ -1143,20 +1200,13 @@ export class GrokAcpTransport {
     if (parsed.status === "invalid") {
       throw RequestError.invalidParams(undefined, parsed.message);
     }
-    if (
-      parsed.status === "unsupported" ||
-      this.#closed ||
-      this.#closing ||
-      this.#replay !== null ||
-      this.#activeCompact !== null ||
-      !this.#activePrompt
-    ) {
+    if (parsed.status === "unsupported" || !activePrompt) {
       return { ...grokMcpElicitCancel() };
     }
     if (parsed.request.sessionId !== this.#sessionId) {
       return { ...grokMcpElicitCancel() };
     }
-    return { ...(await this.#activePrompt.onElicitation(parsed.request)) };
+    return { ...(await activePrompt.onElicitation(parsed.request)) };
   }
 
   #fault(error: GrokTransportError): void {

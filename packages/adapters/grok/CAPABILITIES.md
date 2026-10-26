@@ -4,8 +4,9 @@
 
 - Harness ID：`grok`；原生 ACP stdio + `x.ai/*` 扩展，每个 Host Session 使用独立 `--no-leader` 进程。
 - 原生验证：Grok `1.0.67`（`2fe064390d07`），2026-10-23，macOS，本机登录，隔离 GROK_HOME 与项目；权限探针未调用模型。
-- 交付范围：现有预装插件的权限切换修复；其余能力按既有实现与测试登记，不代表本次重新做过真实验收。
-- 参考实现：现有 Grok 模型配置的并发与状态发布流程；原生权限管理器的实际状态信号。
+- 交付范围：现有预装插件的 ACP 原生提问接入；权限等其余能力保留既有验证记录。
+- 原生提问依据：本机 grokgod 的 grok-build 源码 `ask_user_question/types.rs`、`session/acp_session_impl/spawn.rs`，以及 grokgod 补丁 `0011`、`0025`、`0026`、`0027`、`0028`。
+- 参考实现：Grok MCP elicitation 的原生请求生命周期；公共 Host Question 校验与投影。
 
 ## 能力
 
@@ -30,7 +31,7 @@
 | B7 | 回滚最后一轮 | 原生有则必做 | P1 | 支持 | src/grok-rewind.ts、src/grok-adapter.ts | test/grok-rewind.test.ts、test/grok-adapter.test.ts |  |
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | 支持 | src/grok-tool-output.ts、src/grok-file-change.ts、src/grok-adapter.ts | test/grok-tool-output.test.ts、test/grok-file-change.test.ts |  |
 | B9 | 审批 | 原生有则必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts | ACP request_permission |
-| B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts | test/grok-adapter.test.ts | 当前仅接入 ACP 审批；原生 ask_user_question 的独立问题回传待核对 |
+| B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts | test/grok-questions.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 专属按钮不投影；真实 Desktop 已验收单选与文本 |
 | B11 | 原生 Subagent | 原生有则必做 | P2 | 支持 | src/grok-subagent.ts、src/grok-subagent-lifecycle.ts | test/grok-subagent.test.ts、test/grok-adapter.test.ts |  |
 | B12 | 自主 Turn | 原生有则必做 | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | 当前仅在活动 Turn 中投影原生输出 |
 | B13 | 会话用量 | 原生有则必做 | P1 | 支持 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-usage.test.ts、test/grok-acp-usage.test.ts |  |
@@ -54,7 +55,8 @@
 ## 受限与已知缺口
 
 - B3：Grok 1.0.67 的权限扩展没有 RPC 回执，`session/info` 和 `configOptions` 不包含权限。生效确认必须取自原生权限管理器的实际状态，不能由发送结果推断。仅在无活动 Turn 或压缩操作时切换；通知作用于独立进程内的匹配会话。原生受管策略和 Auto 功能开关始终生效。
-- B10、B12、B14、B15、B16：范围见表中备注；本次不扩展问题回传、自主 Turn 或委派能力。
+- B10：原生超时仍由 grokgod 管理，Host 不合成计时器或自动选择。原生撤回通知没有区分超时原因，Host 仅记录取消。多选复用 Host multiple 与答案数组，通过共享 Renderer 卡片承载；原生 Desktop 卡片仍无多选字段。Plan 专属按钮不投影。活动重置通过可选 questionActivity 与原生确认同步，需补丁 0028 及原生配置开启。
+- B12、B14、B15、B16：范围见表中备注；自主 Turn 与委派能力保留既有边界。
 
 ## 插件外改动
 
@@ -63,7 +65,8 @@
 - `openspec/specs/harness-permission-mode-control/spec.md`、`openspec/specs/grok-cli-acp-session/spec.md`：会话内切换与原生确认要求。
 - `.agents/skills/codexhost-add-harness/references/implementations.md`、`spec-session-core.md`：移除过期的 Grok 创建时固定权限示例。
 - `packages/host-runtime/test/external-thread-runtime.test.ts`：Grok 恢复夹具使用 live 能力，验证保存的权限仍经 open 传入。
-- 公共契约与 Host / Renderer 生产代码：无改动。
+- 原生提问文档：`docs/harnesses/grok/questions.md`、能力边界、三种语言 README、MCP/Computer Use 依赖说明及 `docs/index.md`。
+- 公共产品扩展：浏览器安全的待答问题/回复/活动 RPC、Host 多选路由及 Renderer 复选框卡片；不按 Harness ID 分支。Harness Question 契约已具备 multiple；活动同步新增可选 HarnessSession.questionActivity，旧插件保留兼容。
 
 ## 验证记录
 
@@ -74,4 +77,9 @@
 | 类型 / 格式 | npm run typecheck；改动 TS 文件 ESLint 与 Prettier 检查；git diff --check | 通过 |
 | 真实原生验收 | CODEXHOST_GROK_PERMISSION_LIVE=1 的原生测试；macOS，1.0.67，本机登录，grok-4.7，local | 切换、重复选择、同 ID Resume 均通过；modelCalls=0 |
 | 插件加载 / Host | buildHarnessPlugin + 临时根 loadHarnessPlugins；external-thread-runtime.test.ts | 通过；未修改 Host / Renderer 生产代码 |
-| Desktop / 委派 | 本次无 UI 或委派改动 | 未做真实 Desktop、SSH、Windows CLI 或完整委派验收 |
+| 原生提问：Adapter / ACP | Grok 包与 installed-harness-plugins.test.ts | 342 项通过、2 项跳过；覆盖真实 SDK stdio 派发、先权限解决后提问的问题回传与清理；对端为协议夹具 |
+| 原生提问：构建 / 类型 / 静态检查 | npm run build:typescript；npm run typecheck；改动 TS 的 ESLint / Prettier；node tools/check-boundaries.mjs；git diff --check | 通过；Markdown 在仓库默认 Prettier 忽略范围内，新提问文档另以空 ignore 文件检查 |
+| 原生提问：真实模型 / Adapter | grokgod、grok-4.6、隔离目录；通过真实 GrokAdapter 自动回复 Alpha | Host Question 已发出并接受回复，原生 AskUserQuestion.UserAnswered 记录 Alpha；不代表 Desktop 界面验收 |
+| 原生提问：Desktop | 2026-10-26，更新应用并重启后的新 Grok 会话；人工单选与文本回复 | 通过：Alpha（40.096 秒）、Other + notes hello（16.467 秒）；原生 UserAnswered，均早于 120 秒超时；未验收预览或 Plan 专属控件，未运行 SSH / Windows 或完整委派 |
+
+多选实现验证：440 项聚焦测试通过、2 项 opt-in 原生测试跳过；真实 grokgod / grok-4.6 经 GrokAdapter 自动选择 Alpha + Gamma，原生 UserAnswered 保留两项。共享卡片、Host 边界及多选 ACP 回传均有测试。安装版 Desktop 人工多选已在 117.012 秒后回传 Alpha + Beta，用户确认功能正常；用户已认可 Grok 卡片样式；允许 Other 的单选组也使用共享卡片以保留聊天输入框。只读倒计时需 grokgod 0027，用户已确认显示并递减；活动重置及同步需 0028 与原生配置开启，22:34 JST 手动重启后，用户确认交互会重置倒计时；该次最终由原生超时选择推荐 Alpha，未提交多选答案，未测量最后交互至超时的精确时长。

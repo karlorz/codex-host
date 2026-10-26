@@ -187,7 +187,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 | 斜杠命令 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | 修订上一条消息 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 实时语音 | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
-| 多选提问 | — | ◐ | ◐ | ◐ | — | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
+| 多选提问 | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
 | 子代理 | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | ◐ | — | — | — | — |
 | Computer Use / 内置浏览器 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
 | 生成图片 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
@@ -195,8 +195,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 图例：✅ 已接入 · ◐ 部分接入、降级或仅保存意向 · — 当前插件未投影该能力 · ? 未验证。
 
 - **实时语音**使用本 fork 按 Desktop 版本审计的 hook 与已配置的 gateway。Host 的 `thread/realtime/*` 和新会话继承所选 Harness 的路径是通用的。Claude Code 有已记录的有人值守 Desktop 通话；Grok 标为 ◐，因为验证覆盖真实 gateway 通话和公共插件的隔离 Host 试验，尚不等于已安装 Desktop 按钮验收。其他 Harness 未验证（?）。详见 [CPA live-voice Desktop hook](../operations/cpa-live-voice-desktop-hook.md)。
-- **多选提问**没有对应的 Desktop 多选卡片。共享投影省略 `multiple`，但 Host 契约保留该字段。用户报告的委派 Claude Code 实测中，`AskUserQuestion` 使用 `multiSelect: true` 与 Alpha/Beta/Gamma 时显示单选，返回单个字符串（`"Alpha"`），Host 没有报错。Claude Code、OpenCode、DSH、CodeBuddy/WorkBuddy、Cursor、Hermes、Qoder、Kimi Code 和 Copilot elicitation 表单标为 ◐：Adapter 保留原生多选意图，但不能忠实投影；只有 Claude Code 做过真机验证。OMP 标为 ◐，表示文档所述的原生多次单选/文本交互组合，并非多选卡片。Pi 固定单选；Antigravity 显式拒绝多选。详见 [Antigravity 提问交互复盘](../harnesses/antigravity/antigravity-question-interaction-postmortem.md) 与 [OMP 交互](../harnesses/omp/omp-interactions.md)。
-- **Grok 构建与提问**：本 fork 使用补丁版 **grokgod Grok build**；下述依赖补丁的行为不能视为 stock Grok 的能力保证。补丁 `0011-ask-question-timeout-action` 为已有原生 `ask_user_question` 增加可配置的超时选择及基于活动的超时重置，不会接通 Desktop 卡片。用户报告的 grokgod ACP 实测返回 `Failed to reach the client for user question: "Method not found": _x.ai/ask_user_question`。Host ACP 客户端只处理 `_x.ai/mcp/elicit` 扩展请求，因此不会出现提问卡片。提问 / 取消仍标为 ◐：回合取消和受限 MCP 同意审批走独立的已实现路径。详见 [Harness 能力表边界](../harnesses/capability-boundaries.md)。
+- **多选提问**：Adapter 发出 `multiple: true` 时使用共享 codexhost 复选框卡片，选中值以数组回传；允许 Other 的单选组也使用 Composer 上方的共享卡片，保留普通聊天输入框；其他单选/文本组仍使用原生 Desktop 卡片。Grok 保留原生多选标记及全部选中标签。共享 Host/浏览器路径有回归测试，安装版 Desktop 人工测试已同时回传 Alpha 与 Beta。其他 Adapter 的原生多选全链路未验证时仍标为 ◐。OMP 使用独立单选/文本交互；Pi 固定单选，Antigravity 拒绝多选。详见 [Grok 原生提问](../harnesses/grok/questions.md)、[Antigravity 提问交互复盘](../harnesses/antigravity/antigravity-question-interaction-postmortem.md) 与 [OMP 交互](../harnesses/omp/omp-interactions.md)。
+- **Grok 构建与提问**：本 fork 使用补丁版 **grokgod Grok build**；补丁依赖行为不能视为 stock Grok 的能力保证。Host 独立处理原生 `_x.ai/ask_user_question`，与 MCP 同意审批分开，支持单选、文本、Other 与多选答案。提问 / 取消仍标为 ◐，因为原生 Plan 专属操作仍受限。补丁 `0011-ask-question-timeout-action` 管理可配置的原生超时选择/重置；Host 不自设 Grok 计时器或自动作答。只读倒计时额外依赖 grokgod 补丁 `0027-ask-question-timeout-metadata`；未提供原生截止时间的构建不显示倒计时。活动重置及倒计时同步额外依赖 `0028-ask-question-activity-ack` 与原生 `timeout_reset_on_activity = true`；可信卡片交互及后续窗口重新获得焦点会重置原生时限，显示跟随原生确认更新；悬停与首次显示不重置。详见 [Grok 原生提问](../harnesses/grok/questions.md)。
 - **Grok MCP 审批 — Always allow**依赖 grokgod 补丁 `0025-mcp-elicitation-persist`，转发原生 persist 选项，并将选中的范围作为 MCP `_meta.persist` 回传。只有请求包含 `always` 时 Desktop 才提供该选项；未打补丁的 Grok 只有 Allow once / Deny。原生 session 生命周期尚未核实，因此不提供 Allow this conversation。详见 [Grok MCP elicitation](../harnesses/grok/mcp-elicitation.md)。
 - **子代理**：✅ 原生状态加只读子 Transcript · ◐ 只有原生状态。Pi 需要受支持的 `pi-subagents` 扩展协议；OMP 需要 RPC 子代理订阅支持。这些单元格描述插件投影，不表示上游 Harness 内部能否运行子代理。
 - **Computer Use / 内置浏览器**使用用户安装的 Grok `cua_repl` MCP。本 fork 的 Computer Use 接入依赖补丁版 grokgod Grok build 的 `0026-cua-turn-end-release`，包括回合边界清理和 Mac Sky 原生释放桥，以及已安装的 ChatGPT Computer Use runtime；未证明 stock Grok 具备同等行为。IAB 仅保存意向：Host 保持浏览器绑定关闭，等待 Desktop 授权和会话所属的浏览器路由。详见 [Grok Computer Use 设置](../harnesses/grok/computer-use-settings.md)。

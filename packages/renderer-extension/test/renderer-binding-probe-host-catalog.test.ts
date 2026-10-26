@@ -192,6 +192,7 @@ function installFakeBrowser(): void {
   }
   const composer = Object.assign(new FakeElement(), {
     isConnected: true,
+    getClientRects: () => [],
     matches: (selector: string) => selector === "[data-codex-composer-root]",
     querySelectorAll: (selector: string) => (selector === "button" ? [testState.sendButton] : []),
     querySelector: (selector: string) => (selector.includes("textarea") ? testState.editor : null),
@@ -203,6 +204,7 @@ function installFakeBrowser(): void {
     type: "submit",
     disabled: false,
     parentElement: null,
+    closest: () => null,
     getAttribute: () => null,
   } as unknown as HTMLButtonElement;
   testState.composer = composer;
