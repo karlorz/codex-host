@@ -5,6 +5,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { installCurrentRendererAdapter } from "../src/versioned-renderer-adapter.js";
+import { installRendererExternalQueue } from "../src/renderer-external-queue.js";
 
 interface QueuedMessage {
   id: string;
@@ -287,5 +288,218 @@ describe("external follow-ups retain Desktop's local queue", () => {
     } finally {
       adapter.dispose();
     }
+  });
+});
+
+describe("external follow-ups drain the Host server queue", () => {
+  function drainFixture(role: "owner" | "follower" = "owner") {
+    const conversations = new Map([
+      [
+        "external",
+        {
+          id: "external",
+          modelProvider: "codexhost",
+          threadRuntimeStatus: { type: "idle" },
+        },
+      ],
+      ["native", { id: "native", modelProvider: "openai", threadRuntimeStatus: { type: "idle" } }],
+    ]);
+    const queued = new Map<string, Array<{ id: string; pausedReason?: string }>>([
+      ["external", [{ id: "queued-1" }]],
+    ]);
+    const sendRequest = vi.fn(async (method: string, params: unknown) => ({ method, params }));
+    const listeners = new Map<string, Set<(notification: unknown) => void>>();
+    const submissionHost = {
+      activeTurnId: null as string | null,
+      pendingStart: false,
+      getActiveTurnId(threadId: string) {
+        return threadId === "external" ? this.activeTurnId : null;
+      },
+      hasPendingTurnStart(threadId: string) {
+        return threadId === "external" ? this.pendingStart : false;
+      },
+    };
+    const coordinator = {
+      options: { submissionHost },
+      readMessages(threadId: string) {
+        return queued.get(threadId) ?? [];
+      },
+      serverQueue: {
+        isEnabled: () => true,
+        read(threadId: string) {
+          return queued.get(threadId) ?? [];
+        },
+      },
+    };
+    const manager = {
+      getStreamRole: vi.fn((threadId: string) =>
+        threadId === "external" ? { role } : { role: "owner" },
+      ),
+      getConversation: (threadId: string) => conversations.get(threadId) ?? null,
+      getTurnCoordinator: () => coordinator,
+      sendRequest,
+      addNotificationCallback(
+        methods: string | readonly string[],
+        listener: (notification: unknown) => void,
+      ) {
+        for (const method of typeof methods === "string" ? [methods] : methods) {
+          const set = listeners.get(method) ?? new Set();
+          set.add(listener);
+          listeners.set(method, set);
+        }
+        return () => {
+          for (const method of typeof methods === "string" ? [methods] : methods) {
+            listeners.get(method)?.delete(listener);
+          }
+        };
+      },
+    };
+    const emit = (notification: unknown) => {
+      if (!notification || typeof notification !== "object" || !("method" in notification)) return;
+      for (const listener of listeners.get(String(notification.method)) ?? [])
+        listener(notification);
+    };
+    return { manager, sendRequest, emit, queued, submissionHost };
+  }
+
+  it("starts the Host queued follow-up when an External Turn completes", async () => {
+    const f = drainFixture();
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).toHaveBeenCalledWith("thread/queue/start", {
+        threadId: "external",
+        queuedSubmissionId: "queued-1",
+      });
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("starts an idle Host queue after thread/queue/changed", async () => {
+    const f = drainFixture();
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({ method: "thread/queue/changed", params: { threadId: "external" } });
+      await Promise.resolve();
+      expect(f.sendRequest).toHaveBeenCalledWith("thread/queue/start", {
+        threadId: "external",
+        queuedSubmissionId: "queued-1",
+      });
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("does not start while a Turn is still active", async () => {
+    const f = drainFixture();
+    f.submissionHost.activeTurnId = "turn-1";
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("does not start an interrupted Turn's follow-up", async () => {
+    const f = drainFixture();
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "interrupted" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("does not start from a follower window", async () => {
+    const f = drainFixture("follower");
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("does not start a native Codex queue", async () => {
+    const f = drainFixture();
+    f.queued.set("native", [{ id: "native-1" }]);
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "native", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("skips a paused Host follow-up", async () => {
+    const f = drainFixture();
+    f.queued.set("external", [
+      { id: "queued-1", pausedReason: "Interrupted before the steer was accepted." },
+    ]);
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("keeps the native getStreamRole after steering later claims owner", async () => {
+    const f = drainFixture("follower");
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      Object.assign(f.manager, { getStreamRole: () => ({ role: "owner" }) });
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await Promise.resolve();
+      expect(f.sendRequest).not.toHaveBeenCalled();
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("stops draining after uninstall", async () => {
+    const f = drainFixture();
+    const cleanup = installRendererExternalQueue(f.manager);
+    cleanup?.();
+    f.emit({
+      method: "turn/completed",
+      params: { threadId: "external", turn: { status: "completed" } },
+    });
+    await Promise.resolve();
+    expect(f.sendRequest).not.toHaveBeenCalled();
   });
 });

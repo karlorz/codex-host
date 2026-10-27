@@ -79,6 +79,8 @@ Host 和 Renderer 接入必须配套发布；仅升级 Host、让旧 Renderer �
 
 Codex Desktop **26.903.61454 / build 8378** 起，在功能开关及 app-server 版本满足条件时使用服务端队列。运行中追加消息会先调用 `thread/queue/list`，再调用 `thread/queue/add`。Desktop **26.1016** 及之后的 Manager 带有 `getStreamRole` 时，`renderer-external-queue.ts` 不再把外部 Thread 从 `serverQueue.isEnabled` 里排除，因此跟进消息走 Host 的 `thread/queue/*`。Host 按官方列表信封返回 `{ data, nextCursor }`。队列里的文本项写成 Desktop `type: "text"`（`input_text` 入队时也转成该类型），并带有 `text_elements` 数组（缺省 `[]`），供 Desktop **26.1021.31345 / build 21828** 读取 `text_elements.length`。空的 `turn/start` 会消费 Host 队列中匹配或队首的跟进文本；队列为空时仍返回 `-32602`。官方 Codex Thread 仍使用原生 app-server 队列。
 
+Desktop 的自动执行读取本地跟进存储，不会把仅存在于 Host `thread/queue/*` 的条目当作下一封待发消息。因此 `renderer-external-queue.ts` 在 stream owner 上监听 `turn/completed` 与 `thread/queue/changed`：外部 Thread 空闲且队首未暂停时调用 `thread/queue/start`。安装时先保存原生 `getStreamRole`，不受后续 steer 包装影响；follower 窗口不执行。中断的 Turn 不自动执行。
+
 Avatar overlay 是独立的 Desktop webcontents，在语音、IAB 或 Computer Use 之后可以成为该 Thread 的 stream owner。主窗口的 Renderer Binding 不会注入 overlay；`cpa-live-voice-hook.js` 在 overlay 里发现 RequestManager 后安装 steer 包装，并把 External Thread 的 stream role 视为 owner，使 follower 窗口可以把跟进消息写入 Host `thread/queue/*`。Overlay 作为 owner 通过 `thread/queue/start` 执行队列。缺少 type:text 的 `turn/start` 会从 Host 队列或本地队列条目恢复文本。
 
 没有 `getStreamRole` 的 Desktop 上，`renderer-external-queue.ts` 仍在当前 Manager 的 `getTurnCoordinator().serverQueue.isEnabled(threadId)` 上排除外部 Thread，让 Desktop 继续使用保留的本地队列：
@@ -113,7 +115,7 @@ Codex Desktop **26.924.22138 / build 11645** 的本地队列在 `turnCompleted` 
 - `packages/host-runtime/test/app-server-host*.test.ts`：真实 Host 路由、外部不泄漏官方流、取消与启动顺序、响应 gate、同 Thread start 竞争、官方透传。
 - `packages/renderer-extension/test/renderer-external-steering.test.ts`：正常 start 占位、唯一输入、无旧轮 steer Item、去重、队列暂停恢复、owner/follower、失败和卸载。
 - `packages/renderer-extension/test/renderer-external-steering-rpc.test.ts`：类方法的 RPC 可访问性、模型／权限列表读取、官方与外部 steer、实例隔离、卸载和重复安装，以及卸载期间待定请求的清理。
-- `packages/renderer-extension/test/renderer-external-queue.test.ts`：经生产 Adapter 安装路径验证外部入队、已有暂停消息、队列清空后再次入队、同连接官方队列、Manager 隔离、元数据更新、旧版后端和卸载恢复。
+- `packages/renderer-extension/test/renderer-external-queue.test.ts`：经生产 Adapter 安装路径验证外部入队、已有暂停消息、队列清空后再次入队、同连接官方队列、Manager 隔离、元数据更新、旧版后端和卸载恢复；在带 `getStreamRole` 的 Manager 上验证空闲外部 Thread 于 `turn/completed` / `thread/queue/changed` 调用 `thread/queue/start`，以及进行中、中断、follower、官方 Thread、暂停条目与卸载后不再执行。
 - `packages/renderer-extension/test/renderer-overlay-external-followups.test.ts`：avatar overlay 发现 RequestManager 后把 External Thread 视为 stream owner。
 - `packages/renderer-extension/test/renderer-external-steering.test.ts`：缺少 type:text 的 queued `turn/start` 从本地队列恢复文本。
 - `packages/host-runtime/test/app-server-host.follow-up-queue.test.ts`：Host `thread/queue/add` 与 `thread/queue/start`，空 `turn/start` 消费队列，以及中断恢复后空队列仍返回 `-32602`。
