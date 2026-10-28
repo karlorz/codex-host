@@ -39,6 +39,9 @@ fn run_unix_listener() -> bool {
         .expect("create fake listener directory");
     let _ = fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path).expect("bind fake Unix listener");
+    if env::var_os("FAKE_CODEX_LEAVE_STALE_SOCKET").is_some() {
+        return true;
+    }
     if let Some(path) = ready_path {
         write_ready_file(
             &path,

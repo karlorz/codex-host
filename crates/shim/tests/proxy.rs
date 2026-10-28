@@ -1199,7 +1199,7 @@ fn managed_remote_listener_detaches_and_reuses_a_matching_socket_owner() {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn managed_remote_listener_replaces_a_stale_socket_before_the_startup_timeout() {
-    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::os::unix::net::UnixStream;
 
     static NEXT_STALE_DIRECTORY_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1216,8 +1216,19 @@ fn managed_remote_listener_replaces_a_stale_socket_before_the_startup_timeout() 
     let ready = directory.join("ready");
     fs::create_dir_all(socket.parent().expect("control socket directory"))
         .expect("create control socket directory");
-    // A listener that exits without cleanup leaves a socket that no process owns.
-    drop(UnixListener::bind(&socket).expect("bind stale control socket"));
+    // The owner exits before this test continues. Binding in the multithreaded test
+    // process can leak the listener into concurrent forks until they reach exec.
+    let stale_owner = Command::new(fake_codex_path())
+        .env("FAKE_CODEX_UNIX_LISTENER_PATH", &socket)
+        .env("FAKE_CODEX_LEAVE_STALE_SOCKET", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run stale control socket owner");
+    assert!(
+        stale_owner.status.success(),
+        "stale socket owner failed: {}",
+        String::from_utf8_lossy(&stale_owner.stderr)
+    );
     let stale_socket = fs::metadata(&socket).expect("read stale control socket identity");
     assert!(
         UnixStream::connect(&socket).is_err(),
