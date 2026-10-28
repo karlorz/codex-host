@@ -11,6 +11,7 @@ import type { HostItemId, HostTurnId } from "@codexhost/shared-contracts";
 interface ActiveSubagentDelegation {
   callId: string;
   item: HostSubagentDelegationItem;
+  published: boolean;
 }
 
 export interface GrokSubagentStartInput {
@@ -84,8 +85,10 @@ export class GrokSubagentLifecycle {
       ...(input.prompt ? { prompt: input.prompt } : {}),
       subagents: [subagent],
     };
-    this.#delegations.set(input.callId, { callId: input.callId, item });
-    this.#emit({ type: "item.started", turnId, item });
+    const active = { callId: input.callId, item, published: false };
+    this.#delegations.set(input.callId, active);
+    // Desktop keys descendants by Thread identity; a tool call ID is only provisional.
+    if (input.nativeSubagentId) this.#publish(turnId, active);
     this.#emitState(subagent);
     return subagent;
   }
@@ -146,12 +149,7 @@ export class GrokSubagentLifecycle {
       ...(patch.status ? { status: patch.status } : {}),
     };
     active.item = { ...active.item, subagents: [subagent] };
-    this.#emit({
-      type: "item.updated",
-      turnId,
-      itemId: active.item.itemId,
-      update: { type: "subagents.replace", subagents: active.item.subagents },
-    });
+    if (nativeSubagentId || active.published) this.#publish(turnId, active);
     this.#emitState(subagent);
     return subagent;
   }
@@ -245,12 +243,8 @@ export class GrokSubagentLifecycle {
       ...(input.resultSummary ? { resultSummary: input.resultSummary } : {}),
     };
     const item = { ...active.item, subagents: [subagent] };
-    this.#emit({
-      type: "item.updated",
-      turnId,
-      itemId: item.itemId,
-      update: { type: "subagents.replace", subagents: item.subagents },
-    });
+    active.item = item;
+    this.#publish(turnId, active);
     const outcome: HostItemOutcome = input.cancellationRequested
       ? { status: "cancelled", reason: "Cancelled by user" }
       : input.failed
@@ -273,9 +267,27 @@ export class GrokSubagentLifecycle {
             ? "interrupted"
             : "failed";
       const item = { ...active.item, subagents: [{ ...current, status }] };
+      if (!active.published) {
+        active.item = item;
+        this.#publish(turnId, active);
+      }
       this.#emit({ type: "item.completed", turnId, snapshot: { item, outcome } });
       this.#emitState({ ...current, status });
     }
+  }
+
+  #publish(turnId: HostTurnId, active: ActiveSubagentDelegation): void {
+    if (!active.published) {
+      active.published = true;
+      this.#emit({ type: "item.started", turnId, item: active.item });
+      return;
+    }
+    this.#emit({
+      type: "item.updated",
+      turnId,
+      itemId: active.item.itemId,
+      update: { type: "subagents.replace", subagents: active.item.subagents },
+    });
   }
 
   #callIdForNative(nativeSubagentId: string): string | undefined {

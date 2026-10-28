@@ -3554,14 +3554,18 @@ describe("Grok Adapter ACP projection", () => {
     await adapter.close();
   });
 
-  it.each([
-    { model: undefined, reportedModel: undefined },
-    { model: "grok-4.5", reportedModel: undefined },
-    { model: "grok-4.5", reportedModel: "grok-4.6" },
-    { model: undefined, reportedModel: "provider/child-model" },
-  ])(
+  it.each(
+    [
+      { model: undefined, reportedModel: undefined },
+      { model: "grok-4.5", reportedModel: undefined },
+      { model: "grok-4.5", reportedModel: "grok-4.6" },
+      { model: undefined, reportedModel: "provider/child-model" },
+    ].flatMap((configuration) =>
+      [false, true].map((identityFromSpawned) => ({ ...configuration, identityFromSpawned })),
+    ),
+  )(
     "projects Grok Subagents without inferring child configuration: %j",
-    async ({ model, reportedModel }) => {
+    async ({ model, reportedModel, identityFromSpawned }) => {
       const transport = new FakeGrokTransport();
       const { adapter, session } = await openedSession(transport);
       expect(session.capabilities.subagents).toEqual({ observe: true, readTranscript: true });
@@ -3589,6 +3593,23 @@ describe("Grok Adapter ACP projection", () => {
         },
         status: "in_progress",
       });
+      transport.event({
+        type: "tool.update",
+        callId: "spawn-1",
+        title: "Inspect implementation",
+        rawInput: {
+          variant: "Task",
+          task_id: identityFromSpawned ? null : "child-session",
+          run_in_background: true,
+        },
+      });
+      if (identityFromSpawned) {
+        transport.event({
+          type: "subagent.spawned",
+          nativeSubagentId: "child-session",
+          description: "Inspect implementation",
+        });
+      }
       const started = await nextEvent(iterator);
       expect(started).toMatchObject({
         type: "item.started",
@@ -3598,6 +3619,8 @@ describe("Grok Adapter ACP projection", () => {
           prompt: "Look at the repo",
           subagents: [
             {
+              nativeSubagentId: "child-session",
+              subagentId: "child-session",
               description: "Inspect implementation",
               role: "explore",
               background: true,
@@ -3614,19 +3637,6 @@ describe("Grok Adapter ACP projection", () => {
       expect(started.item.subagents[0]).not.toHaveProperty("reasoningEffort");
       if (!model) expect(started.item.subagents[0]).not.toHaveProperty("model");
 
-      transport.event({
-        type: "tool.update",
-        callId: "spawn-1",
-        title: "Inspect implementation",
-        rawInput: { variant: "Task", task_id: "child-session", run_in_background: true },
-      });
-      expect(await nextEvent(iterator)).toMatchObject({
-        type: "item.updated",
-        update: {
-          type: "subagents.replace",
-          subagents: [{ nativeSubagentId: "child-session", status: "running" }],
-        },
-      });
       expect(await nextEvent(iterator)).toMatchObject({
         type: "subagent.state.changed",
         nativeSubagentId: "child-session",

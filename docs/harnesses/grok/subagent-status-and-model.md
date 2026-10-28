@@ -9,6 +9,7 @@ This integration does not inject a replacement list, custom status subtitles, av
 ## Lifecycle and transcripts
 
 - Spawn/send tools expose child identity, description, role, background execution, and status through the public Subagent contract.
+- Grok spawn calls remain internal until a native child ID is reported by a spawned event or tool result. Desktop receives the materialized child Thread identity on the first published activity, so a temporary tool-call ID cannot create a second card. A spawn that fails or is cancelled before receiving a native ID is retained as a terminal delegation.
 - A completed background spawn tool does not mean the child has completed. Observed native completion events, terminal wait results, and successful kill tools settle child states. A failed kill tool does not imply that the child stopped.
 - Child transcripts are read-only snapshots of the child Native Session; they are not separate writable Host Sessions.
 - Parent Native history is projected back into Subagent Items when the Thread is reopened. Presentation uses the existing Desktop history path rather than a Renderer-maintained copy of the list.
