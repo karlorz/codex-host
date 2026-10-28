@@ -23,7 +23,9 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   let processStartedAt: string;
 
   beforeEach(async () => {
-    vi.mocked(execFileSync).mockClear();
+    vi.mocked(execFileSync).mockReset();
+    const actual = await vi.importActual<typeof ChildProcessModule>("node:child_process");
+    vi.mocked(execFileSync).mockImplementation(actual.execFileSync);
     directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-windows-native-lock-"));
     owner = spawn(
       process.execPath,
@@ -40,6 +42,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await store?.close();
     if (owner && owner.exitCode === null && owner.signalCode === null) {
       const exited = once(owner, "exit");
@@ -49,9 +52,9 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     await rm(directory, { recursive: true, force: true });
   });
 
-  async function writeLock(startedAt: string | undefined): Promise<string> {
+  async function writeLock(startedAt: string | undefined, pid = owner.pid): Promise<string> {
     const content = JSON.stringify({
-      pid: owner.pid,
+      pid,
       instanceId: "previous-owner",
       startedAt: new Date(0).toISOString(),
       executablePath: process.execPath,
@@ -61,7 +64,21 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     return content;
   }
 
+  async function prependQuery(script: string): Promise<void> {
+    const actual = await vi.importActual<typeof ChildProcessModule>("node:child_process");
+    vi.mocked(execFileSync).mockImplementationOnce((file, args, options) => {
+      if (!Array.isArray(args)) throw new Error("Missing native query arguments");
+      return actual.execFileSync(
+        file,
+        [...args.slice(0, -1), `${script}; ${args.at(-1)}`],
+        options,
+      );
+    });
+  }
+
   it("recovers a stale lock with the same PID and executable but a different creation time", async () => {
+    // Ordinary owners must be identifiable even when the CIM service is unavailable.
+    await prependQuery("function Get-CimInstance { throw 'CIM unavailable' }");
     await writeLock(new Date(0).toISOString());
     try {
       await store.initialize();
@@ -82,6 +99,23 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     // Reclaiming the lock must not stop the unrelated process that reused the PID.
     if (owner.pid === undefined) throw new Error("Missing fixture process PID");
     expect(process.kill(owner.pid, 0)).toBe(true);
+  });
+
+  it("uses CIM creation time when direct process metadata is unavailable", async () => {
+    // A missing PID makes the direct API fail; simulate the protected-process case
+    // with a live probe and CIM reply while executing the real PowerShell fallback.
+    const inaccessiblePid = 2_147_483_647;
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    await prependQuery(
+      "function Get-CimInstance { [pscustomobject]@{ " +
+        "ExecutablePath = $null; CreationDate = [DateTime]::UtcNow } }",
+    );
+    await writeLock(new Date(0).toISOString(), inaccessiblePid);
+    await store.initialize();
+    expect(JSON.parse(await readFile(path.join(directory, "store.lock"), "utf8"))).toMatchObject({
+      pid: process.pid,
+    });
+    expect(kill).toHaveBeenCalledExactlyOnceWith(inaccessiblePid, 0);
   });
 
   it("preserves a real live owner's lock", async () => {

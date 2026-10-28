@@ -254,17 +254,27 @@ function processIdentity(pid: number): ProcessIdentity | null {
       const startedAt = Date.parse(result);
       return { executablePath: null, startedAt: Number.isFinite(startedAt) ? startedAt : null };
     }
-    // CIM can expose CreationDate for a reused system PID even when Get-Process cannot
-    // read its Path/StartTime. Serialize UTC explicitly: Windows PowerShell's default
-    // DateTime JSON representation is not an ISO timestamp that Date.parse can read.
+    // Read ordinary owners without starting CIM, whose cold initialization can exceed
+    // the query deadline. Protected processes may still expose CreationDate through CIM.
+    // Serialize UTC explicitly; PowerShell's default DateTime JSON is not ISO.
     const query = [
       "$ErrorActionPreference = 'Stop'",
-      `$process = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = ${pid}'`,
-      "if ($null -ne $process) { [pscustomobject]@{ " +
-        "Path = $process.ExecutablePath; " +
-        "StartTime = $(if ($null -ne $process.CreationDate) { " +
-        "$process.CreationDate.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture) " +
-        "} else { $null }) } | ConvertTo-Json -Compress }",
+      "$startTime = $null",
+      "$executablePath = $null",
+      "try { " +
+        `$process = [Diagnostics.Process]::GetProcessById(${pid}); ` +
+        "$startTime = $process.StartTime; " +
+        "$executablePath = $process.MainModule.FileName " +
+        "} catch {}",
+      "if ($null -eq $startTime) { try { " +
+        `$process = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = ${pid}'; ` +
+        "if ($null -ne $process) { " +
+        "$executablePath = $process.ExecutablePath; $startTime = $process.CreationDate " +
+        "} } catch {} }",
+      "[pscustomobject]@{ Path = $executablePath; " +
+        "StartTime = $(if ($null -ne $startTime) { " +
+        "$startTime.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture) " +
+        "} else { $null }) } | ConvertTo-Json -Compress",
     ].join("; ");
     const result = execFileSync(
       "powershell.exe",
