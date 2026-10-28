@@ -401,6 +401,40 @@ describe("external follow-ups drain the Host server queue", () => {
     }
   });
 
+  it("preserves a newer item added while Host acknowledgement is pending", async () => {
+    const f = drainFixture();
+    let acknowledge!: () => void;
+    f.sendRequest.mockImplementationOnce(async (method, params) => {
+      await new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      return { method, params };
+    });
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      expect(f.sendRequest).toHaveBeenCalledOnce();
+      expect(f.queued.get("external")).toEqual([{ id: "queued-1" }]);
+
+      f.queued.set("external", [{ id: "queued-1" }, { id: "typed-while-pending" }]);
+      f.emit({ method: "thread/queue/changed", params: { threadId: "external" } });
+      expect(f.sendRequest).toHaveBeenCalledOnce();
+      expect(f.queued.get("external")).toHaveLength(2);
+
+      acknowledge();
+      await vi.waitFor(() =>
+        expect(f.queued.get("external")).toEqual([{ id: "typed-while-pending" }]),
+      );
+      expect(f.sendRequest).toHaveBeenCalledOnce();
+    } finally {
+      acknowledge();
+      cleanup?.();
+    }
+  });
+
   it("retains the local queue item when Host admission fails", async () => {
     const f = drainFixture();
     f.sendRequest.mockRejectedValueOnce(new Error("delivery failed"));

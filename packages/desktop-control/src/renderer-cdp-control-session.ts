@@ -249,20 +249,28 @@ async function waitForBinding(
   enabledAgents: readonly string[] | undefined,
   timeoutMs: number,
   pollIntervalMs: number,
+  signal?: AbortSignal,
 ): Promise<ProductionRendererStatus> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     try {
-      const value = await readBinding(renderer);
+      const reading = readBinding(renderer);
+      const value = await (signal
+        ? awaitWithSignal(reading, signal, "Renderer binding readiness timed out")
+        : reading);
+      signal?.throwIfAborted();
       if (value !== null) return validateBindingStatus(value, enabledAgents);
     } catch (error) {
+      signal?.throwIfAborted();
       lastError = error;
       if (error instanceof RendererAdapterReadinessError && error.state !== "installing") {
         throw error;
       }
     }
-    await sleep(pollIntervalMs);
+    const pause = sleep(pollIntervalMs);
+    await (signal ? awaitWithSignal(pause, signal, "Renderer binding readiness timed out") : pause);
   }
   const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
   throw new Error(`Production Renderer binding did not become ready${detail}`);
@@ -355,7 +363,7 @@ async function installLocalThreadRenderer(
       await run(() => evaluateSource(renderer, source));
     }
     await run(() => operations.installDraftPrewarmPolicy(renderer));
-    await run(() => waitForBinding(renderer, enabledAgents, 30_000, 25));
+    await waitForBinding(renderer, enabledAgents, 30_000, 25, signal);
   } finally {
     renderer.close();
   }

@@ -87,6 +87,8 @@ Avatar overlay 是独立的 Desktop webcontents，在语音、IAB 或 Computer U
 
 The Controller installs the production Renderer binding in local chat windows whose `app://-/index.html` URL has a single `initialRoute=/local/...` parameter, as well as the root window. Its health checks discover new local chat windows and restore missing bindings without reloading the page or changing composer drafts. Healthy bindings are retained. Avatar overlay receives only its dedicated hook; Spotlight and detached-window routes are excluded from the local chat installation.
 
+Local-window readiness polling shares the auxiliary installation deadline. A timeout cancels polling and releases that window's CDP connection without discarding the primary session.
+
 没有 `getStreamRole` 的 Desktop 上，`renderer-external-queue.ts` 仍在当前 Manager 的 `getTurnCoordinator().serverQueue.isEnabled(threadId)` 上排除外部 Thread，让 Desktop 继续使用保留的本地队列：
 
 - 只读取同一个 Manager 的 `getConversation(threadId)`，核对 Thread ID 及 Host 投影的保留标记 `modelProvider: "codexhost"`。不根据当前 Agent 选择或 Model 名称猜测，不跨 Host 缓存身份，也不增加 RPC。

@@ -97,6 +97,51 @@ describe("Renderer CDP Control Session", () => {
     }
   });
 
+  it("stops checking local chat readiness after the shared timeout", async () => {
+    const primary = rendererClient();
+    const stalled = rendererClient();
+    const healthy = rendererClient();
+    stalled.evaluateSpy.mockResolvedValue({
+      ...readyBinding(),
+      adapter: { state: "installing", reason: "request-manager-unavailable" },
+    });
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      timeoutMs: 40,
+      operations: {
+        listTargets: async () => [
+          target("page-1"),
+          target("stalled", "app://-/index.html?initialRoute=%2Flocal%2Fstalled"),
+          target("healthy", "app://-/index.html?initialRoute=%2Flocal%2Fhealthy"),
+        ],
+        connect: async (url) =>
+          url.endsWith("/stalled") ? stalled : url.endsWith("/healthy") ? healthy : primary,
+        installDraftPrewarmPolicy: async () => ({
+          state: "ready",
+          reason: "owned-request-bridge",
+        }),
+      },
+    });
+    try {
+      expect(stalled.close).toHaveBeenCalledOnce();
+      expect(healthy.close).toHaveBeenCalledOnce();
+      expect(primary.close).not.toHaveBeenCalled();
+      expect(session.snapshot.binding).toEqual(readyBinding());
+      const checksAtClose = stalled.evaluateSpy.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      expect(stalled.evaluateSpy).toHaveBeenCalledTimes(checksAtClose);
+    } finally {
+      // Finish any pending readiness check before releasing the fixture.
+      stalled.evaluateSpy.mockResolvedValue({
+        ...readyBinding(),
+        adapter: { state: "unsupported", reason: "test-finished" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      session.close();
+    }
+  });
+
   it("selects only the exact primary app surface and preserves an owned target", () => {
     const first = target("page-1");
     const owned = target("page-2");
