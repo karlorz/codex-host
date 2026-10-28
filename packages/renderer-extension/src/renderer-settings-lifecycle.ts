@@ -32,7 +32,7 @@ export interface RendererSettingsLifecycleOptions {
   getUpdateClient?(): RendererUpdateClient | null;
   getConnectionDiagnostics?(): RendererConnectionDiagnostics | null;
   getAccountClient?(): RendererCodexAccountClient | null;
-  getSessionImportClient?(): RendererSessionImportClient | null;
+  getSessionImportClient?(hostId?: string): RendererSessionImportClient | null;
   getLoadedSessionsClient?(): LoadedSessionsClient | null;
   getRemoteConnections?(): RemoteConnectionsControl | null;
   requestUsageStatistics?: RendererUsageStatisticsRequest;
@@ -81,11 +81,11 @@ export function installRendererSettingsLifecycle(
       options.getConnectionDiagnostics ?? (() => null),
       options.getAccountClient ?? (() => null),
       options.getSessionImportClient ?? (() => null),
-      async (threadId, signal) => {
+      async (threadId, signal, hostId) => {
         if (!options.openImportedThread) {
           throw new Error("Imported Thread navigation is unavailable");
         }
-        await options.openImportedThread(threadId, signal);
+        await options.openImportedThread(threadId, signal, hostId);
         if (!disposed && !signal.aborted) shell?.close();
       },
       options.getLoadedSessionsClient ?? (() => null),

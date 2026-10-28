@@ -20,14 +20,16 @@ describe("Renderer contract audit inspectors", () => {
       ownerDocument: { defaultView: null },
     } as unknown as HTMLElement;
     const send = {
-      type: "submit",
       closest: () => null,
+      type: "submit",
       parentElement: { children: [], parentElement: null },
       hasAttribute: () => false,
       getAttribute: () => null,
       querySelectorAll: () => list([]),
     } as unknown as HTMLButtonElement;
     const composer = {
+      closest: () => null,
+      querySelector: () => null,
       hidden: false,
       getAttribute: () => null,
       getBoundingClientRect: () => ({ width: 600, height: 120 }),

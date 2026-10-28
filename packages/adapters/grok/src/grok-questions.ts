@@ -125,6 +125,7 @@ interface PendingQuestion {
 export class GrokQuestions {
   readonly #pending = new Map<HostInteractionId, PendingQuestion>();
   readonly #seenToolCalls = new Set<string>();
+  #closed = false;
 
   constructor(
     private readonly turnId: HostTurnId,
@@ -148,7 +149,7 @@ export class GrokQuestions {
   }
 
   ask(request: GrokQuestionRequest): Promise<GrokQuestionResponse> {
-    if (this.#seenToolCalls.has(request.toolCallId))
+    if (this.#closed || this.#seenToolCalls.has(request.toolCallId))
       return Promise.resolve({ outcome: "cancelled" });
     this.#seenToolCalls.add(request.toolCallId);
     const interaction: HostQuestionInteraction = {
@@ -206,8 +207,11 @@ export class GrokQuestions {
     for (const [index, question] of pending.request.questions.entries()) {
       const values = response.answers[`q${index}`];
       if (!values?.length) continue;
-      if (values.some((answer) => !nonEmptyString(answer)))
-        return this.#error("invalidRequest", "Grok answer must not be empty");
+      if (
+        values.some((answer) => !nonEmptyString(answer)) ||
+        new Set(values).size !== values.length
+      )
+        return this.#error("invalidRequest", "Grok answers must be nonempty and unique");
       const selected = values.map((answer) =>
         question.options.find(({ label }) => label === answer),
       );
@@ -249,6 +253,7 @@ export class GrokQuestions {
   }
 
   cancel(): void {
+    this.#closed = true;
     for (const pending of this.#pending.values())
       this.#settle(pending, { outcome: "cancelled" }, "cancelled");
   }

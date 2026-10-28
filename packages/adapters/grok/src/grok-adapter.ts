@@ -612,6 +612,7 @@ class GrokHarnessSession implements HarnessSession {
             ? active.questions.ask(request)
             : Promise.resolve({ outcome: "cancelled" }),
       )
+      .finally(() => active.questions.cancel())
       .then(
         (response) =>
           this.#settleFromHistory(

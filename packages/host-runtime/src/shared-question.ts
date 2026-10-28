@@ -1,0 +1,37 @@
+import {
+  validateHostQuestionResponse,
+  type HostQuestionInteraction,
+  type HostQuestionResponse,
+} from "@codexhost/harness-adapter";
+import { threadQuestionSchema } from "@codexhost/shared-contracts";
+
+export function usesSharedQuestionCard(interaction: HostQuestionInteraction): boolean {
+  return interaction.questions.some(
+    (question) => question.type === "choice" && (question.multiple || question.allowOther),
+  );
+}
+
+export function sharedQuestion(interaction: HostQuestionInteraction) {
+  if (!usesSharedQuestionCard(interaction)) throw new Error("Question does not use a shared card");
+  return threadQuestionSchema.parse({
+    interactionId: interaction.interactionId,
+    turnId: interaction.turnId,
+    ...(interaction.title !== undefined ? { title: interaction.title } : {}),
+    ...(interaction.expiresAt !== undefined ? { expiresAt: interaction.expiresAt } : {}),
+    ...(interaction.autoResolution ? { autoResolution: interaction.autoResolution } : {}),
+    questions: interaction.questions,
+  });
+}
+
+/** Answers carry Host values, unlike the native Desktop path's option labels. */
+export function validateSharedQuestionResponse(
+  interaction: HostQuestionInteraction,
+  response: HostQuestionResponse,
+): void {
+  const error = validateHostQuestionResponse(interaction, response);
+  if (error) throw new Error(error.message);
+  for (const values of Object.values(response.answers)) {
+    if (new Set(values).size !== values.length) throw new Error("Duplicate Question answers");
+    if (values.some((value) => !value.trim())) throw new Error("Empty Question answer");
+  }
+}

@@ -18,7 +18,6 @@ export interface QuestionContext {
     sendRequest(method: string, params: unknown, options?: RendererRequestOptions): unknown;
   };
 }
-
 function same(a: QuestionContext | null, b: QuestionContext | null): boolean {
   return (
     a?.hostId === b?.hostId &&
@@ -28,31 +27,31 @@ function same(a: QuestionContext | null, b: QuestionContext | null): boolean {
   );
 }
 
-/** Poll only the visible external Composer. Re-querying also recovers pending cards after remount. */
+/** Only the unambiguous visible external Composer can own a card. */
 export function installRendererQuestions(
   window: Window,
   readContext: () => QuestionContext | null,
 ) {
   let disposed = false;
   let inFlight = false;
+  let revision = 0;
   let context: QuestionContext | null = null;
   let card: ReturnType<typeof createQuestionCard> | null = null;
-  let cardId: string | null = null;
+  let cardKey: string | null = null;
   let stopActivity: (() => void) | undefined;
   const unsupported = new WeakSet<object>();
   const drafts = new Map<string, Record<string, string[]>>();
-  const key = (id: string) => JSON.stringify([context?.hostId, context?.threadId, id]);
   const clear = (retain = true) => {
     stopActivity?.();
     stopActivity = undefined;
-    if (retain && card && cardId) {
-      drafts.set(key(cardId), card.readAnswers());
+    if (retain && card && cardKey) {
+      drafts.set(cardKey, card.readAnswers());
       const oldest = drafts.keys().next().value;
       if (drafts.size > 50 && oldest !== undefined) drafts.delete(oldest);
     }
     card?.dispose();
     card = null;
-    cardId = null;
+    cardKey = null;
   };
   const refresh = async () => {
     if (disposed) return;
@@ -60,9 +59,11 @@ export function installRendererQuestions(
     if (!same(context, next)) {
       clear();
       context = next;
+      revision++;
     }
     const current = context;
     if (!current || inFlight || unsupported.has(current.route)) return;
+    const startedRevision = revision;
     inFlight = true;
     try {
       const raw = await current.route.sendRequest(
@@ -70,26 +71,37 @@ export function installRendererQuestions(
         { threadId: current.threadId },
         { priority: "background", timeoutMs: 5000 },
       );
-      if (disposed || !same(current, readContext())) return;
+      if (disposed || revision !== startedRevision || !same(current, readContext())) return;
       const question = threadQuestionsResultSchema.parse(raw).questions[0];
-      if (!question) {
-        if (cardId) drafts.delete(key(cardId));
+      if (
+        !question ||
+        !question.questions.some(
+          (field) => field.type === "choice" && (field.multiple || field.allowOther),
+        )
+      ) {
+        if (cardKey) drafts.delete(cardKey);
         clear(false);
         return;
       }
-      if (cardId === question.interactionId && card?.root.isConnected) {
+      const key = JSON.stringify([
+        current.hostId,
+        current.threadId,
+        question.turnId,
+        question.interactionId,
+      ]);
+      if (cardKey === key && card?.root.isConnected) {
         card.updateAutoResolution(question.autoResolution);
         return;
       }
-      clear(cardId === question.interactionId);
-      cardId = question.interactionId;
+      clear(cardKey === key);
+      cardKey = key;
       card = createQuestionCard(
         current.composer.ownerDocument,
         question,
         async (answers, cancelled) => {
-          if (disposed || !same(current, readContext()) || cardId !== question.interactionId)
+          if (disposed || !same(current, readContext()) || cardKey !== key)
             throw new Error("Question owner changed");
-          const result = await current.route.sendRequest(
+          const raw = await current.route.sendRequest(
             THREAD_QUESTION_RESPOND_METHOD,
             {
               threadId: current.threadId,
@@ -100,13 +112,17 @@ export function installRendererQuestions(
             },
             { priority: "interactive", timeoutMs: 10000 },
           );
-          threadQuestionRespondResultSchema.parse(result);
-          drafts.delete(JSON.stringify([current.hostId, current.threadId, question.interactionId]));
-          if (same(current, context) && cardId === question.interactionId) clear(false);
+          threadQuestionRespondResultSchema.parse(raw);
+          drafts.delete(key);
+          if (same(current, context)) {
+            // An older in-flight list must not resurrect an already answered card.
+            revision++;
+            if (cardKey === key) clear(false);
+          }
         },
-        drafts.get(key(question.interactionId)),
+        drafts.get(key),
       );
-      // Keep question textareas outside Desktop's Composer/editor discovery.
+      // Keep question editors outside native Composer discovery and submission handlers.
       current.composer.before(card.root);
       const mounted = card;
       stopActivity = installQuestionActivity(
@@ -133,8 +149,7 @@ export function installRendererQuestions(
       );
     } catch (error) {
       if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
-      // A failed refresh must not leave an actionable stale card.
-      if (same(current, context)) clear();
+      if (revision === startedRevision && same(current, context)) clear();
     } finally {
       inFlight = false;
     }
@@ -145,6 +160,10 @@ export function installRendererQuestions(
   void refresh();
   return {
     refresh,
+    refreshContext() {
+      // Streaming DOM mutations must not turn the background poll into a request per token.
+      if (!same(context, readContext()) || (card && !card.root.isConnected)) void refresh();
+    },
     dispose() {
       disposed = true;
       window.clearInterval(timer);

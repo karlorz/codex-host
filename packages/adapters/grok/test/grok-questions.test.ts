@@ -43,6 +43,14 @@ function setup() {
 }
 
 describe("Grok native questions", () => {
+  it("never opens another request after the Turn has closed", async () => {
+    const { questions, outputs } = setup();
+    questions.cancel();
+    await expect(questions.ask(parseGrokQuestionRequest(request))).resolves.toEqual({
+      outcome: "cancelled",
+    });
+    expect(outputs).toEqual([]);
+  });
   it("maps activity to the pending native tool and ignores acknowledgements after withdrawal", async () => {
     const { questions, interaction, outputs } = setup();
     const timeout = {

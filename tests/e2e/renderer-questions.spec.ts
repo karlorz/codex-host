@@ -46,7 +46,8 @@ test.beforeEach(async ({ page }) => {
 test("resets countdown only after native ack, preserves drafts and ignores stale polling", async ({
   page,
 }) => {
-  await page.clock.install();
+  await page.clock.install({ time: new Date("2026-10-29T00:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-10-29T00:00:01Z"));
   await page.evaluate(async () => {
     const state = Reflect.get(window, "fixture");
     state.questions[0].autoResolution = {
@@ -318,7 +319,7 @@ test("uses the native-style header and dismissal without submitting selected ans
   page,
 }) => {
   const card = page.locator("[data-codexhost-question]");
-  await expect(card.locator(".title")).toHaveText("Question");
+  await expect(card.locator(".title")).toHaveText("Grok");
   await expect(card.locator(".question-icon svg")).toHaveCount(1);
   await expect(card.getByRole("button", { name: "Dismiss question" }).locator("svg")).toHaveCount(
     1,
