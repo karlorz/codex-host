@@ -1,12 +1,18 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import type * as ChildProcessModule from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MappingStore } from "../src/index.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcessModule>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
 
 // Exercise the actual Windows PowerShell/CIM query, not the current-PID shortcut.
 // Access to a protected system process is covered separately by simulated OS replies.
@@ -17,6 +23,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   let processStartedAt: string;
 
   beforeEach(async () => {
+    vi.mocked(execFileSync).mockClear();
     directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-windows-native-lock-"));
     owner = spawn(
       process.execPath,
@@ -56,7 +63,19 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
 
   it("recovers a stale lock with the same PID and executable but a different creation time", async () => {
     await writeLock(new Date(0).toISOString());
-    await store.initialize();
+    try {
+      await store.initialize();
+    } catch (error) {
+      // Mapping Store preserves live locks when metadata is unavailable. Surface the
+      // real native query error here so runner failures retain their original cause.
+      const queryFailure = vi.mocked(execFileSync).mock.results.find((r) => r.type === "throw");
+      if (queryFailure) {
+        throw new Error("Native Windows process identity query failed", {
+          cause: queryFailure.value,
+        });
+      }
+      throw error;
+    }
     expect(JSON.parse(await readFile(path.join(directory, "store.lock"), "utf8"))).toMatchObject({
       pid: process.pid,
     });
