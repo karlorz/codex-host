@@ -305,11 +305,9 @@ function gateSubscriptions(
  * example API-key sign-in), so it may legitimately be absent until it reads
  * `rate_limit`.
  */
-function discoverGates(
-  scope: GateScope,
-  projections: ReadonlyMap<Instance, Projection>,
+function classifiedGates(
+  gates: ReturnType<typeof gateSubscriptions>,
 ): Array<[GateKind, Subscription]> | null {
-  const gates = gateSubscriptions(scope, projections);
   if (gates.invalid) return null;
   const found: Array<[GateKind, Subscription]> = [];
   for (const kind of ["account", "reserve"] as const) {
@@ -321,6 +319,13 @@ function discoverGates(
     }
   }
   return found;
+}
+
+function discoverGates(
+  scope: GateScope,
+  projections: ReadonlyMap<Instance, Projection>,
+): Array<[GateKind, Subscription]> | null {
+  return classifiedGates(gateSubscriptions(scope, projections));
 }
 
 export interface RendererCodexUsageGateInspection {
@@ -335,10 +340,7 @@ export interface RendererCodexUsageGateInspection {
 export function inspectComposerCodexUsageGate(composer: Element): RendererCodexUsageGateInspection {
   const owners = submitOwners(composer);
   const gates = owners.length === 1 && owners[0] ? gateSubscriptions(owners[0]) : null;
-  const validOwnerCount =
-    gates?.reserve.length === 1 && owners[0] && discoverGates(owners[0], new Map()) !== null
-      ? 1
-      : 0;
+  const validOwnerCount = gates?.reserve.length === 1 && classifiedGates(gates) !== null ? 1 : 0;
   return {
     ownerCount: owners.length,
     reserveGateCount: gates?.reserve.length ?? 0,

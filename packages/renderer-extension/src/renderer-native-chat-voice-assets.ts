@@ -71,7 +71,7 @@ export async function loadNativeChatVoiceModules(
     ),
   );
   if (!sharedModule || !initialModule || !startModule || !prewarm) throw new Error();
-  const latest = assets.version === "26.1023.51421";
+  const latest = assets.version === NATIVE_CHAT_VOICE_VERSION;
   const current = latest || assets.version === "26.1021.31345";
   const initialize = latest ? primary?.gm : current ? primary?.um : initialModule.oT;
   const start = current && !latest ? { t: startModule.r, n: startModule.i } : startModule;

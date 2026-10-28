@@ -103,6 +103,31 @@ function awaitWithSignal<T>(
   });
 }
 
+function runWithCdpSignal<T>(
+  signal: AbortSignal,
+  timeoutMessage: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  signal.throwIfAborted();
+  return awaitWithSignal(operation(), signal, timeoutMessage);
+}
+
+async function connectRendererTarget(
+  target: CdpTarget,
+  operations: RendererCdpControlOperations,
+  signal: AbortSignal,
+  timeoutMessage: string,
+): Promise<RendererCdpClient> {
+  return runWithCdpSignal(signal, timeoutMessage, async () => {
+    const connected = await operations.connect(target.webSocketDebuggerUrl);
+    if (signal.aborted) {
+      connected.close();
+      signal.throwIfAborted();
+    }
+    return connected;
+  });
+}
+
 function sameAgents(actual: readonly string[], expected: readonly string[] | undefined): boolean {
   // Production discovers plugins after mounting. Explicit tooling expectations stay exact.
   if (!actual.includes("codex") || new Set(actual).size !== actual.length) return false;
@@ -111,32 +136,27 @@ function sameAgents(actual: readonly string[], expected: readonly string[] | und
   return actual.length === expected.length && actual.every((agent) => expectedSet.has(agent));
 }
 
-function isPrimaryRendererUrl(value: string): boolean {
+function parseCodexAppUrl(value: string): URL | null {
   try {
     const url = new URL(value);
-    return (
-      url.protocol === "app:" &&
-      url.hostname === "-" &&
-      url.pathname === "/index.html" &&
-      url.search === "" &&
-      url.hash === ""
-    );
+    return url.protocol === "app:" && url.hostname === "-" ? url : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+function isPrimaryRendererUrl(value: string): boolean {
+  const url = parseCodexAppUrl(value);
+  return url !== null && url.pathname === "/index.html" && url.search === "" && url.hash === "";
+}
+
 function isAvatarOverlayRendererUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "app:" || url.hostname !== "-") return false;
-    if (url.pathname === "/avatar-overlay.html") return true;
-    return (
-      url.pathname === "/index.html" && url.searchParams.get("initialRoute") === "/avatar-overlay"
-    );
-  } catch {
-    return false;
-  }
+  const url = parseCodexAppUrl(value);
+  if (!url) return false;
+  if (url.pathname === "/avatar-overlay.html") return true;
+  return (
+    url.pathname === "/index.html" && url.searchParams.get("initialRoute") === "/avatar-overlay"
+  );
 }
 
 export function selectPrimaryRendererTarget(
@@ -293,18 +313,10 @@ async function installOverlayHook(
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
 ): Promise<void> {
-  const run = <T>(operation: () => Promise<T>): Promise<T> => {
-    signal.throwIfAborted();
-    return awaitWithSignal(operation(), signal, "Overlay hook installation timed out");
-  };
-  const renderer = await run(async () => {
-    const connected = await operations.connect(target.webSocketDebuggerUrl);
-    if (signal.aborted) {
-      connected.close();
-      signal.throwIfAborted();
-    }
-    return connected;
-  });
+  const timeoutMessage = "Overlay hook installation timed out";
+  const run = <T>(operation: () => Promise<T>): Promise<T> =>
+    runWithCdpSignal(signal, timeoutMessage, operation);
+  const renderer = await connectRendererTarget(target, operations, signal, timeoutMessage);
   try {
     await run(() => renderer.command("Runtime.enable"));
     await run(() => renderer.command("Page.enable"));
@@ -320,20 +332,13 @@ async function installOverlayHook(
 
 function isLocalThreadRenderer(target: CdpTarget): boolean {
   if (target.type !== "page") return false;
-  try {
-    const url = new URL(target.url);
-    const route = url.searchParams.get("initialRoute");
-    return (
-      url.protocol === "app:" &&
-      url.hostname === "-" &&
-      url.pathname === "/index.html" &&
-      url.hash === "" &&
-      [...url.searchParams.keys()].length === 1 &&
-      (route === "/local" || route?.startsWith("/local/") === true)
-    );
-  } catch {
-    return false;
-  }
+  const url = parseCodexAppUrl(target.url);
+  if (!url || url.pathname !== "/index.html" || url.hash !== "") return false;
+  const route = url.searchParams.get("initialRoute");
+  return (
+    [...url.searchParams.keys()].length === 1 &&
+    (route === "/local" || route?.startsWith("/local/") === true)
+  );
 }
 
 async function installLocalThreadRenderer(
@@ -343,18 +348,10 @@ async function installLocalThreadRenderer(
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
 ): Promise<void> {
-  const run = <T>(operation: () => Promise<T>): Promise<T> => {
-    signal.throwIfAborted();
-    return awaitWithSignal(operation(), signal, "Local chat Renderer installation timed out");
-  };
-  const renderer = await run(async () => {
-    const connected = await operations.connect(target.webSocketDebuggerUrl);
-    if (signal.aborted) {
-      connected.close();
-      signal.throwIfAborted();
-    }
-    return connected;
-  });
+  const timeoutMessage = "Local chat Renderer installation timed out";
+  const run = <T>(operation: () => Promise<T>): Promise<T> =>
+    runWithCdpSignal(signal, timeoutMessage, operation);
+  const renderer = await connectRendererTarget(target, operations, signal, timeoutMessage);
   try {
     if ((await run(() => readBinding(renderer))) === null) {
       await run(() => renderer.command("Runtime.enable"));

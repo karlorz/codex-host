@@ -1,7 +1,10 @@
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bindings";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-hook.js";
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
-import { NATIVE_CHAT_VOICE_ASSETS } from "./renderer-native-chat-voice-assets.js";
+import {
+  NATIVE_CHAT_VOICE_ASSETS,
+  NATIVE_CHAT_VOICE_VERSION,
+} from "./renderer-native-chat-voice-assets.js";
 import {
   INFERENCE_GATE,
   bindVoiceCapabilitySubscriptions,
@@ -348,7 +351,7 @@ export function installVoiceSettingsExplanation(
           ),
         );
         if (disposed) return;
-        const latest = assets.version === "26.1023.51421";
+        const latest = assets.version === NATIVE_CHAT_VOICE_VERSION;
         const initialize = latest ? initial.N4n : initial.l0n;
         if (typeof initialize !== "function" || typeof settings.VoiceSettings !== "function")
           return;
