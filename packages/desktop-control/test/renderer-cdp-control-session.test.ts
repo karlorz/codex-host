@@ -47,6 +47,56 @@ function rendererClient(binding = readyBinding()) {
 }
 
 describe("Renderer CDP Control Session", () => {
+  it("installs local-route chat windows and discovers them after startup", async () => {
+    const primary = rendererClient();
+    const local = rendererClient();
+    local.evaluateSpy.mockResolvedValue(null);
+    local.command.mockImplementation(async (method, params) => {
+      local.commands.push({ method, ...(params ? { params } : {}) });
+      if (method === "Runtime.evaluate") local.evaluateSpy.mockResolvedValue(readyBinding());
+      return {};
+    });
+    let inventory = [target("page-1")];
+    const connect = vi.fn(async (url: string) => (url.endsWith("/local-chat") ? local : primary));
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      operations: {
+        listTargets: async () => inventory,
+        connect,
+        installDraftPrewarmPolicy: async () => ({ state: "ready", reason: "owned-request-bridge" }),
+      },
+    });
+    try {
+      inventory = [
+        target("page-1"),
+        target("local-chat", "app://-/index.html?initialRoute=%2Flocal%2Fthread"),
+        target("spotlight", "app://-/index.html?initialRoute=%2Fspotlight"),
+        target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+      ];
+      await session.ensureInstalled();
+      expect(local.commands).toContainEqual({
+        method: "Runtime.evaluate",
+        params: { expression: "production renderer", awaitPromise: true },
+      });
+      expect(connect.mock.calls.map(([url]) => url.split("/").at(-1))).toEqual([
+        "page-1",
+        "local-chat",
+      ]);
+      const installedCount = local.commands.filter((c) => c.method === "Runtime.evaluate").length;
+      await session.ensureInstalled();
+      expect(local.commands.filter((c) => c.method === "Runtime.evaluate")).toHaveLength(
+        installedCount,
+      );
+      expect(primary.close).not.toHaveBeenCalled();
+      expect(local.close).toHaveBeenCalledTimes(2);
+    } finally {
+      session.close();
+    }
+  });
+
   it("selects only the exact primary app surface and preserves an owned target", () => {
     const first = target("page-1");
     const owned = target("page-2");

@@ -55,6 +55,24 @@ function firstQueuedItemId(items: unknown): string | null {
   return null;
 }
 
+function removeQueuedItem(
+  coordinator: unknown,
+  threadId: string,
+  queuedSubmissionId: string,
+): void {
+  if (!isRecord(coordinator) || typeof coordinator.mutate !== "function") return;
+  try {
+    coordinator.mutate.call(coordinator, threadId, (current: unknown) => {
+      if (!Array.isArray(current)) return current;
+      return current.filter((item) => !isRecord(item) || item.id !== queuedSubmissionId);
+    });
+  } catch (error) {
+    // The Host has already accepted the Turn. A Desktop cache cleanup failure
+    // must not turn an acknowledged submission into a retryable failure.
+    console.error("codexhost could not reconcile the submitted local follow-up", error);
+  }
+}
+
 function installLocalQueueGate(target: Record<string, unknown>): (() => void) | null {
   const getTurnCoordinator = target.getTurnCoordinator as RendererMethod;
   const coordinator: unknown = getTurnCoordinator.call(target);
@@ -152,6 +170,12 @@ function installServerQueueDrain(target: Record<string, unknown>): (() => void) 
         queuedSubmissionId: queuedSubmissionIdValue,
       }),
     )
+      .then(() => {
+        // Host queue admission and Desktop's local queue cache are separate.
+        // Remove only the item whose stable ID was acknowledged; preserve any
+        // newer message the user entered while the request was in flight.
+        removeQueuedItem(coordinator, threadId, queuedSubmissionIdValue);
+      })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes("Queued follow-up was not found")) return;

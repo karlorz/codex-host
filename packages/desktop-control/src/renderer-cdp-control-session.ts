@@ -310,26 +310,85 @@ async function installOverlayHook(
   }
 }
 
-async function installOverlayHooks(
+function isLocalThreadRenderer(target: CdpTarget): boolean {
+  if (target.type !== "page") return false;
+  try {
+    const url = new URL(target.url);
+    const route = url.searchParams.get("initialRoute");
+    return (
+      url.protocol === "app:" &&
+      url.hostname === "-" &&
+      url.pathname === "/index.html" &&
+      url.hash === "" &&
+      [...url.searchParams.keys()].length === 1 &&
+      (route === "/local" || route?.startsWith("/local/") === true)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function installLocalThreadRenderer(
+  target: CdpTarget,
+  source: string,
+  enabledAgents: readonly string[] | undefined,
+  operations: RendererCdpControlOperations,
+  signal: AbortSignal,
+): Promise<void> {
+  const run = <T>(operation: () => Promise<T>): Promise<T> => {
+    signal.throwIfAborted();
+    return awaitWithSignal(operation(), signal, "Local chat Renderer installation timed out");
+  };
+  const renderer = await run(async () => {
+    const connected = await operations.connect(target.webSocketDebuggerUrl);
+    if (signal.aborted) {
+      connected.close();
+      signal.throwIfAborted();
+    }
+    return connected;
+  });
+  try {
+    if ((await run(() => readBinding(renderer))) === null) {
+      await run(() => renderer.command("Runtime.enable"));
+      await run(() => renderer.command("Page.enable"));
+      await run(() => renderer.command("Page.addScriptToEvaluateOnNewDocument", { source }));
+      await run(() => evaluateSource(renderer, source));
+    }
+    await run(() => operations.installDraftPrewarmPolicy(renderer));
+    await run(() => waitForBinding(renderer, enabledAgents, 30_000, 25));
+  } finally {
+    renderer.close();
+  }
+}
+
+async function installAuxiliaryRenderers(
   endpoint: string,
+  rendererSource: string,
+  enabledAgents: readonly string[] | undefined,
   overlayHookSource: string | undefined,
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
 ): Promise<void> {
-  if (!overlayHookSource) return;
   try {
-    const overlays = selectAvatarOverlayRendererTargets(
-      await awaitWithSignal(
-        operations.listTargets(endpoint, signal),
-        signal,
-        "Overlay CDP target discovery timed out",
-      ),
+    const targets = await awaitWithSignal(
+      operations.listTargets(endpoint, signal),
+      signal,
+      "Auxiliary Renderer CDP target discovery timed out",
     );
-    await Promise.allSettled(
-      overlays.map((overlay) => installOverlayHook(overlay, overlayHookSource, operations, signal)),
-    );
+    await Promise.allSettled([
+      ...(overlayHookSource
+        ? selectAvatarOverlayRendererTargets(targets).map((overlay) =>
+            installOverlayHook(overlay, overlayHookSource, operations, signal),
+          )
+        : []),
+      ...targets
+        .filter(isLocalThreadRenderer)
+        .map((target) =>
+          installLocalThreadRenderer(target, rendererSource, enabledAgents, operations, signal),
+        ),
+    ]);
   } catch {
-    // Overlay discovery and injection are best-effort and share one deadline.
+    // Auxiliary windows share one deadline and cannot discard the primary session.
   }
 }
 
@@ -424,8 +483,10 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
         this.currentSnapshot = replacement.snapshot;
       }
     }
-    await installOverlayHooks(
+    await installAuxiliaryRenderers(
       this.rendererCdpEndpoint,
+      this.rendererSource,
+      this.enabledAgents,
       this.overlayHookSource,
       this.operations,
       discoveryTimeoutSignal(this.timeoutMs),
@@ -480,8 +541,10 @@ export async function createRendererCdpControlSession(
     pollIntervalMs,
     operations,
   );
-  await installOverlayHooks(
+  await installAuxiliaryRenderers(
     options.rendererCdpEndpoint,
+    options.rendererSource,
+    enabledAgents,
     options.overlayHookSource,
     operations,
     discoveryTimeoutSignal(timeoutMs, options.signal),

@@ -324,6 +324,10 @@ describe("external follow-ups drain the Host server queue", () => {
       readMessages(threadId: string) {
         return queued.get(threadId) ?? [];
       },
+      mutate(threadId: string, update: (current: unknown) => unknown) {
+        const next = update(queued.get(threadId) ?? []);
+        if (Array.isArray(next)) queued.set(threadId, next);
+      },
       serverQueue: {
         isEnabled: () => true,
         read(threadId: string) {
@@ -375,6 +379,40 @@ describe("external follow-ups drain the Host server queue", () => {
         threadId: "external",
         queuedSubmissionId: "queued-1",
       });
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("removes only the acknowledged local queue item after Host admission", async () => {
+    const f = drainFixture();
+    f.queued.set("external", [{ id: "queued-1" }, { id: "typed-after-submit" }]);
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await vi.waitFor(() =>
+        expect(f.queued.get("external")).toEqual([{ id: "typed-after-submit" }]),
+      );
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it("retains the local queue item when Host admission fails", async () => {
+    const f = drainFixture();
+    f.sendRequest.mockRejectedValueOnce(new Error("delivery failed"));
+    const cleanup = installRendererExternalQueue(f.manager);
+    try {
+      f.emit({
+        method: "turn/completed",
+        params: { threadId: "external", turn: { status: "completed" } },
+      });
+      await vi.waitFor(() => expect(f.sendRequest).toHaveBeenCalledOnce());
+      await Promise.resolve();
+      expect(f.queued.get("external")).toEqual([{ id: "queued-1" }]);
     } finally {
       cleanup?.();
     }
