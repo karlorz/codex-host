@@ -1,6 +1,6 @@
 # CPA live-voice Desktop hook
 
-CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, and **26.1021.31345** use the native client-owned-call flow described below. Native Chat Instant Connect has a separate **26.1021.31345** profile.
+CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, **26.1021.31345**, and **26.1023.51421** use the native client-owned-call flow described below. Native Chat Instant Connect has separate **26.1021.31345** and **26.1023.51421** profiles.
 
 For upstream merges, follow the [Live Voice preservation checklist](fork-versioning.md#preserve-live-voice-when-syncing-upstream), including regression checks and separate Desktop-version qualification.
 
@@ -41,7 +41,7 @@ Harness composers) project only that composer’s `voice.realtime` /
 
 The unaudited-Desktop asset gate still fail-closes. `~/.codex/config.toml` realtime keys stay manual.
 
-Daily CI (`npm run compat:daily`, `.github/workflows/compat-daily.yml`) compares the public Sparkle appcast to the Work/gateway and Chat voice pins. It does not download ChatGPT.app. A pin behind Sparkle latest opens or comments on a `compat-broken` issue on this repository.
+Daily CI (`npm run compat:daily`, `.github/workflows/compat-daily.yml`) compares the static public Sparkle appcast to the Work/gateway and Chat voice pins. It does not download ChatGPT.app or query Desktop's per-installation updater offer. A public release can be newer than the version offered by Check for Updates on a particular Mac. A pin behind the public-feed release opens or comments on a `compat-broken` issue on this repository; it does not establish a failed voice call.
 
 First-start official-backend recovery is covered by `packages/host-runtime/test/native-account-host.test.ts` (failed first generation, delayed second generation, no `unhandledRejection`). Manual cold-start UAT: fully quit ChatGPT and CodexHost, start **CodexHost 0.13.3** from the menu bar, wait ~15s. Pass: no 无法载入组织设定, console 总览 stays 启动成功, Work + Grok still shows Start voice. Fail: org-settings dialog on first launch only, then OK after 重试 — that is the remaining Host-wait gap, not Chat voice.
 
@@ -51,6 +51,58 @@ The hook only changes Desktop call ownership. Point Codex at the realtime host i
 experimental_realtime_ws_base_url = "https://<realtime-host>/v1"
 experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 ```
+
+## Desktop 26.1023.51421 qualification
+
+The macOS **26.1023.51421** build **22530** profile has source, regression-test,
+live no-call and user-reported basic voice qualification. The direct predecessor
+on this Mac was 26.1023.50603; the retained 26.1021.31345 qualification below is the reviewed
+contract reference, with its recorded acceptance limits. Retained macOS and
+Windows 26.1021 profiles keep their own version identity and exports. No Windows
+26.1023 profile is inferred from the macOS release.
+
+| Contract | macOS 26.1023.51421 asset and exports |
+| --- | --- |
+| Work call creation | `app-initial-bc8256c3cccb.js`: `xir` initializes `yir.getInstance().fetch`, limited to the existing `POST /wham/realtime/calls` gateway route |
+| Native bridge and services | `app-shared-e9f258fd3588.js`: `QIt` bridge, `Sst` services record; immutable RPC stubs retain their native behavior |
+| Capability projection | Initial `N4n` initializer, `M4n` capability family, `Par` inference-gate family; provider-only replay retains account, workspace, loading and feature checks |
+| Work overlay | `avatar-overlay-native-page-af6c3662f64f.js`: exported native page owns the starter subscription |
+| Native Chat START | `start-voice-a0564cefdc95.js`: `t` initializer and `n` full composer START, retaining scope/props/metadata/abort-signal arguments and native availability, navigation and session guards |
+| Chat scopes and store | Initial `x1n` RouteScope, `MQn` ComposerScope, `Opn` backend Chat ID, `s$t` browser voice store; shared `uct` AppScope |
+| Chat browser runtime | `app-primary-b7f335b763ca.js`: `gm` initializer and mutable `hm` enable flag; shared `OHt` React and `wPt` ReactDOM factories |
+| Native prewarm | `voice-prewarm-53aefded152c.js`, which initializes and re-exports the native controller |
+| Draft selection | Initial `Zir` location, `ejn` native navigation, `Kpn` transcript mapping, `zpn` current node, `k3` intent generation; shared `ast` Chat path |
+| Voice Settings | `voice-settings-1a9f68eb7ae8.js`: exported page; initial `yer` access policy and `KG` dictation mode; the same audited capability families and AppScope |
+
+Live read-only probes confirmed these export shapes, scope brands, React
+factories and prewarm controller in the installed application. A narrow refresh
+on an idle primary document produced active call-transport, launch and Composer
+capability hooks, with one enabled native Work Start Voice control. An idle
+overlay probe confirmed gateway readiness and a committed owned capability
+projection, then restored the native subscription. Neither probe opened a call.
+Native Chat remained pending in that probe while the visible Composer was Work.
+On 29 October 2026, the operator reported successful basic voice conversations
+in both Work and ChatGPT Chat, including audible replies and microphone release
+after ending each call. The saved routes select Work's configured gateway and
+ChatGPT's native Chat experience. This is attended user-reported evidence.
+The operator also confirmed successful ChatGPT voice starts in both a saved
+Chat and a new draft. Settings controls, transcript adoption and history
+persistence retain their separate verification requirements; no measured
+prewarm latency is claimed.
+
+The updated primary and overlay bundles are backed up, staged and hash-verified
+in the local codexhost installation. A full codexhost/Desktop relaunch loaded
+the staged Work profile, and subsequent read-only probes confirmed active hooks
+and one enabled Work voice control. Live refresh affects the current document;
+an already-registered overlay starter needs a new document or full restart to
+bind a replacement callback. Basic audible playback and microphone release are
+accepted from the operator's report; other lifecycle and history boundaries
+require their own evidence. Matching CI pins clear public-feed version drift
+only.
+
+The ASAR SHA-256 is
+`1c8ef1bef66e5fc416ae66eff8e6529972aa3601e27a1c7b5f61d6a292b957d3`.
+Sanitized local evidence is under ignored `.codexhost/update-impact/26.1023.51421/`.
 
 ## Desktop 26.1021.31345 qualification
 
@@ -803,12 +855,14 @@ continue to cancel selection. Native START remains available independently.
 
 The native version/asset and scope guards fail closed on unsupported builds.
 Lifecycle tests cover saved and draft starts, prewarm contexts, navigation,
-cancellation, retry, hidden composers and disposal. Native Chat microphone,
-connected WM audio and account eligibility have **not** been exercised on the
-running Desktop: Computer Use refuses access to com.openai.codex. Static source
-qualification and tests do not establish those live results. Issue
-[#4](https://github.com/karlorz/codex-host/issues/4) retains that acceptance limit.
-A matching compat-daily pin clears version drift only.
+cancellation, retry, hidden composers and disposal. The 26.1016.61520
+qualification did not exercise native Chat microphone, connected WM audio or
+account eligibility: Computer Use refused access to com.openai.codex. Static
+source qualification and tests do not establish those live results. Issue
+[#4](https://github.com/karlorz/codex-host/issues/4) records that build's
+acceptance limit; attended results for 26.1023.51421 are recorded in its
+qualification section above. A matching compat-daily pin clears version drift
+only.
 
 ### Codex Chat gateway capability
 
@@ -920,7 +974,13 @@ The hook does not copy OpenAI frontend JavaScript into git. Tests cover the asse
 
 ## Version gate
 
-Audited for Desktop **26.1007.30912** (gate path, primary bundle `app-initial-6350d04672d0.js`), **26.1013.40934** (client-owned path), **26.1016.51333**, and **26.1016.61520** (client-owned WebFetch wrap on `app-initial-c95ddb62696e.js` / `app-shared-2eda13eb7044.js`). Native Chat voice is pinned separately to 26.1016.61520 with live microphone/audio acceptance pending. Re-audit before enabling on another build. Fail closed: no wrap, no ASAR patch, keep `~/Applications/ChatGPT-Voice.app` if that copy is still the working path.
+Work voice has audited profiles through **26.1023.51421**, including the
+retained 26.1007 gate path and the supported client-owned-call profiles listed
+above. Native Chat has its own versioned profiles and current pin
+**26.1023.51421**. Exact platform, version, asset-pair and export guards remain
+authoritative; acceptance on one build or platform does not qualify another.
+Re-audit before enabling an unknown build. Unsupported assets fail closed
+without an ASAR patch.
 
 ## Invariants
 

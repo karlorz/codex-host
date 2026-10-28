@@ -27,6 +27,11 @@ describe("audited voice asset ownership", () => {
   });
 
   it.each([
+    [
+      "26.1023.51421",
+      ["app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"],
+      "avatar-overlay-native-page-af6c3662f64f.js",
+    ],
     ["26.1021.31345", latest, "avatar-overlay-native-page-d549db3706f1.js"],
     ["26.1021.31345", windows, "avatar-overlay-native-page-1549fe5955e1.js"],
     ["26.1016.62342", previous, "avatar-overlay-native-page-ef8332c6a2fb.js"],
@@ -48,6 +53,8 @@ describe("audited voice asset ownership", () => {
     ["26.1016.62342", baseline],
     ["26.1016.61520", latest],
     ["unknown", latest],
+    ["26.1023.51421", latest],
+    [undefined, ["app-initial-bc8256c3cccb.js", latest[1]]],
     [undefined, [latest[0], previous[1]]],
     [undefined, [...latest, ...previous]],
     ["26.1021.31345", [...latest, previous[0]]],

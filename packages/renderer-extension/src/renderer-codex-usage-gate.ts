@@ -327,16 +327,24 @@ export interface RendererCodexUsageGateInspection {
   ownerCount: number;
   reserveGateCount: number;
   accountGateCount: number;
+  validOwnerCount: number;
+  accountGateOwnerCount: number;
 }
 
 /** Read-only contract audit: counts only, never patches or subscribes. */
 export function inspectComposerCodexUsageGate(composer: Element): RendererCodexUsageGateInspection {
   const owners = submitOwners(composer);
   const gates = owners.length === 1 && owners[0] ? gateSubscriptions(owners[0]) : null;
+  const validOwnerCount =
+    gates?.reserve.length === 1 && owners[0] && discoverGates(owners[0], new Map()) !== null
+      ? 1
+      : 0;
   return {
     ownerCount: owners.length,
     reserveGateCount: gates?.reserve.length ?? 0,
     accountGateCount: gates?.account.length ?? 0,
+    validOwnerCount,
+    accountGateOwnerCount: validOwnerCount === 1 && (gates?.account.length ?? 0) > 0 ? 1 : 0,
   };
 }
 

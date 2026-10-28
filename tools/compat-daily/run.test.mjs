@@ -80,6 +80,13 @@ describe("compat-daily pins", () => {
     assert.equal(report.findings[0]?.surface, "work-voice");
     assert.equal(report.findings[1]?.surface, "chat-voice");
     assert.match(report.findings[1]?.title ?? "", /chat-voice/);
+    assert.equal(report.feed.url, "https://persistent.oaistatic.com/codex-app-prod/appcast.xml");
+    assert.equal(report.feed.installationAvailability, "not-checked");
+    for (const finding of report.findings) {
+      assert.match(finding.detail, /public macOS release feed/u);
+      assert.match(finding.detail, /per-installation updater/u);
+      assert.match(finding.detail, /does not test.*voice/u);
+    }
   });
 
   it("keeps Chat drift visible when Work already matches 61520", () => {
@@ -93,7 +100,28 @@ describe("compat-daily pins", () => {
       ["chat-voice"],
     );
     assert.match(report.findings[0].detail, /26\.1013\.40934/);
-    assert.match(report.findings[0].detail, /unqualified/);
+    assert.match(report.findings[0].detail, /requires qualification/);
+  });
+
+  it("retains release eligibility metadata without claiming an installation offer", () => {
+    const latest = parseAppcast(`<rss><channel><item>
+      <pubDate>Wed, 28 Oct 2026 00:27:10 +0000</pubDate>
+      <sparkle:version>22530</sparkle:version>
+      <sparkle:shortVersionString>26.1023.51421</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+    </item></channel></rss>`);
+    assert.deepEqual(latest, {
+      version: "26.1023.51421",
+      build: "22530",
+      publishedAt: "Wed, 28 Oct 2026 00:27:10 +0000",
+      minimumSystemVersion: "13.0",
+      architecture: "arm64",
+      phasedRolloutInterval: "86400",
+    });
+    const report = evaluate(readPins(files), latest);
+    assert.equal(report.feed.installationAvailability, "not-checked");
   });
 
   it("falls back Chat pins to Work when Chat reuses CLIENT_OWNED_*", () => {
@@ -242,12 +270,27 @@ it("runs drift and recovery workflow steps in separate scopes", async () => {
   };
   const report = evaluate(
     { ...readPins(files), chatVersion: "26.1016.61520" },
-    { version: "26.1016.62342", build: "21477" },
+    {
+      version: "26.1016.62342",
+      build: "21477",
+      publishedAt: "release date",
+      architecture: "arm64",
+      minimumSystemVersion: "13.0",
+      phasedRolloutInterval: "86400",
+    },
   );
   const { run, created, comments } = await workflowFixture(report, [issue]);
   await run("Open or update issues on pin drift");
   assert.equal(created.length, 2);
   assert.match(created[0].body, /macOS/u);
+  assert.match(created[0].body, /Public macOS feed release/u);
+  assert.match(created[0].body, /Published: release date/u);
+  assert.match(created[0].body, /Architecture: arm64; minimum macOS: 13.0/u);
+  assert.match(created[0].body, /Phased rollout interval: 86400/u);
+  assert.match(
+    created[0].body,
+    /Installation-specific availability and live voice behavior: not checked/u,
+  );
   assert.match(created[0].body, /checked-sha/u);
   assert.match(created[0].body, /refs\/heads\/stable/u);
   await run("Comment on matching voice pins", "workflow_dispatch", "refs/heads/stable", "success");
@@ -328,28 +371,28 @@ it("prints structured JSON and fails for fetch, parse and pin-loading errors", (
   }
 });
 
-it("recognizes the audited 26.1021 Work and relocated native Chat pins", async () => {
+it("recognizes the audited 26.1023 Work and native Chat pins", async () => {
   const pins = await loadPinsFromRepo();
-  const report = evaluate(pins, { version: "26.1021.31345", build: "21828" });
-  assert.equal(pins.workVersion, "26.1021.31345");
-  assert.equal(pins.chatVersion, "26.1021.31345");
-  assert.equal(pins.overlayAsset, "avatar-overlay-native-page-d549db3706f1.js");
-  assert.equal(pins.chatStart, "entity-business-profile-reference-b68063dfc05d.js");
+  const report = evaluate(pins, { version: "26.1023.51421", build: "22530" });
+  assert.equal(pins.workVersion, "26.1023.51421");
+  assert.equal(pins.chatVersion, "26.1023.51421");
+  assert.equal(pins.overlayAsset, "avatar-overlay-native-page-af6c3662f64f.js");
+  assert.equal(pins.chatStart, "start-voice-a0564cefdc95.js");
   assert.deepEqual(report.findings, []);
   assert.deepEqual(
     recoveredPinIssues(report, [
       {
-        number: 9,
-        title: "compat-daily/work-voice: pin 26.1016.62342 behind desktop 26.1021.31345",
+        number: 14,
+        title: "compat-daily/work-voice: pin 26.1021.31345 behind desktop 26.1023.51421",
       },
       {
-        number: 10,
-        title: "compat-daily/chat-voice: pin 26.1016.62342 behind desktop 26.1021.31345",
+        number: 15,
+        title: "compat-daily/chat-voice: pin 26.1021.31345 behind desktop 26.1023.51421",
       },
     ]),
     [
-      { number: 9, surface: "work-voice", version: "26.1021.31345" },
-      { number: 10, surface: "chat-voice", version: "26.1021.31345" },
+      { number: 14, surface: "work-voice", version: "26.1023.51421" },
+      { number: 15, surface: "chat-voice", version: "26.1023.51421" },
     ],
   );
 });

@@ -9,14 +9,24 @@ npm run compat:daily
 
 GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). macOS pin drift opens or comments `compat-broken` issues on this repository.
 
-The local command prints JSON containing `latest`, `pins` and `findings`. It exits
+The macOS feed is the static public release feed at
+`https://persistent.oaistatic.com/codex-app-prod/appcast.xml`. Desktop's production
+updater uses `https://updates.oaistatic.com/codex/app/appcast` with installation,
+architecture, current-version, OS and account-plan context. A public release can
+therefore be newer than the update offered to a particular Mac. This job does not
+query that installation-specific offer, download or install an application, or
+verify native voice behavior. Issue bodies label that scope explicitly.
+
+The local command prints JSON containing `feed`, `latest`, `pins` and `findings`.
+`feed.installationAvailability` is `not-checked`; optional release metadata includes
+publication date, architecture, minimum OS and phased-rollout interval. It exits
 with status 1 when macOS Sparkle latest is numerically newer than either surface's
 pin. Equal or older feed versions produce no drift findings. Version comparison
 uses three numeric components; malformed versions are operational errors. This
 release alert does not evaluate every retained profile or change runtime eligibility.
 Fetch, parse and pin-loading errors also fail the command, printing JSON with
 `error` and an empty `findings` array plus the diagnostic on stderr. Successful
-reports retain `latest`, `pins` and `findings`. Running locally does not create issues.
+reports retain `feed`, `latest`, `pins` and `findings`. Running locally does not create issues.
 The workflow creates or comments on issues only on non-PR runs of the repository's
 default branch, and skips all issue updates for operational errors. Reports include
 the checked commit and ref. Other branches still run checks without publishing issue

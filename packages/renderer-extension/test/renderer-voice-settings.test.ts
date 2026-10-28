@@ -197,42 +197,64 @@ describe("voice Settings provider explanation", () => {
 
 afterEach(() => vi.useRealTimers());
 describe("voice Settings explanation lifecycle", () => {
-  it("waits for the complete native asset pair during document startup", async () => {
-    vi.useFakeTimers();
-    const f = fixture();
-    const names = ["app://-/assets/app-initial-feb30b196d11.js"];
-    const target = {
-      __codexhostCpaLiveVoiceHookV1: {
-        enabled: true,
-        desktopVersion: "26.1021.31345",
-        desktopPlatform: "darwin",
-        auditedDesktopVersion: "26.1007.30912",
-        auditedAppInitialAsset: "app-initial-6350d04672d0.js",
-      },
-      document: f.doc,
-      performance: { getEntriesByType: () => names.map((name) => ({ name })) },
-      setTimeout,
-      clearTimeout,
-    } as unknown as typeof globalThis;
-    const importModule = vi.fn(async (url: string): Promise<Record<string, unknown>> =>
-      url.includes("app-initial")
-        ? { l0n: () => {}, k5n: f.modules.access, c0n: f.modules.capability, Cnr: f.modules.gates }
-        : url.includes("app-shared")
-          ? { Bst: f.modules.appScope }
-          : { VoiceSettings: f.modules.page },
-    );
-    const hook = installVoiceSettingsExplanation({ target, importModule });
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(importModule).not.toHaveBeenCalled();
-      names.push("app://-/assets/app-shared-2cae01273bae.js");
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(f.description.textContent).toContain("Your account allows voice chat");
-    } finally {
-      hook.dispose();
-    }
-    expect(vi.getTimerCount()).toBe(0);
-  });
+  it.each(["26.1021.31345", "26.1023.51421"])(
+    "waits for the complete %s native asset pair during document startup",
+    async (version) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      const current = version === "26.1023.51421";
+      const names = [
+        `app://-/assets/${current ? "app-initial-bc8256c3cccb.js" : "app-initial-feb30b196d11.js"}`,
+      ];
+      const target = {
+        __codexhostCpaLiveVoiceHookV1: {
+          enabled: true,
+          desktopVersion: version,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: f.doc,
+        performance: { getEntriesByType: () => names.map((name) => ({ name })) },
+        setTimeout,
+        clearTimeout,
+      } as unknown as typeof globalThis;
+      const importModule = vi.fn(async (url: string): Promise<Record<string, unknown>> =>
+        url.includes("app-initial")
+          ? current
+            ? {
+                N4n: () => {},
+                yer: f.modules.access,
+                M4n: f.modules.capability,
+                Par: f.modules.gates,
+              }
+            : {
+                l0n: () => {},
+                k5n: f.modules.access,
+                c0n: f.modules.capability,
+                Cnr: f.modules.gates,
+              }
+          : url.includes("app-shared")
+            ? current
+              ? { uct: f.modules.appScope }
+              : { Bst: f.modules.appScope }
+            : { VoiceSettings: f.modules.page },
+      );
+      const hook = installVoiceSettingsExplanation({ target, importModule });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(importModule).not.toHaveBeenCalled();
+        names.push(
+          `app://-/assets/${current ? "app-shared-e9f258fd3588.js" : "app-shared-2cae01273bae.js"}`,
+        );
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(f.description.textContent).toContain("Your account allows voice chat");
+      } finally {
+        hook.dispose();
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
   it("restores the native denial when account access changes, without rewriting unchanged text on each poll", async () => {
     vi.useFakeTimers();
     const f = fixture();

@@ -27,7 +27,14 @@ const validInspection = {
     textBodyCount: 2,
     textBodyOwnerCount: 2,
   },
-  codexUsageGate: { composerCount: 1, ownerCount: 1, reserveGateCount: 1, accountGateCount: 1 },
+  codexUsageGate: {
+    composerCount: 1,
+    ownerCount: 1,
+    reserveGateCount: 1,
+    accountGateCount: 1,
+    validOwnerCount: 1,
+    accountGateOwnerCount: 1,
+  },
   fork: { annotatedResponseCount: 0, candidateButtonCount: 0, verifiedButtonCount: 0 },
   production: {
     bindingPresent: false,

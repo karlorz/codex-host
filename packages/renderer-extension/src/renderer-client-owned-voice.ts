@@ -14,10 +14,10 @@ import {
 } from "./renderer-cpa-live-voice-preference.js";
 import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
 
-export const CLIENT_OWNED_VOICE_VERSION = "26.1021.31345";
-export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-feb30b196d11.js";
-export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-2cae01273bae.js";
-export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-d549db3706f1.js";
+export const CLIENT_OWNED_VOICE_VERSION = "26.1023.51421";
+export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-bc8256c3cccb.js";
+export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-e9f258fd3588.js";
+export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-af6c3662f64f.js";
 export const CLIENT_OWNED_VOICE_ASSETS = [
   {
     platform: "darwin",
@@ -25,6 +25,21 @@ export const CLIENT_OWNED_VOICE_ASSETS = [
     initial: CLIENT_OWNED_VOICE_INITIAL_ASSET,
     shared: CLIENT_OWNED_VOICE_SHARED_ASSET,
     overlay: CLIENT_OWNED_VOICE_OVERLAY_ASSET,
+    init: "xir",
+    fetch: "yir",
+    fetchFrom: "initial",
+    bridge: "QIt",
+    services: "Sst",
+    capabilityInit: "N4n",
+    capabilityFamily: "M4n",
+    inferenceGateFamily: "Par",
+  },
+  {
+    platform: "darwin",
+    version: "26.1021.31345",
+    initial: "app-initial-feb30b196d11.js",
+    shared: "app-shared-2cae01273bae.js",
+    overlay: "avatar-overlay-native-page-d549db3706f1.js",
     fetch: "Htr",
     fetchFrom: "initial",
     bridge: "bIt",
@@ -35,7 +50,7 @@ export const CLIENT_OWNED_VOICE_ASSETS = [
   },
   {
     platform: "win32",
-    version: CLIENT_OWNED_VOICE_VERSION,
+    version: "26.1021.31345",
     initial: "app-initial-438d1df57f70.js",
     shared: "app-shared-955d52676f9c.js",
     overlay: "avatar-overlay-native-page-1549fe5955e1.js",

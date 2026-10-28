@@ -1,6 +1,7 @@
 name: Compat Daily
 
-# Compare macOS ChatGPT/Codex Desktop Sparkle latest to Renderer voice pins.
+# Compare the public macOS release feed to Renderer voice pins.
+# This does not check installation-specific update offers or live voice behavior.
 # Opens one GitHub issue per surface when a pin is behind. Does not download the .app.
 
 on:
@@ -99,7 +100,12 @@ jobs:
               const body = [
                 finding.detail,
                 '',
-                `- macOS Desktop: \`${report.latest?.version ?? 'unknown'}\` build \`${report.latest?.build ?? 'unknown'}\``,
+                `- Public macOS feed release: \`${report.latest?.version ?? 'unknown'}\` build \`${report.latest?.build ?? 'unknown'}\``,
+                `- Feed: ${report.feed?.url ?? 'unknown'}`,
+                `- Published: ${report.latest?.publishedAt ?? 'not specified'}`,
+                `- Architecture: ${report.latest?.architecture ?? 'not specified'}; minimum macOS: ${report.latest?.minimumSystemVersion ?? 'not specified'}`,
+                `- Phased rollout interval: ${report.latest?.phasedRolloutInterval ?? 'not specified'}`,
+                '- Installation-specific availability and live voice behavior: not checked',
                 `- Event: \`${context.eventName}\``,
                 `- Checked commit: \`${context.sha}\` (\`${context.ref}\`)`,
                 `- Run: ${runUrl}`,

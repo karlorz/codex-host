@@ -1,22 +1,32 @@
 type NativeModule = Record<string, unknown>;
-export const NATIVE_CHAT_VOICE_VERSION = "26.1021.31345";
-const NATIVE_CHAT_INITIAL_ASSET = "app-initial-feb30b196d11.js";
-const START_ASSET = "entity-business-profile-reference-b68063dfc05d.js";
+export const NATIVE_CHAT_VOICE_VERSION = "26.1023.51421";
+const NATIVE_CHAT_INITIAL_ASSET = "app-initial-bc8256c3cccb.js";
+const START_ASSET = "start-voice-a0564cefdc95.js";
 
 export const NATIVE_CHAT_VOICE_ASSETS = [
   {
     platform: "darwin",
     version: NATIVE_CHAT_VOICE_VERSION,
     initial: NATIVE_CHAT_INITIAL_ASSET,
+    shared: "app-shared-e9f258fd3588.js",
+    primary: "app-primary-b7f335b763ca.js",
+    start: START_ASSET,
+    prewarm: "voice-prewarm-53aefded152c.js",
+    settings: "voice-settings-1a9f68eb7ae8.js",
+  },
+  {
+    platform: "darwin",
+    version: "26.1021.31345",
+    initial: "app-initial-feb30b196d11.js",
     shared: "app-shared-2cae01273bae.js",
     primary: "app-primary-7d7313419f84.js",
-    start: START_ASSET,
+    start: "entity-business-profile-reference-b68063dfc05d.js",
     prewarm: "voice-prewarm-d672f1245523.js",
     settings: "voice-settings-14000f5c9fc2.js",
   },
   {
     platform: "win32",
-    version: NATIVE_CHAT_VOICE_VERSION,
+    version: "26.1021.31345",
     initial: "app-initial-438d1df57f70.js",
     shared: "app-shared-955d52676f9c.js",
     primary: "app-primary-844e405f2b90.js",
@@ -61,40 +71,65 @@ export async function loadNativeChatVoiceModules(
     ),
   );
   if (!sharedModule || !initialModule || !startModule || !prewarm) throw new Error();
-  const current = assets.version === NATIVE_CHAT_VOICE_VERSION;
-  const initialize = current ? primary?.um : initialModule.oT;
-  const start = current ? { t: startModule.r, n: startModule.i } : startModule;
+  const latest = assets.version === "26.1023.51421";
+  const current = latest || assets.version === "26.1021.31345";
+  const initialize = latest ? primary?.gm : current ? primary?.um : initialModule.oT;
+  const start = current && !latest ? { t: startModule.r, n: startModule.i } : startModule;
   if (
     typeof start.t !== "function" ||
     typeof start.n !== "function" ||
     typeof initialize !== "function" ||
-    typeof (current ? initialModule.qXt : initialModule.SPn) !== "function" ||
-    typeof (current ? sharedModule.XVt : sharedModule.FBt) !== "function" ||
-    typeof (current ? sharedModule.KNt : sharedModule.PNt) !== "function" ||
+    typeof (latest ? initialModule["s$t"] : current ? initialModule.qXt : initialModule.SPn) !==
+      "function" ||
+    typeof (latest ? sharedModule.OHt : current ? sharedModule.XVt : sharedModule.FBt) !==
+      "function" ||
+    typeof (latest ? sharedModule.wPt : current ? sharedModule.KNt : sharedModule.PNt) !==
+      "function" ||
     typeof prewarm.VoiceInstantConnectCacheController !== "function"
   )
     throw new Error();
   initialize();
   start.t();
   // Initializers publish mutable native exports, including the enable flag.
-  const initial = current
+  const initial = latest
     ? {
-        MOr: initialModule.CQn,
-        CDr: initialModule.PXn,
-        B1n: initialModule.tdn,
-        SPn: initialModule.qXt,
-        oT: primary?.um,
-        aT: primary?.lm,
-        Ycr: initialModule.Xkn,
-        Nir: initialModule.yAn,
-        n0n: initialModule.ydn,
-        Y1n: initialModule.fdn,
-        HJt: initialModule.R2,
+        MOr: initialModule.x1n,
+        CDr: initialModule.MQn,
+        B1n: initialModule.Opn,
+        SPn: initialModule["s$t"],
+        oT: primary?.gm,
+        aT: primary?.hm,
+        Ycr: initialModule.Zir,
+        Nir: initialModule.ejn,
+        n0n: initialModule.Kpn,
+        Y1n: initialModule.zpn,
+        HJt: initialModule.k3,
       }
-    : initialModule;
-  const shared = current
-    ? { Qst: sharedModule.Bst, FBt: sharedModule.XVt, PNt: sharedModule.KNt, Vot: sharedModule.Fot }
-    : sharedModule;
+    : current
+      ? {
+          MOr: initialModule.CQn,
+          CDr: initialModule.PXn,
+          B1n: initialModule.tdn,
+          SPn: initialModule.qXt,
+          oT: primary?.um,
+          aT: primary?.lm,
+          Ycr: initialModule.Xkn,
+          Nir: initialModule.yAn,
+          n0n: initialModule.ydn,
+          Y1n: initialModule.fdn,
+          HJt: initialModule.R2,
+        }
+      : initialModule;
+  const shared = latest
+    ? { Qst: sharedModule.uct, FBt: sharedModule.OHt, PNt: sharedModule.wPt, Vot: sharedModule.ast }
+    : current
+      ? {
+          Qst: sharedModule.Bst,
+          FBt: sharedModule.XVt,
+          PNt: sharedModule.KNt,
+          Vot: sharedModule.Fot,
+        }
+      : sharedModule;
   const scope = (value: unknown, brand: string) =>
     value !== null &&
     typeof value === "object" &&

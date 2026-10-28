@@ -405,15 +405,16 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
   });
   // External Harness submission while ChatGPT Codex usage is exhausted depends
   // on one Composer owner exposing one reserve gate and, when it reads usage,
-  // one Account gate (renderer-codex-usage-gate.ts). The Account gate returns
-  // early for API-key sign-in or loading, so its absence is unverified.
+  // Account gates unique within each component (renderer-codex-usage-gate.ts).
+  // A Composer can subscribe in both owner and child. Account selectors return
+  // early for API-key sign-in or loading, so each Composer needs its own evidence.
   const gate = contracts.codexUsageGate;
   const gateActive = gate.composerCount > 0;
   const gateStructure =
     gate.ownerCount === gate.composerCount &&
     gate.reserveGateCount === gate.composerCount &&
-    gate.accountGateCount <= gate.composerCount;
-  const accountGateObserved = gate.accountGateCount === gate.composerCount;
+    gate.validOwnerCount === gate.composerCount;
+  const accountGateObserved = gate.accountGateOwnerCount === gate.composerCount;
   const codexUsageGate = classifySurface({
     id: "codex-usage-gate",
     observed: gate,

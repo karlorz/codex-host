@@ -292,7 +292,9 @@ describe("version and runtime qualification", () => {
   }
   it("uses the audited 26.1021 capability and inference families despite reused old exports", async () => {
     vi.useFakeTimers();
-    const f = target();
+    const assets = CLIENT_OWNED_VOICE_ASSETS.find((p) => p.version === "26.1021.31345");
+    if (!assets) throw new Error("Missing retained 26.1021 profile");
+    const f = target(assets);
     const unrelated = { scope: f.f.family.scope, resolve: () => ({ atom: { read: () => false } }) };
     const initialize = vi.fn();
     const importModule = async () => ({

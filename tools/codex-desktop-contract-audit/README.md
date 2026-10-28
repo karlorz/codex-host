@@ -38,12 +38,14 @@ The `codex-usage-gate` surface covers `renderer-codex-usage-gate.ts`, which lets
 
 - `ownerCount` — Composer owners exposing `onLocalSubmitStart` and boolean `submitDisabled` that hold the reserve gate (pass-through wrappers with the same props are excluded);
 - `reserveGateCount` — boolean subscriptions whose selector reads reserve `hardBlocked`;
-- `accountGateCount` — boolean subscriptions whose selector reads `authMethod` and `rate_limit.allowed`.
+- `accountGateCount` — boolean subscriptions whose selector reads `authMethod` and `rate_limit.allowed`;
+- `validOwnerCount` — Composers with one owner, one reserve gate, matching snapshots, no mixed selectors, and no duplicate gate kind within one committed component;
+- `accountGateOwnerCount` — valid Composers whose Account selector currently reads usage. An owner and its child may each subscribe; both belong to one Composer.
 
 Verdicts:
 
-- an owner or reserve count other than one per Composer, or more than one Account gate, is `confirmed-impact`;
-- no Account gate is `unverified` (`codex-usage-account-gate-dormant`): the selector returns early for API-key sign-in or while Account data loads, so inspect again signed in with ChatGPT;
+- an owner, reserve or valid-owner count other than one per Composer is `confirmed-impact`;
+- a valid Composer without an observed Account gate is `unverified` (`codex-usage-account-gate-dormant`): the selector returns early for API-key sign-in or while Account data loads, so inspect again signed in with ChatGPT. Multiple subscriptions in another Composer cannot qualify it;
 - no Composer with an editor is `unverified`.
 
 The probe replays selectors read-only and never lifts gates, writes Account or query data, or submits input. Whether Send and Enter work with exhausted usage on a new chat, existing Thread, or Codex Thread is behavioral and stays outside this tool.

@@ -65,6 +65,8 @@ function sharedExports(f: ReturnType<typeof fixture>) {
     Mit: f.responseError,
     Zot: fetch,
     Htr: fetch,
+    yir: fetch,
+    QIt: bridge,
     bIt: bridge,
     Qot: { realtimeVoiceRuntime: vi.fn() },
   };
@@ -457,6 +459,7 @@ describe("client-owned voice gateway", () => {
     expect(f.client.fetch).toBe(f.original);
   });
   it.each([
+    ["26.1023.51421", "app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"],
     ["26.1021.31345", "app-initial-feb30b196d11.js", "app-shared-2cae01273bae.js"],
     ["26.1016.62342", "app-initial-dddef47d6ef6.js", "app-shared-fc3316d48427.js"],
     ["26.1016.61520", "app-initial-c95ddb62696e.js", "app-shared-2eda13eb7044.js"],
@@ -497,6 +500,47 @@ describe("client-owned voice gateway", () => {
       expect(f.client.fetch).toBe(f.original);
     },
   );
+
+  it("initializes the 26.1023 fetch owner without invoking reused legacy exports", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const unrelated = vi.fn(() => {
+      throw new Error("Unrelated native initializer");
+    });
+    const initial: Record<string, unknown> = {
+      Oit: unrelated,
+      xir: vi.fn(() => {
+        initial.yir = { getInstance: () => f.client };
+      }),
+    };
+    const shared = { QIt: { getInstance: () => f.bridge }, Oit: unrelated };
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: "26.1023.51421",
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async (url) => (url.includes("app-initial") ? initial : shared),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(initial.xir).toHaveBeenCalledOnce();
+      expect(unrelated).not.toHaveBeenCalled();
+      await f.client.fetch(url, workOptions());
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.client.fetch).toBe(f.original);
+  });
 
   it("initializes lazy native WebFetch exports before installing on a cold document", async () => {
     vi.useFakeTimers();

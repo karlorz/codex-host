@@ -211,6 +211,7 @@ describe("overlay starter registration", () => {
       Oit() {},
       ist: services,
       Qot: services,
+      Sst: services,
     }));
     return { register, unregister, native, services, names, target, importModule };
   }

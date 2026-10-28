@@ -210,6 +210,8 @@ describe("Codex usage gate for external Harness Composers", () => {
       ownerCount: 1,
       reserveGateCount: 1,
       accountGateCount: 2,
+      validOwnerCount: 1,
+      accountGateOwnerCount: 1,
     });
     const ownerAccount = required(external.instances[1]);
     const childAccount = required(external.instances[3]);
@@ -270,6 +272,8 @@ describe("Codex usage gate for external Harness Composers", () => {
       ownerCount: 1,
       reserveGateCount: 1,
       accountGateCount: 1,
+      validOwnerCount: 1,
+      accountGateOwnerCount: 1,
     });
     expect(source.store.sub.mock.calls).toHaveLength(calls);
     expect(external.blocked()).toBe(true);
@@ -551,6 +555,8 @@ describe("Codex usage gate for external Harness Composers", () => {
       ownerCount: 1,
       reserveGateCount: 1,
       accountGateCount: 1,
+      validOwnerCount: 1,
+      accountGateOwnerCount: 1,
     });
     expect(f.blocked()).toBe(true);
     expect(f.source.store.sub).toBe(sub);
@@ -560,6 +566,35 @@ describe("Codex usage gate for external Harness Composers", () => {
     expect(inspectComposerCodexUsageGate(f.composer).accountGateCount).toBe(0);
     const duplicate = composerFixture(undefined, { duplicateAccount: true });
     expect(inspectComposerCodexUsageGate(duplicate.composer).accountGateCount).toBe(2);
+  });
+
+  it("audits component ownership without subscribing or projecting gates", () => {
+    const separate = composerFixture(undefined, { childAccount: true });
+    const duplicate = composerFixture(undefined, { duplicateAccount: true });
+    const missing = composerFixture(undefined, { omitReserve: true });
+    for (const [fixture, validOwnerCount] of [
+      [separate, 1],
+      [duplicate, 0],
+      [missing, 0],
+    ] as const) {
+      const calls = fixture.source.store.sub.mock.calls.length;
+      const snapshots = fixture.instances.map((instance) => instance.getSnapshot);
+      expect(inspectComposerCodexUsageGate(fixture.composer)).toMatchObject({ validOwnerCount });
+      expect(fixture.source.store.sub.mock.calls).toHaveLength(calls);
+      expect(fixture.instances.map((instance) => instance.getSnapshot)).toEqual(snapshots);
+      expect(fixture.source.store.set).not.toHaveBeenCalled();
+    }
+    separate.source.setAuthMethod("api-key");
+    expect(inspectComposerCodexUsageGate(separate.composer)).toMatchObject({
+      validOwnerCount: 1,
+      accountGateOwnerCount: 0,
+    });
+    const mixed = desktopStore();
+    mixed.exemptAccountGate.read = (get) =>
+      get(mixed.reserveGate) === true || mixed.accountGate.read(get) === true;
+    expect(
+      inspectComposerCodexUsageGate(composerFixture(mixed, { childAccount: true }).composer),
+    ).toMatchObject({ validOwnerCount: 0 });
   });
 
   it("releases the gates when the Composer disconnects", () => {

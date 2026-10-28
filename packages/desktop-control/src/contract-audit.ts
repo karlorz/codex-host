@@ -54,6 +54,8 @@ export interface RendererContractAuditInspection {
     ownerCount: number;
     reserveGateCount: number;
     accountGateCount: number;
+    validOwnerCount: number;
+    accountGateOwnerCount: number;
   };
   fork: {
     annotatedResponseCount: number;
@@ -214,7 +216,14 @@ export function validateRendererContractAuditInspection(
     ),
     codexUsageGate: integerRecord(
       value.codexUsageGate,
-      ["composerCount", "ownerCount", "reserveGateCount", "accountGateCount"] as const,
+      [
+        "composerCount",
+        "ownerCount",
+        "reserveGateCount",
+        "accountGateCount",
+        "validOwnerCount",
+        "accountGateOwnerCount",
+      ] as const,
       "Renderer Codex usage gate contract",
     ),
     fork: integerRecord(

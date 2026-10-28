@@ -52,7 +52,17 @@ export function parseAppcast(xml) {
   )?.[1];
   const build = item.match(/<sparkle:version>([^<]+)<\/sparkle:version>/u)?.[1];
   if (!version || !build) throw new Error("Appcast item missing version");
-  return { version, build };
+  const release = { version, build };
+  for (const [key, tag] of [
+    ["publishedAt", "pubDate"],
+    ["minimumSystemVersion", "sparkle:minimumSystemVersion"],
+    ["architecture", "sparkle:hardwareRequirements"],
+    ["phasedRolloutInterval", "sparkle:phasedRolloutInterval"],
+  ]) {
+    const value = optionalCapture(item, new RegExp(`<${tag}>([^<]+)</${tag}>`, "u"));
+    if (value) release[key] = value.trim();
+  }
+  return release;
 }
 
 function versionParts(version) {
@@ -74,21 +84,27 @@ export function evaluate(pins, latest) {
   const workParts = versionParts(pins.workVersion);
   const chatParts = versionParts(pins.chatVersion);
   const findings = [];
+  const scope = `The public macOS release feed advertises ${latest.version} build ${latest.build}. Desktop's per-installation updater may offer a different version. This check does not test native voice behavior or installation-specific update availability.`;
   if (isNewer(latestParts, workParts)) {
     findings.push({
       surface: "work-voice",
       title: `compat-daily/work-voice: pin ${pins.workVersion} behind desktop ${latest.version}`,
-      detail: `Work/gateway voice is pinned to ${pins.workVersion} (${pins.workInitial}${pins.overlayAsset ? `, overlay ${pins.overlayAsset}` : ""}). macOS Sparkle latest is ${latest.version} build ${latest.build}.`,
+      detail: `Work/gateway voice is pinned to ${pins.workVersion} (${pins.workInitial}${pins.overlayAsset ? `, overlay ${pins.overlayAsset}` : ""}). ${scope} Work/gateway voice requires qualification for this public release.`,
     });
   }
   if (isNewer(latestParts, chatParts)) {
     findings.push({
       surface: "chat-voice",
       title: `compat-daily/chat-voice: pin ${pins.chatVersion} behind desktop ${latest.version}`,
-      detail: `ChatGPT Chat voice is pinned to ${pins.chatVersion} (${pins.chatInitial}, ${pins.chatStart}). macOS Sparkle latest is ${latest.version} build ${latest.build}. Native Chat start/prewarm on this macOS Desktop is unqualified.`,
+      detail: `ChatGPT Chat voice is pinned to ${pins.chatVersion} (${pins.chatInitial}, ${pins.chatStart}). ${scope} Native Chat start/prewarm requires qualification for this public release.`,
     });
   }
-  return { latest, pins, findings };
+  return {
+    feed: { url: APPCAST_URL, installationAvailability: "not-checked" },
+    latest,
+    pins,
+    findings,
+  };
 }
 
 /** Matching pins clear version drift, independently of live voice acceptance. */

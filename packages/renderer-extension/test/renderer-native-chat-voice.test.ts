@@ -1,7 +1,4 @@
-import {
-  NATIVE_CHAT_VOICE_ASSETS,
-  NATIVE_CHAT_VOICE_VERSION,
-} from "../src/renderer-native-chat-voice-assets.js";
+import { NATIVE_CHAT_VOICE_ASSETS } from "../src/renderer-native-chat-voice-assets.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectNativeChatVoiceBinding,
@@ -473,7 +470,18 @@ function installFixture() {
 
 afterEach(() => vi.useRealTimers());
 describe("native Chat voice lifecycle installation", () => {
-  it.each(NATIVE_CHAT_VOICE_ASSETS.filter((p) => p.version === NATIVE_CHAT_VOICE_VERSION))(
+  it.each([
+    {
+      platform: "darwin",
+      version: "26.1023.51421",
+      initial: "app-initial-bc8256c3cccb.js",
+      shared: "app-shared-e9f258fd3588.js",
+      primary: "app-primary-b7f335b763ca.js",
+      start: "start-voice-a0564cefdc95.js",
+      prewarm: "voice-prewarm-53aefded152c.js",
+    },
+    ...NATIVE_CHAT_VOICE_ASSETS.filter((p) => p.version === "26.1021.31345"),
+  ])(
     "starts $platform Chat through the relocated composer START and primary browser runtime",
     async (assets) => {
       vi.useFakeTimers();
@@ -485,26 +493,42 @@ describe("native Chat voice lifecycle installation", () => {
       f.assets.splice(0, f.assets.length, assets.initial, assets.shared);
       const primary: Record<string, unknown> = {};
       const initializeBrowser = vi.fn(() => {
-        primary.lm = f.initial.aT;
+        primary[assets.version === "26.1023.51421" ? "hm" : "lm"] = f.initial.aT;
       });
-      primary.um = initializeBrowser;
+      primary[assets.version === "26.1023.51421" ? "gm" : "um"] = initializeBrowser;
       const initializeStart = vi.fn();
       f.importModule.mockImplementation(async (url) => {
         if (url.endsWith(assets.initial))
-          return {
-            CQn: f.initial.MOr,
-            PXn: f.initial.CDr,
-            tdn: f.initial.B1n,
-            qXt: f.initial.SPn,
-            Xkn: f.initial.Ycr,
-            ydn: f.initial.n0n,
-            fdn: f.initial.Y1n,
-            yAn: f.initial.Nir,
-          };
+          return assets.version === "26.1023.51421"
+            ? {
+                x1n: f.initial.MOr,
+                MQn: f.initial.CDr,
+                Opn: f.initial.B1n,
+                s$t: f.initial.SPn,
+                Zir: f.initial.Ycr,
+                Kpn: f.initial.n0n,
+                zpn: f.initial.Y1n,
+                ejn: f.initial.Nir,
+              }
+            : {
+                CQn: f.initial.MOr,
+                PXn: f.initial.CDr,
+                tdn: f.initial.B1n,
+                qXt: f.initial.SPn,
+                Xkn: f.initial.Ycr,
+                ydn: f.initial.n0n,
+                fdn: f.initial.Y1n,
+                yAn: f.initial.Nir,
+              };
         if (assets.primary && url.endsWith(assets.primary)) return primary;
         if (url.endsWith(assets.shared))
-          return { Bst: f.shared.Qst, XVt: f.shared.FBt, KNt: f.shared.PNt, Fot: f.shared.Vot };
-        if (url.endsWith(assets.start)) return { r: initializeStart, i: f.start };
+          return assets.version === "26.1023.51421"
+            ? { uct: f.shared.Qst, OHt: f.shared.FBt, wPt: f.shared.PNt, ast: f.shared.Vot }
+            : { Bst: f.shared.Qst, XVt: f.shared.FBt, KNt: f.shared.PNt, Fot: f.shared.Vot };
+        if (url.endsWith(assets.start))
+          return assets.version === "26.1023.51421"
+            ? { t: initializeStart, n: f.start }
+            : { r: initializeStart, i: f.start };
         if (url.endsWith(assets.prewarm)) return { VoiceInstantConnectCacheController: vi.fn() };
         throw new Error("Unaudited module");
       });

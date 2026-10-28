@@ -1,10 +1,7 @@
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bindings";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-hook.js";
-import { selectVoiceAssets } from "./renderer-voice-assets.js";
-import {
-  NATIVE_CHAT_VOICE_ASSETS,
-  NATIVE_CHAT_VOICE_VERSION,
-} from "./renderer-native-chat-voice-assets.js";
+import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
+import { NATIVE_CHAT_VOICE_ASSETS } from "./renderer-native-chat-voice-assets.js";
 import {
   INFERENCE_GATE,
   bindVoiceCapabilitySubscriptions,
@@ -283,7 +280,12 @@ export function installVoiceSettingsExplanation(
   if (globals[GLOBAL]) return globals[GLOBAL] as { dispose(): void };
   const config = readCpaLiveVoiceHookConfig(target);
   if (!config) return { dispose() {} };
-  if (config.desktopVersion && config.desktopVersion !== NATIVE_CHAT_VOICE_VERSION)
+  if (
+    !supportsVoiceVersion(
+      NATIVE_CHAT_VOICE_ASSETS.filter((profile) => !!profile.settings),
+      config.desktopVersion,
+    )
+  )
     return { dispose() {} };
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -346,16 +348,20 @@ export function installVoiceSettingsExplanation(
           ),
         );
         if (disposed) return;
-        if (typeof initial.l0n !== "function" || typeof settings.VoiceSettings !== "function")
+        const latest = assets.version === "26.1023.51421";
+        const initialize = latest ? initial.N4n : initial.l0n;
+        if (typeof initialize !== "function" || typeof settings.VoiceSettings !== "function")
           return;
-        initial.l0n();
-        const dictationMode = initial.mW as SettingsModules["dictationMode"];
+        initialize();
+        const dictationMode = (
+          latest ? initial.KG : initial.mW
+        ) as SettingsModules["dictationMode"];
         modules = {
-          appScope: shared.Bst as SettingsModules["appScope"],
+          appScope: (latest ? shared.uct : shared.Bst) as SettingsModules["appScope"],
           page: settings.VoiceSettings,
-          access: initial.k5n,
-          capability: initial.c0n as SettingsModules["capability"],
-          gates: initial.Cnr as Family,
+          access: latest ? initial.yer : initial.k5n,
+          capability: (latest ? initial.M4n : initial.c0n) as SettingsModules["capability"],
+          gates: (latest ? initial.Par : initial.Cnr) as Family,
           ...(dictationMode ? { dictationMode } : {}),
         };
       }

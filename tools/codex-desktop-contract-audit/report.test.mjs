@@ -26,7 +26,14 @@ const contracts = {
     textBodyCount: 0,
     textBodyOwnerCount: 0,
   },
-  codexUsageGate: { composerCount: 1, ownerCount: 1, reserveGateCount: 1, accountGateCount: 1 },
+  codexUsageGate: {
+    composerCount: 1,
+    ownerCount: 1,
+    reserveGateCount: 1,
+    accountGateCount: 1,
+    validOwnerCount: 1,
+    accountGateOwnerCount: 1,
+  },
   fork: { annotatedResponseCount: 0, candidateButtonCount: 0, verifiedButtonCount: 0 },
   production: {
     bindingPresent: false,
@@ -72,13 +79,41 @@ describe("Codex Desktop contract audit report", () => {
     });
     expect(verdictFor({ ownerCount: 2 })?.verdict).toBe("confirmed-impact");
     // API-key sign-in: the Account gate returns before reading usage.
-    expect(verdictFor({ accountGateCount: 0 })).toMatchObject({
+    expect(verdictFor({ accountGateCount: 0, accountGateOwnerCount: 0 })).toMatchObject({
       verdict: "unverified",
       reason: "codex-usage-account-gate-dormant",
     });
     expect(verdictFor({ composerCount: 0, ownerCount: 0, reserveGateCount: 0 })?.verdict).toBe(
       "unverified",
     );
+  });
+
+  it("uses verified component ownership rather than aggregate Account subscription count", () => {
+    const surfaceFor = (gate) =>
+      buildSurfaceResults({
+        ...contracts,
+        codexUsageGate: { ...contracts.codexUsageGate, ...gate },
+      }).find(({ id }) => id === "codex-usage-gate");
+    expect(surfaceFor({ accountGateCount: 2 })).toMatchObject({ verdict: "no-impact" });
+    expect(surfaceFor({ accountGateCount: 2, validOwnerCount: 0 })).toMatchObject({
+      verdict: "confirmed-impact",
+    });
+    // Two observed subscriptions in one Composer cannot qualify a second dormant Composer.
+    expect(
+      surfaceFor({
+        composerCount: 2,
+        ownerCount: 2,
+        reserveGateCount: 2,
+        validOwnerCount: 2,
+        accountGateOwnerCount: 1,
+        accountGateCount: 2,
+      }),
+    ).toMatchObject({ verdict: "unverified", reason: "codex-usage-account-gate-dormant" });
+    const older = structuredClone(reportFor(buildSurfaceResults(contracts)));
+    const gate = older.surfaces.find(({ id }) => id === "codex-usage-gate");
+    delete gate.observed.validOwnerCount;
+    delete gate.observed.accountGateOwnerCount;
+    expect(() => validateAuditReport(older, { baseline: true })).not.toThrow();
   });
 
   it("accepts a reviewed baseline that predates a newer surface", () => {
