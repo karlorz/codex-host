@@ -83,6 +83,8 @@ Desktop 的自动执行读取本地跟进存储，不会把仅存在于 Host `th
 
 Host 成功确认 `thread/queue/start` 后，Renderer 通过 Desktop `getTurnCoordinator().mutate` 只移除本次已确认的稳定 queue item ID；请求期间新增的消息会保留。该步骤只同步队列状态，不对私有 Composer DOM 做通用清空。
 
+External Thread 的 stream-owner 投影在同一绑定内保持对象引用稳定。Desktop 的 `executeTurnStart` 在观察提交时以引用相等判断 owner 是否仍然有效；每次读取生成新对象会使已接受的提交失去有效性，导致本地消息停留在 `sending` 或 `outcome-unknown`，并阻塞后续消息。官方 Thread 仍返回原生 stream-role 对象。
+
 Avatar overlay 是独立的 Desktop webcontents，在语音、IAB 或 Computer Use 之后可以成为该 Thread 的 stream owner。主窗口的 Renderer Binding 不会注入 overlay；`cpa-live-voice-hook.js` 在 overlay 里发现 RequestManager 后安装 steer 包装，并把 External Thread 的 stream role 视为 owner，使 follower 窗口可以把跟进消息写入 Host `thread/queue/*`。Overlay 作为 owner 通过 `thread/queue/start` 执行队列。缺少 type:text 的 `turn/start` 会从 Host 队列或本地队列条目恢复文本。
 
 The Controller installs the production Renderer binding in local chat windows whose `app://-/index.html` URL has a single `initialRoute=/local/...` parameter, as well as the root window. Its health checks discover new local chat windows and restore missing bindings without reloading the page or changing composer drafts. Healthy bindings are retained. Avatar overlay receives only its dedicated hook; Spotlight and detached-window routes are excluded from the local chat installation.

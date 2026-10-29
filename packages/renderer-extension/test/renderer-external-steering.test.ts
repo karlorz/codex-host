@@ -171,6 +171,38 @@ describe("external direction changes use normal Desktop start presentation", () 
     f.dispose();
   });
 
+  it("preserves stream-owner identity throughout Desktop's submission observation", async () => {
+    const f = fixture();
+    f.manager.getConversation = (threadId: string) => ({
+      id: threadId,
+      modelProvider: "codexhost",
+    });
+    f.originalStreamRole.mockReturnValue({ role: "follower" });
+    const start = f.manager.startTurn.getMockImplementation();
+    if (!start) throw new Error("Synthetic Desktop start implementation is unavailable");
+    f.manager.startTurn.mockImplementation(async (...args: unknown[]) => {
+      const threadId = args[0] as string;
+      const owner = f.manager.getStreamRole(threadId);
+      // Desktop's executeTurnStart observes the owner by reference across the request.
+      const isCurrent = () => owner.role === "owner" && f.manager.getStreamRole(threadId) === owner;
+      await Promise.resolve();
+      if (!isCurrent()) throw new Error("Submission stream owner changed");
+      const response = await start(...args);
+      if (!isCurrent()) throw new Error("Submission stream owner changed");
+      return response;
+    });
+    try {
+      await expect(f.manager.steerTurn(...f.args)).resolves.toEqual({ turnId: "replacement" });
+      expect(f.rpc).toHaveBeenCalledWith(
+        "turn/steer",
+        expect.objectContaining({ clientUserMessageId: "message" }),
+        f.requestOptions,
+      );
+    } finally {
+      f.dispose();
+    }
+  });
+
   it("restores queued follow-up text onto an empty overlay turn/start", async () => {
     const f = fixture();
     f.queue.set([

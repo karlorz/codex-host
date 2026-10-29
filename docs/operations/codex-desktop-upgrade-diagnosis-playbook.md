@@ -12,6 +12,28 @@
 - `docs/archive/codex-desktop-incidents/26.814-compatibility-debt.md`
 - `docs/archive/codex-desktop-incidents/26.908-request-manager-wrapper.md`（Fiber hook 把 Request Manager 包进 `{ hostId, manager, status }` 后，连接检查全部失败）
 
+## External messages stuck in the local submission queue
+
+Desktop can retain a message as `sending` or `outcome-unknown` after the Harness
+has completed it. That local head blocks later submissions even when the Host
+queue is empty and the Thread is idle. Inspect all three states independently:
+the local Turn Coordinator queue, Host `thread/queue/list`, and native history.
+
+Desktop's `executeTurnStart` captures the stream-owner object and checks its
+reference identity while observing the request. The External Thread wrapper in
+`renderer-external-steering.ts` must return a stable owner object for the lifetime
+of its binding. Repeated reads returning equal fields in different objects fail
+this check. Probe reference equality on the actual Manager used by the Composer;
+the primary window and avatar overlay can have different stream owners.
+
+For recovery, verify whether the blocked message already has a completed native
+Turn before changing its local record. Reconcile only a confirmed delivered
+submission, preserving later messages and the Composer draft. An idle Thread or
+an empty Host queue alone does not establish delivery. Do not replay an
+`outcome-unknown` message merely to unblock the queue. After recovery, verify the
+remaining message in native history and check both queue counts; an active
+Thread alone does not prove that the intended message arrived.
+
 ## Recovering “ChatGPT hit a snag” without losing session state
 
 This screen can be a React render failure while Desktop, Host, and the native

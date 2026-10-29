@@ -444,6 +444,8 @@ export function installRendererExternalSteering(
   };
 
   const originalRole = manager.getStreamRole;
+  // Desktop compares the owner object by reference while observing a submission.
+  const externalOwnerRole = { role: "owner" };
   const getStreamRole: RendererMethod | undefined =
     typeof originalRole === "function"
       ? (...args: unknown[]) => {
@@ -455,7 +457,7 @@ export function installRendererExternalSteering(
               conversation.id === threadId &&
               conversation.modelProvider === "codexhost"
             ) {
-              return { role: "owner" };
+              return externalOwnerRole;
             }
           }
           return originalRole.apply(manager, args);
