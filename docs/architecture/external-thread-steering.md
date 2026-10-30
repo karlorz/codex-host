@@ -79,6 +79,8 @@ Host 和 Renderer 接入必须配套发布；仅升级 Host、让旧 Renderer �
 
 Codex Desktop **26.903.61454 / build 8378** 起，在功能开关及 app-server 版本满足条件时使用服务端队列。运行中追加消息会先调用 `thread/queue/list`，再调用 `thread/queue/add`。Desktop **26.1016** 及之后的 Manager 带有 `getStreamRole` 时，`renderer-external-queue.ts` 不再把外部 Thread 从 `serverQueue.isEnabled` 里排除，因此跟进消息走 Host 的 `thread/queue/*`。Host 按官方列表信封返回 `{ data, nextCursor }`。队列里的文本项写成 Desktop `type: "text"`（`input_text` 入队时也转成该类型），并带有 `text_elements` 数组（缺省 `[]`），供 Desktop **26.1021.31345 / build 21828** 读取 `text_elements.length`。空的 `turn/start` 会消费 Host 队列中匹配或队首的跟进文本；队列为空时仍返回 `-32602`。官方 Codex Thread 仍使用原生 app-server 队列。
 
+Manager 位于主进程的 Desktop **26.1027** 使用 Host 实现的真实服务端队列，见[外部 Thread 跟进消息队列](external-thread-queue.md)。Desktop 本地不保存队列；Turn 正常完成后由 Host 自动推进，晚到的入队也会补查。以下本地队列补丁仅用于 Renderer 仍持有 Manager 的路径。
+
 Desktop 的自动执行读取本地跟进存储，不会把仅存在于 Host `thread/queue/*` 的条目当作下一封待发消息。因此 `renderer-external-queue.ts` 在 stream owner 上监听 `turn/completed` 与 `thread/queue/changed`：外部 Thread 空闲且队首未暂停时调用 `thread/queue/start`。安装时先保存原生 `getStreamRole`，不受后续 steer 包装影响；follower 窗口不执行。中断的 Turn 不自动执行。
 
 Host 成功确认 `thread/queue/start` 后，Renderer 通过 Desktop `getTurnCoordinator().mutate` 只移除本次已确认的稳定 queue item ID；请求期间新增的消息会保留。该步骤只同步队列状态，不对私有 Composer DOM 做通用清空。
