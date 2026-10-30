@@ -287,7 +287,7 @@ CodexHost does it differently:
   <tr>
     <td>
       <strong>微信交流群</strong><br />
-      <sub>Scan the QR code to join our WeChat group and chat about CodexHost.</sub>
+      <sub>Scan the QR code to add me on WeChat (note “CodexHost”) and I will invite you to our WeChat group.</sub>
       <ul>
         <li><sub>Get help with installation</sub></li>
         <li><sub>Share feature ideas and feedback</sub></li>
@@ -297,7 +297,7 @@ CodexHost does it differently:
       <sub><strong>Contributions are welcome.</strong></sub>
     </td>
     <td align="center">
-      <img width="230" alt="WeChat group QR code" src="docs/imgs/wechat-group-4-qrcode-2026-10-17.jpg" />
+      <img width="230" alt="WeChat contact QR code" src="docs/imgs/wechat-contact-qrcode.jpg" />
     </td>
   </tr>
 </table>

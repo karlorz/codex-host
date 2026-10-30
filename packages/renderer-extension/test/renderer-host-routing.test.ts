@@ -107,25 +107,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("carries the adapter's selected Harness across native new-voice launch and clears for Codex", async () => {
+it("carries the selected draft Harness across native new-voice launch and clears for Codex", async () => {
   const fixture = await setup("local");
   try {
     const request = {
       source: "composer_button_new_thread",
       activeCollaborationMode: { mode: "default", settings: { model: "gpt-6.1-sol" } },
     };
-    expect(fixture.adapter.applyAgent("grok")).toBe(true);
     const expected = encodeHarnessPluginRoute({ harnessId: harnessIdSchema.parse("grok") });
+    const policy = window.__codexhostHostRoutingV1?.forComposer()?.policy;
+    expect(policy?.select(expected)).toBe(true);
     const overlayRequest = structuredClone(
       routeExternalVoiceLaunch(request, window.__codexhostHostRoutingV1),
     );
     expect(overlayRequest).toMatchObject({
       activeCollaborationMode: { settings: { model: expected } },
     });
-    expect(fixture.adapter.applyAgent("codex")).toBe(true);
+    expect(policy?.select(null)).toBe(true);
     expect(routeExternalVoiceLaunch(request, window.__codexhostHostRoutingV1)).toBe(request);
     // An owner replacement retires its selection instead of leaking to the new connection.
-    expect(fixture.adapter.applyAgent("grok")).toBe(true);
+    expect(policy?.select(expected)).toBe(true);
     fixture.managers.delete("local");
     expect(routeExternalVoiceLaunch(request, window.__codexhostHostRoutingV1)).toBe(request);
   } finally {
@@ -295,17 +296,17 @@ it("retires only a disconnected Host and rejects new requests on its captured cl
   }
 });
 
-it("does not copy an external carrier to a native remote Composer", async () => {
+it("rejects an unidentified external selection without changing local or remote Codex", async () => {
   const { adapter, local, remote, fiber } = await setup("local");
   try {
-    expect(adapter.applyAgent("pi")).toBe(true);
+    expect(adapter.applyAgent("pi")).toBe(false);
     fiber.memoizedProps.executionTargetHostId = remoteId;
     expect(adapter.modelControl?.currentHostId?.()).toBe(remoteId);
     await remote.requestClient.sendRequest("thread/start", { model: "native-model" });
     expect(remote.nativeSend).toHaveBeenCalledWith("thread/start", { model: "native-model" });
     await local.requestClient.sendRequest("thread/start", { model: "native-model" });
     expect(local.nativeSend).toHaveBeenCalledWith("thread/start", {
-      model: encodeHarnessPluginRoute({ harnessId: piRequest.harnessId }),
+      model: "native-model",
     });
   } finally {
     adapter.dispose();
