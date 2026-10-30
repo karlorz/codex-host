@@ -69,14 +69,14 @@ function terminalOutcome(stopReason: string): HistoricalTurnOutcome {
 }
 
 const systemReminderPattern = /^\s*<system-reminder>[\s\S]*$/u;
-const taskCompletedTurnKeyPattern = /^task-completed-/u;
+const notificationTurnKeyPattern = /^(?:task|subagent)-completed-/u;
 
 function isSyntheticGrokUserText(text: string): boolean {
   return systemReminderPattern.test(text);
 }
 
 function isSyntheticGrokTurnKey(nativeTurnKey: string): boolean {
-  return taskCompletedTurnKeyPattern.test(nativeTurnKey);
+  return notificationTurnKeyPattern.test(nativeTurnKey);
 }
 
 function isHostTurnEvent(event: GrokTransportEvent): boolean {
@@ -374,16 +374,22 @@ export function mapGrokReplay(
     items = [];
   };
 
-  // Native goal continuations use hidden user input but own a real prompt index and
-  // terminal ID. Task-completed reminders remain excluded from conversation history.
+  // Native goal continuations own a prompt index and a new terminal ID. Background
+  // notifications and interruption records reusing an earlier ID are not new Turns.
   const durableSynthetic = new Set<GrokTransportEvent>();
+  const seenTerminalKeys = new Set<string>();
   let candidate: GrokTransportEvent | undefined;
   for (const event of replay) {
     if (event.type === "user.text")
       candidate = explicitPromptIndex(event) !== null ? event : undefined;
     else if (event.type === "turn.completed") {
-      if (candidate && !isSyntheticGrokTurnKey(event.nativeTurnKey))
+      if (
+        candidate &&
+        !isSyntheticGrokTurnKey(event.nativeTurnKey) &&
+        !seenTerminalKeys.has(event.nativeTurnKey)
+      )
         durableSynthetic.add(candidate);
+      seenTerminalKeys.add(event.nativeTurnKey);
       candidate = undefined;
     } else if (event.type === "rewind.marker") candidate = undefined;
   }

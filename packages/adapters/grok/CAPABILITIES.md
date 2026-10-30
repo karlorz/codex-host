@@ -18,7 +18,7 @@
 | A4 | 创建 Session | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
 | A5 | 执行 Turn | 必做 | P0 | 支持 | src/grok-adapter.ts | test/grok-adapter.test.ts |  |
 | A6 | 取消 | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
-| A7 | 只读快照 | 必做 | P0 | 支持 | src/grok-history.ts | test/grok-history.test.ts |  |
+| A7 | 只读快照 | 必做 | P0 | 支持 | src/grok-history.ts | test/grok-history.test.ts | Hidden worker Turns require a new native terminal ID; task/subagent notifications and repeated interruption IDs are excluded |
 | A8 | 持久身份 + resume | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
 | A9 | 错误与并发 | 必做 | P0 | 支持 | src/grok-adapter.ts | test/grok-adapter.test.ts |  |
 | A10 | 关闭 | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |

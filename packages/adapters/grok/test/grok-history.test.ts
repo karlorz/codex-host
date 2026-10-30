@@ -14,6 +14,61 @@ import {
 const grokHarnessId = harnessIdSchema.parse("grok");
 
 describe("Grok history Fork mapping", () => {
+  it.each(["task-completed-child", "subagent-completed-child"])(
+    "excludes %s notifications and repeated interruption IDs while retaining goal workers",
+    (notificationKey) => {
+      const snapshot = mapGrokReplay(
+        [
+          { type: "user.text", text: "first", metadata: { promptIndex: 84 } },
+          { type: "agent.text", text: "answer" },
+          { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
+          {
+            type: "user.text",
+            text: "<system-reminder>Background task done.</system-reminder>",
+            metadata: { promptIndex: 85, hideFromScrollback: true },
+          },
+          { type: "turn.completed", nativeTurnKey: notificationKey, stopReason: "end_turn" },
+          {
+            type: "user.text",
+            text: "<system-reminder>Continue watching.</system-reminder>",
+            metadata: { promptIndex: 86, hideFromScrollback: true },
+          },
+          { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "interrupted" },
+          {
+            type: "user.text",
+            text: "<system-reminder>A goal has been set.</system-reminder>",
+            metadata: { promptIndex: 87, hideFromScrollback: true },
+          },
+          { type: "agent.text", text: "worker output" },
+          { type: "turn.completed", nativeTurnKey: "goal-worker", stopReason: "interrupted" },
+          { type: "user.text", text: "next", metadata: { eventId: "next-user" } },
+          { type: "turn.completed", nativeTurnKey: "prompt-2", stopReason: "end_turn" },
+        ],
+        grokHarnessId,
+        "session-1",
+        "/workspace",
+      );
+
+      expect(snapshot.turns).toHaveLength(3);
+      expect(snapshot.turns.map((turn) => turn.nativeTurnRef.nativeTurnKey)).toEqual([
+        "prompt-1",
+        "goal-worker",
+        "prompt-2",
+      ]);
+      expect(snapshot.turns.map((turn) => turn.checkpoint?.checkpointId)).toEqual([
+        "84",
+        "87",
+        "88",
+      ]);
+      expect(snapshot.turns[0]?.outcome).toEqual({ status: "succeeded" });
+      expect(snapshot.turns[1]).toMatchObject({
+        input: [],
+        items: [{ item: { type: "agentMessage", text: "worker output" } }],
+        outcome: { status: "failed" },
+      });
+    },
+  );
+
   it("assigns Native Prompt Index Checkpoints and skips synthetic user runs", () => {
     const snapshot = mapGrokReplay(
       [
