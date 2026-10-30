@@ -1,4 +1,5 @@
 import { createGrokUsageStatistics } from "./usage-statistics.js";
+import { grokCommandCatalog, grokGoalPrompt } from "./grok-commands.js";
 import { randomUUID } from "node:crypto";
 import { grokTextItemId } from "./grok-text-item-id.js";
 import { readGrokCredentials } from "./grok-credential-export.js";
@@ -60,7 +61,6 @@ import {
   type TurnSteerCommand,
 } from "@codexhost/harness-adapter";
 import {
-  harnessCommandCatalogSchema,
   type HarnessCommandCatalog,
   harnessIdSchema,
   type HarnessPermissionModeId,
@@ -127,7 +127,7 @@ import {
 } from "./grok-generated-image.js";
 import { forkGrokSession } from "./grok-fork.js";
 import { mapGrokReplay } from "./grok-history.js";
-import { rewindGrokLastTurn } from "./grok-rewind.js";
+import { rewindGrokSession } from "./grok-rewind.js";
 import {
   GROK_DEFAULT_PERMISSION_MODE_ID,
   GROK_PERMISSION_MODE_CATALOG,
@@ -254,6 +254,7 @@ interface ActiveTurn {
   questions: GrokQuestions;
   cancellationRequested: boolean;
   beforeNativeTurnKeys: Set<string>;
+  catalogCommand: boolean;
   completion: Promise<void>;
   resolveCompletion(): void;
 }
@@ -261,18 +262,6 @@ interface ActiveTurn {
 type SessionPhase = "open" | "closing" | "closed" | "faulted";
 
 const grokHarnessId = harnessIdSchema.parse("grok");
-const grokCommandCatalog = harnessCommandCatalogSchema.parse({
-  commands: [
-    {
-      id: "grok.compact",
-      invocation: "/compact",
-      localizations: { "zh-CN": { label: "压缩上下文", description: "压缩当前对话上下文" } },
-      label: "Compact context",
-      description: "Compact the current conversation context",
-      argumentMode: "text",
-    },
-  ],
-});
 function capabilitiesForModels(modelState: GrokModelState): HarnessSessionCapabilities {
   return {
     configuration: {
@@ -281,7 +270,12 @@ function capabilitiesForModels(modelState: GrokModelState): HarnessSessionCapabi
       selectPermissionMode: true,
       permissionModeScope: "live",
     },
-    history: { fork: true, forkAcrossCwd: true, rollbackLastTurn: true },
+    history: {
+      fork: true,
+      forkAcrossCwd: true,
+      rollbackLastTurn: true,
+      rollbackToCheckpoint: true,
+    },
     subagents: { observe: true, readTranscript: true },
   };
 }
@@ -541,6 +535,13 @@ class GrokHarnessSession implements HarnessSession {
     if (command.type === "model.select") return this.#selectModel(command);
     if (command.type === "thinking.select") return this.#selectThinking(command);
     if (command.type === "permissionMode.select") return this.#selectPermissionMode(command);
+    return this.#startTurn(command);
+  }
+
+  async #startTurn(
+    command: TurnStartCommand,
+    catalogCommand = false,
+  ): Promise<HarnessResult<TurnStartAccepted>> {
     if (this.#active || this.#configuring) {
       return {
         ok: false,
@@ -596,6 +597,7 @@ class GrokHarnessSession implements HarnessSession {
       beforeNativeTurnKeys: new Set(
         this.#snapshot.turns.map((turn) => turn.nativeTurnRef.nativeTurnKey),
       ),
+      catalogCommand,
       completion,
       resolveCompletion,
     };
@@ -642,6 +644,18 @@ class GrokHarnessSession implements HarnessSession {
   async #executeHarnessCommand(
     command: HarnessCommandInvocation,
   ): Promise<HarnessResult<HarnessCommandAccepted>> {
+    if (command.commandId === "grok.goal") {
+      const prompt = grokGoalPrompt(command.arguments);
+      if (!prompt.ok) return prompt;
+      return this.#startTurn(
+        {
+          type: "turn.start",
+          turnId: command.turnId,
+          input: [{ type: "text", text: prompt.value }],
+        },
+        true,
+      );
+    }
     const livePrompt = liveHarnessCommandPrompt(
       this.#liveCommandCatalog(),
       GROK_LIVE_COMMAND_ID_PREFIX,
@@ -650,11 +664,14 @@ class GrokHarnessSession implements HarnessSession {
     );
     if (livePrompt !== null) {
       // ACP invokes advertised commands as prompt text starting with `/name`.
-      const started = await this.execute({
-        type: "turn.start",
-        turnId: command.turnId,
-        input: [{ type: "text", text: livePrompt }],
-      });
+      const started = await this.#startTurn(
+        {
+          type: "turn.start",
+          turnId: command.turnId,
+          input: [{ type: "text", text: livePrompt }],
+        },
+        true,
+      );
       return started.ok ? { ok: true, value: { turnId: command.turnId } } : started;
     }
     if (command.commandId !== "grok.compact") {
@@ -726,6 +743,7 @@ class GrokHarnessSession implements HarnessSession {
       ),
       cancellationRequested: false,
       beforeNativeTurnKeys: new Set(),
+      catalogCommand: true,
       completion,
       resolveCompletion,
     };
@@ -1597,12 +1615,23 @@ class GrokHarnessSession implements HarnessSession {
     let history: GrokTransportEvent[] = [];
     let nativeTurnRef: NativeTurnRef | undefined;
     let checkpoint: NativeCheckpointRef | undefined;
+    let ephemeral = false;
     try {
       history = await this.#refreshSnapshot();
       const created = this.#snapshot.turns.filter(
         (turn) => !active.beforeNativeTurnKeys.has(turn.nativeTurnRef.nativeTurnKey),
       );
-      if (created.length !== 1) {
+      const lastUser = history.findLast((event) => event.type === "user.text");
+      ephemeral =
+        created.length === 0 &&
+        active.catalogCommand &&
+        outcome.status === "succeeded" &&
+        response?.stopReason === "end_turn" &&
+        response._meta?.totalTokens === 0 &&
+        lastUser?.type === "user.text" &&
+        lastUser.text === active.command.input.map(({ text }) => text).join("\n") &&
+        (lastUser?.metadata?.hostTurn === true || lastUser?.metadata?.host_turn === true);
+      if (created.length !== 1 && !ephemeral) {
         throw new Error(
           `Grok Turn persisted ${created.length} new Native Turns; exactly one is required`,
         );
@@ -1634,7 +1663,13 @@ class GrokHarnessSession implements HarnessSession {
     }
     const usage = sessionUsageFromHistory(history);
     await this.#refreshCredits().catch(() => undefined);
-    this.#finish(active, checkpoint ? { ...outcome, checkpoint } : outcome, usage, nativeTurnRef);
+    this.#finish(
+      active,
+      checkpoint ? { ...outcome, checkpoint } : outcome,
+      usage,
+      nativeTurnRef,
+      ephemeral,
+    );
   }
 
   #finish(
@@ -1642,6 +1677,7 @@ class GrokHarnessSession implements HarnessSession {
     outcome: TurnOutcome,
     usage: HostUsage | null = null,
     nativeTurnRef?: NativeTurnRef,
+    ephemeral = false,
   ): void {
     if (this.#active !== active) return;
     const itemOutcome: HostItemOutcome = outcome;
@@ -1673,6 +1709,7 @@ class GrokHarnessSession implements HarnessSession {
       type: "turn.completed",
       turnId: active.command.turnId,
       ...(nativeTurnRef ? { nativeTurnRef } : {}),
+      ...(ephemeral ? { ephemeral: true } : {}),
       outcome,
     });
     active.resolveCompletion();
@@ -1988,7 +2025,7 @@ export class GrokAdapter implements HarnessAdapter {
     let initialPermissionModeId = requestedPermissionModeId;
     try {
       let opened: GrokOpenResult | undefined;
-      if (input.kind === "rollbackLastTurn") {
+      if (input.kind === "rollbackLastTurn" || input.kind === "rollbackToCheckpoint") {
         const sourceRef = nativeSessionRefSchema.safeParse(input.sourceRef);
         if (!sourceRef.success || sourceRef.data.harnessId !== this.harnessId) {
           await transport.close().catch(() => undefined);
@@ -2006,10 +2043,11 @@ export class GrokAdapter implements HarnessAdapter {
             entry.initialState.nativeRef?.nativeSessionId === sourceRef.data.nativeSessionId,
         );
         sourceConfiguration = sourceSession?.currentConfiguration();
-        const rewound = await rewindGrokLastTurn({
+        const rewound = await rewindGrokSession({
           cwd,
           harnessId: this.harnessId,
           sourceRef: sourceRef.data,
+          ...(input.kind === "rollbackToCheckpoint" ? { checkpoint: input.checkpoint } : {}),
           locateSource: (sessionId) => transport.locateSession(sessionId),
           readHistory: (historyCwd, sessionId) => transport.readHistory(sessionId, historyCwd),
           rewindAndLoad: async (params) => {
@@ -2080,7 +2118,7 @@ export class GrokAdapter implements HarnessAdapter {
           error: {
             code: "nativeFailure",
             message:
-              input.kind === "rollbackLastTurn"
+              input.kind === "rollbackLastTurn" || input.kind === "rollbackToCheckpoint"
                 ? "Grok Native Rewind did not open a Session"
                 : "Grok Native Fork did not open a Session",
             retryable: true,
@@ -2095,8 +2133,13 @@ export class GrokAdapter implements HarnessAdapter {
       const nativeModelId = modelState.currentModel.id;
       const nativeThinkingOptionId = modelState.currentThinkingOptionId;
       const retainedConfiguration = sourceConfiguration;
-      if ((input.kind === "rollbackLastTurn" || input.kind === "fork") && retainedConfiguration) {
-        const operation = input.kind === "rollbackLastTurn" ? "Rewind" : "Fork";
+      if (
+        (input.kind === "rollbackLastTurn" ||
+          input.kind === "rollbackToCheckpoint" ||
+          input.kind === "fork") &&
+        retainedConfiguration
+      ) {
+        const operation = input.kind === "fork" ? "Fork" : "Rewind";
         initialPermissionModeId =
           retainedConfiguration.permissionModeId ?? GROK_DEFAULT_PERMISSION_MODE_ID;
         const catalogModel = modelState.catalog.models.find(
@@ -2179,7 +2222,10 @@ export class GrokAdapter implements HarnessAdapter {
       await transport.setPermissionMode(initialPermissionModeId);
       const history = await transport.getHistory();
       let initialUsage =
-        input.kind === "resume" || input.kind === "fork" || input.kind === "rollbackLastTurn"
+        input.kind === "resume" ||
+        input.kind === "fork" ||
+        input.kind === "rollbackLastTurn" ||
+        input.kind === "rollbackToCheckpoint"
           ? combineUsage(sessionUsageFromHistory(history), usageFromSignals(opened.signals))
           : null;
       if (contextWindow !== undefined && initialUsage?.contextUsedTokens !== undefined) {

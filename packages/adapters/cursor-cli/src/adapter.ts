@@ -199,6 +199,16 @@ export class CursorAdapter implements HarnessAdapter {
     return result;
   }
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.#closed) return rejected("invalidState", "Cursor adapter is closed");
     if (input.kind === "fork" || input.kind === "rollbackLastTurn") {
       const controller = new AbortController();
@@ -213,7 +223,10 @@ export class CursorAdapter implements HarnessAdapter {
     return this.#openSession(input);
   }
   async #openSession(
-    input: Exclude<OpenSessionInput, ForkSessionInput | RollbackLastTurnSessionInput>,
+    input: Exclude<
+      OpenSessionInput,
+      ForkSessionInput | RollbackLastTurnSessionInput | { kind: "rollbackToCheckpoint" }
+    >,
     prepared?: CursorTransport,
   ): Promise<HarnessResult<HarnessSession>> {
     if (input.kind === "resume" && input.nativeRef.harnessId !== this.harnessId)

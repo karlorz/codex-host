@@ -38,7 +38,7 @@
 |---|---|---|---|
 | `harnessId` | ✓ | 与 Manifest 的 `id` 一致 | [会话核心](spec-session-core.md) |
 | `inspect(input?)` | ✓ | 检查安装、认证、Catalog 和能力；`purpose:"availability"` 是轻量模式 | [会话核心](spec-session-core.md#检查inspect) |
-| `open(input)` | ✓ | create / resume / fork / rollbackLastTurn | [会话核心](spec-session-core.md#打开open)、[历史](spec-history.md) |
+| `open(input)` | ✓ | create / resume / fork / rollbackLastTurn / optional rollbackToCheckpoint | [会话核心](spec-session-core.md#打开open)、[历史](spec-history.md) |
 | `close()` | ✓ | 幂等地释放共享资源 | [会话核心](spec-session-core.md#命令并发与错误) |
 | `installation(action)` | | 检查或更新原生 CLI 的版本 | [连接页](spec-connections.md#版本检查与更新) |
 | `install()` | | 首次安装原生 CLI | [连接页](spec-connections.md#首次安装) |

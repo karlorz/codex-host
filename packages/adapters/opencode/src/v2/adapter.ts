@@ -119,6 +119,16 @@ export class V2Adapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     try {
       input = { ...input, cwd: fs.realpathSync(input.cwd) };
     } catch (error) {

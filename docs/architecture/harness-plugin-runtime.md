@@ -332,3 +332,9 @@ DeepSeek 插件通过自身的 HTTP/WebSocket 实现连接受支持的本机 DSH
 - 恢复、Pi/DeepSeek 导入、委派、协议路由和 Renderer 的定向回归。
 
 这些是合成测试、构建和分离 Bundle 冒烟检查，不等同于真实 Codex Desktop、所有原生 Harness、macOS Broker、SSH 远端或完整安装/升级验收。后续仍须按架构方案的能力基线和发布 Gate 完成迁移与验证。
+
+## Optional conversation checkpoint rollback
+
+`HarnessSessionCapabilities.history.rollbackToCheckpoint` is optional and defaults to unavailable when omitted. A supporting plugin accepts `open({ kind: "rollbackToCheckpoint", sourceRef, checkpoint, cwd, ...configuration })` and removes the selected checkpoint's Turn and its entire suffix without restoring workspace files. This boundary differs from Fork, which retains the selected Turn. Host selects this path by capability, preserves the existing Host Turn prefix, and commits with expected revision and Native Session Ref checks. Existing last-Turn rollback and Fork fallback remain available to plugins without the extension. Plugins that do not support the new open kind must reject it explicitly.
+
+Native identity, exact retained prefix and configuration must be validated. An in-place native mutation cannot be rolled back by a failed Host Mapping Store transaction; plugins must document that failure boundary. Grok's native translation and verification limits are described in [Grok goals and history](../harnesses/grok/goals-and-history.md).

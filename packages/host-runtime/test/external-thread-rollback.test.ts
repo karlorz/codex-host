@@ -184,3 +184,97 @@ describe.each(["last-Turn", "Fork-derived"] as const)("%s rollback preparation",
     }
   });
 });
+
+describe("checkpoint rollback on an ordinary Thread", () => {
+  it.each([2, 3])("removes %i Turns without requiring Fork lineage", async (numTurns) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-checkpoint-rollback-"));
+    const store = new MappingStore({ directory });
+    const repository = new ExternalThreadRepository(store);
+    const adapter = new FakeHarnessAdapter(harnessId);
+    const adapters = new Map<ExternalHarnessId, HarnessAdapter>([["pi", adapter]]);
+    const runtime = new ExternalThreadRuntime({
+      adapters,
+      repository,
+      consumeOutputs: async () => undefined,
+      diagnose: () => undefined,
+    });
+    const nativeRef = nativeSessionRefSchema.parse({
+      harnessId,
+      nativeSessionId: "native-session",
+      formatVersion: 1,
+    });
+    const history = snapshot(nativeRef.nativeSessionId, 3);
+    const original = new FakeHarnessSession(
+      harnessId,
+      adapter.catalog,
+      undefined,
+      nativeRef,
+      history,
+    );
+    Object.assign(original.capabilities.history, { rollbackToCheckpoint: true });
+    const candidate = new FakeHarnessSession(
+      harnessId,
+      adapter.catalog,
+      undefined,
+      nativeRef,
+      snapshot(nativeRef.nativeSessionId, 3 - numTurns),
+    );
+    try {
+      await repository.initialize();
+      const threadId = hostThreadIdSchema.parse("ordinary");
+      await store.createProvisional({
+        hostThreadId: threadId,
+        createRequestId: "create-ordinary",
+        harnessId,
+        cwd: "/synthetic",
+        transportModelId: "codexhost/pi-native",
+        ephemeral: false,
+        historyMode: "paginated",
+      });
+      const record = await store.commitReady({
+        hostThreadId: threadId,
+        nativeSessionRef: nativeRef,
+        turnMappings: history.turns.map((turn, index) => ({
+          hostTurnId: hostTurnIdSchema.parse(`host-turn-${index}`),
+          nativeTurnRef: turn.nativeTurnRef,
+          nativeCheckpointRef: turn.checkpoint,
+        })),
+      });
+      const thread = runtime.register({
+        record,
+        session: original,
+        sessionId: threadId,
+        thread: { id: threadId },
+        turns: [],
+      });
+      const open = vi.spyOn(adapter, "open").mockResolvedValue({ ok: true, value: candidate });
+      const result = await executeExternalThreadRollback({
+        derived: thread,
+        rollback: { threadId, numTurns },
+        adapters,
+        repository,
+        runtime,
+      });
+      expect(result).toMatchObject({ ok: true });
+      expect(open).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "rollbackToCheckpoint",
+          sourceRef: nativeRef,
+          checkpoint: history.turns[3 - numTurns]?.checkpoint,
+        }),
+      );
+      const persisted = await store.getThread(threadId);
+      expect(persisted?.turnMappings.map((mapping) => mapping.hostTurnId)).toEqual(
+        record.turnMappings.slice(0, 3 - numTurns).map((mapping) => mapping.hostTurnId),
+      );
+      expect(persisted?.nativeSessionRef).toEqual(nativeRef);
+      expect(runtime.get(threadId)?.session).toBe(candidate);
+      expect(store.supersededNativeSessionIds(harnessId)).toEqual([]);
+    } finally {
+      await Promise.all([original.close(), candidate.close()]);
+      runtime.clear();
+      await repository.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

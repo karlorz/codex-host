@@ -57,6 +57,29 @@ function readyInspection() {
 }
 
 describe("Harness Model runtime contracts", () => {
+  it("accepts both legacy history capabilities and optional checkpoint rollback", () => {
+    const legacy = readyInspection();
+    expect(harnessInspectionSchema.parse(legacy)).toEqual(legacy);
+    expect(
+      harnessInspectionSchema.parse({
+        ...legacy,
+        capabilities: {
+          ...legacy.capabilities,
+          history: { ...legacy.capabilities.history, rollbackToCheckpoint: true },
+        },
+      }),
+    ).toMatchObject({ capabilities: { history: { rollbackToCheckpoint: true } } });
+    expect(
+      harnessInspectionSchema.safeParse({
+        ...legacy,
+        capabilities: {
+          ...legacy.capabilities,
+          history: { ...legacy.capabilities.history, rollbackToCheckpoint: "yes" },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("resolves an advertised Fast ref to the same Model without adding a menu row", () => {
     const fast = { id: "priority" };
     const catalog = harnessModelCatalogSchema.parse({

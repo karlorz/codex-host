@@ -1636,6 +1636,16 @@ export class OpenCodeAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.#closePromise) {
       return { ok: false, error: invalidState("OpenCode Adapter is closed") };
     }

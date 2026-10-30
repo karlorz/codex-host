@@ -171,3 +171,7 @@ The public `/dsh-goal` invocation avoids Codex Desktop's built-in `/goal` comman
 - Shared contracts remain Harness-neutral.
 - Renderer code must not parse or execute Harness `SKILL.md` files.
 - UI DOM selectors are compatibility details, not command contract requirements.
+
+## Curated native goal controls
+
+Grok exposes `grok.goal` as `/grok-goal`, forwarding objective text, an optional trailing `--budget`, and status/pause/resume/clear to native `/goal`. The shared live-command blocklist still excludes raw `goal`. The descriptor and translation belong to the Grok plugin; Host and Renderer use the ordinary command and stop-then-start steering paths. Goal state and scheduling remain native. See [Grok goals and history](../harnesses/grok/goals-and-history.md) for persistence ordering, ephemeral local controls and autonomous execution limits.

@@ -33,6 +33,7 @@ import {
   type FindRecentDelegationInput,
   type RebindSubagentSessionInput,
   type ReplaceReadySessionAfterLastTurnInput,
+  type ReplaceReadySessionAfterRollbackInput,
   type ReplaceReadySessionInput,
   type StoredDelegationRecordV1,
   type StoredThreadMetadataV1,
@@ -770,13 +771,19 @@ export class MappingStore {
   async replaceReadySessionAfterLastTurn(
     input: ReplaceReadySessionAfterLastTurnInput,
   ): Promise<StoredThreadRecordV1> {
-    const replaced = await this.#replaceReadySessionAfterLastTurn(input);
+    return this.replaceReadySessionAfterRollback({ ...input, numTurns: 1 });
+  }
+
+  async replaceReadySessionAfterRollback(
+    input: ReplaceReadySessionAfterRollbackInput,
+  ): Promise<StoredThreadRecordV1> {
+    const replaced = await this.#replaceReadySessionAfterRollback(input);
     await this.#recordSuperseded(input.expectedNativeSessionRef, replaced);
     return replaced;
   }
 
-  #replaceReadySessionAfterLastTurn(
-    input: ReplaceReadySessionAfterLastTurnInput,
+  #replaceReadySessionAfterRollback(
+    input: ReplaceReadySessionAfterRollbackInput,
   ): Promise<StoredThreadRecordV1> {
     return this.#update(input.hostThreadId, (current) => {
       if (
@@ -784,14 +791,16 @@ export class MappingStore {
         !current.nativeSessionRef ||
         current.revision !== input.expectedRevision ||
         !sameJson(current.nativeSessionRef, input.expectedNativeSessionRef) ||
-        input.turnMappings.length !== current.turnMappings.length - 1 ||
+        !Number.isSafeInteger(input.numTurns) ||
+        input.numTurns < 1 ||
+        input.turnMappings.length !== current.turnMappings.length - input.numTurns ||
         input.turnMappings.some(
           ({ hostTurnId }, index) => hostTurnId !== current.turnMappings[index]?.hostTurnId,
         )
       ) {
         throw new MappingStoreError(
           "MAPPING_CONFLICT",
-          "Last-Turn Session replacement must match the expected record and retain the exact shorter Host Turn prefix",
+          "Rollback Session replacement must match the expected record and retain the exact shorter Host Turn prefix",
         );
       }
       return {

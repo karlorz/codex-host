@@ -281,6 +281,16 @@ export class QoderAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if ("model" in input && input.model && !decodeQoderModelRef(input.model)) {
       return {
         ok: false,

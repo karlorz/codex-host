@@ -1151,6 +1151,15 @@ export class FakeHarnessAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint")
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Fake Adapter does not support checkpoint rollback",
+          retryable: false,
+        },
+      };
     if (this.#closePromise) return { ok: false, error: invalidStateError };
     if (input.cwd.length === 0) {
       return {

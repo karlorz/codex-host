@@ -53,7 +53,7 @@
 | B4 | 无人值守执行 | 必做（支持或明确拒绝） | P1 | `create.executionPolicy: "unattended-full-access"` | open 返回类型化拒绝 | 同上 |
 | B5 | Fork | 原生有则必做 | P1 | `history.fork` + `open({kind:"fork"})` + `NativeCheckpointRef` | 声明 false，open 返回 `unsupported` | [身份与历史](spec-history.md#fork精确保留前缀并独立继续) |
 | B6 | 跨目录 Fork | 原生有则必做 | P2 | `history.forkAcrossCwd`（要求 B5 也支持） | 声明 false | 同上 |
-| B7 | 回滚最后一轮 | 原生有则必做 | P1 | `history.rollbackLastTurn` + `open({kind:"rollbackLastTurn"})` | 声明 false | [身份与历史](spec-history.md#rollback去掉最后一个完整-turn) |
+| B7 | 回滚最后一轮 / 可选 checkpoint | 原生有则必做 | P1 | `history.rollbackLastTurn` + `open({kind:"rollbackLastTurn"})`; optional `history.rollbackToCheckpoint` + corresponding open kind | 声明 false | [身份与历史](spec-history.md#rollback去掉最后一个完整-turn) |
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | Item：`commandExecution`、`toolExecution`、`fileChange`（含 diff）、`reasoning`、`contextCompaction` | 原生没有对应内容时不产生该 Item | [输出与交互](spec-output-interactions.md#原生内容映射) |
 | B9 | 审批 | 原生有则必做 | P0 | `HostApprovalInteraction` + `execute(interaction.respond)` | 不伪造审批 UI | [输出与交互](spec-output-interactions.md#双向-interaction) |
 | B10 | 提问 | 原生有则必做 | P0 | `HostQuestionInteraction` | 不退化成普通文本，也不自动作答；多选保留 multiple 与答案数组，由共享 Renderer 卡片承载；活动重置使用可选 questionActivity 并仅返回原生确认的截止时间 | 同上 |

@@ -312,6 +312,16 @@ export class KimiAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.#closed) {
       return err("invalidState", "Adapter is closed");
     }

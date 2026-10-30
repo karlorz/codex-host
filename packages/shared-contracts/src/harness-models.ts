@@ -163,6 +163,8 @@ const harnessHistoryCapabilitiesSchema = z
     fork: z.boolean(),
     forkAcrossCwd: z.boolean(),
     rollbackLastTurn: z.boolean(),
+    /** Remove the selected checkpoint's Turn and every later Turn, without restoring files. */
+    rollbackToCheckpoint: z.boolean().optional(),
   })
   .strict()
   .refine((history) => history.fork || !history.forkAcrossCwd, {

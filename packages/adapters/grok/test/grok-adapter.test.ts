@@ -291,6 +291,11 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     this.#resolve?.(response);
     this.#resolve = null;
   }
+
+  finishWithoutHistory(response: PromptResponse): void {
+    this.#activePromptText = null;
+    this.finish(response);
+  }
 }
 
 async function openedSession(
@@ -341,6 +346,68 @@ async function nextEvent(
   if (output.kind !== "event") throw new Error("Expected Grok Event");
   return output.event;
 }
+
+describe("Grok native goal commands", () => {
+  it.each(["", "write a report --budget 5000", "status", "pause", "resume", "clear"])(
+    "executes native /goal %s with a stable Turn identity",
+    async (text) => {
+      const transport = new FakeGrokTransport();
+      const { adapter, session } = await openedSession(transport);
+      const iterator = session.outputs[Symbol.asyncIterator]();
+      const turnId = hostTurnIdSchema.parse("goal-command");
+      expect(
+        await session.commands?.execute({ turnId, commandId: "grok.goal", arguments: { text } }),
+      ).toMatchObject({ ok: true });
+      expect(await nextEvent(iterator)).toEqual({ type: "turn.started", turnId });
+      transport.finish();
+      for (;;) {
+        const event = await nextEvent(iterator);
+        if (event.type === "turn.completed") {
+          expect(event).toMatchObject({
+            outcome: { status: "succeeded" },
+            nativeTurnRef: { nativeTurnKey: "grok-prompt-1" },
+          });
+          break;
+        }
+      }
+      const snapshot = await session.readSnapshot();
+      expect(snapshot).toMatchObject({
+        ok: true,
+        value: { turns: [{ input: [{ type: "text", text: text ? `/goal ${text}` : "/goal" }] }] },
+      });
+      await adapter.close();
+    },
+  );
+
+  it("requires explicit native host-Turn evidence for a command without a durable conversation Turn", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    const turnId = hostTurnIdSchema.parse("goal-status");
+    await session.commands?.execute({
+      turnId,
+      commandId: "grok.goal",
+      arguments: { text: "status" },
+    });
+    await nextEvent(iterator);
+    transport.replay.push({
+      type: "user.text",
+      text: "/goal status",
+      metadata: { host_turn: true },
+    });
+    transport.finishWithoutHistory({ stopReason: "end_turn", _meta: { totalTokens: 0 } });
+    for (;;) {
+      const event = await nextEvent(iterator);
+      if (event.type === "turn.completed") {
+        expect(event).toMatchObject({ ephemeral: true, outcome: { status: "succeeded" } });
+        expect(event).not.toHaveProperty("nativeTurnRef");
+        break;
+      }
+    }
+    expect(await session.readSnapshot()).toMatchObject({ ok: true, value: { turns: [] } });
+    await adapter.close();
+  });
+});
 
 describe("Grok Adapter questions", () => {
   const request = parseGrokQuestionRequest({
@@ -2883,6 +2950,7 @@ describe("Grok Adapter ACP projection", () => {
       fork: true,
       forkAcrossCwd: true,
       rollbackLastTurn: true,
+      rollbackToCheckpoint: true,
     });
     await expect(opened.value.readSnapshot()).resolves.toMatchObject({
       ok: true,
@@ -3244,6 +3312,7 @@ describe("Grok Adapter ACP projection", () => {
       fork: true,
       forkAcrossCwd: true,
       rollbackLastTurn: true,
+      rollbackToCheckpoint: true,
     });
     await expect(opened.value.readSnapshot()).resolves.toMatchObject({
       ok: true,
@@ -3408,7 +3477,12 @@ describe("Grok Adapter ACP projection", () => {
     if (!session.commands) throw new Error("Grok Session did not expose commands");
     await expect(session.commands.list()).resolves.toMatchObject({
       ok: true,
-      value: { commands: [{ id: "grok.compact", invocation: "/compact", argumentMode: "text" }] },
+      value: {
+        commands: [
+          { id: "grok.compact", invocation: "/compact", argumentMode: "text" },
+          { id: "grok.goal", invocation: "/grok-goal", argumentMode: "text" },
+        ],
+      },
     });
     await expect(
       session.commands.execute({

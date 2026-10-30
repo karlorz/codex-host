@@ -103,20 +103,31 @@ async function restoreCurrentConfiguration(
   return null;
 }
 
-async function executeCurrentLastTurnRollback(input: {
+async function executeCurrentRollback(input: {
   current: ExternalThread;
+  numTurns: number;
   adapters: Map<ExternalHarnessId, HarnessAdapter>;
   repository: ExternalThreadRepository;
   runtime: ExternalThreadRuntime;
   environment?: NodeJS.ProcessEnv;
 }): Promise<ExternalThreadRollbackResult> {
-  const { current, adapters, repository, runtime } = input;
+  const { current, numTurns, adapters, repository, runtime } = input;
   // Keep the preparation version even if another Host operation replaces current.record.
   const currentRecord = current.record;
-  if (currentRecord.turnMappings.length === 0) {
+  if (numTurns > currentRecord.turnMappings.length) {
     return {
       ok: false,
-      error: { code: -32076, message: "External Thread has no Turn to roll back" },
+      error: { code: -32076, message: "External rollback boundary is unavailable" },
+    };
+  }
+
+  const lastTurnOnly = numTurns === 1 && current.session.capabilities.history.rollbackLastTurn;
+  const checkpoint =
+    currentRecord.turnMappings[currentRecord.turnMappings.length - numTurns]?.nativeCheckpointRef;
+  if (!lastTurnOnly && !checkpoint) {
+    return {
+      ok: false,
+      error: { code: -32080, message: "External rollback Checkpoint is unavailable" },
     };
   }
   const currentNativeRef = currentRecord.nativeSessionRef;
@@ -132,7 +143,9 @@ async function executeCurrentLastTurnRollback(input: {
   let opened: Awaited<ReturnType<HarnessAdapter["open"]>>;
   try {
     opened = await adapter.open({
-      kind: "rollbackLastTurn",
+      ...(lastTurnOnly
+        ? { kind: "rollbackLastTurn" as const }
+        : { kind: "rollbackToCheckpoint" as const, checkpoint: checkpoint as NativeCheckpointRef }),
       cwd: current.cwd,
       environment: {
         ...(input.environment ?? process.env),
@@ -173,11 +186,14 @@ async function executeCurrentLastTurnRollback(input: {
     await session.close().catch(() => undefined);
     return { ok: false, error: mapExternalThreadHarnessError(snapshot.error, "read") };
   }
-  if (snapshot.value.turns.length !== currentRecord.turnMappings.length - 1) {
+  if (snapshot.value.turns.length !== currentRecord.turnMappings.length - numTurns) {
     await session.close().catch(() => undefined);
     return {
       ok: false,
-      error: { code: -32080, message: "External rollback did not remove exactly one Turn" },
+      error: {
+        code: -32080,
+        message: "External rollback did not match the requested Turn boundary",
+      },
     };
   }
   const replacementState = snapshot.value.state ?? session.initialState;
@@ -191,10 +207,11 @@ async function executeCurrentLastTurnRollback(input: {
 
   let aligned;
   try {
-    aligned = await repository.commitLastTurnRollback(
+    aligned = await repository.commitRollback(
       currentRecord,
       finalNativeRef as NativeSessionRef,
       snapshot.value,
+      numTurns,
     );
   } catch {
     await session.close().catch(() => undefined);
@@ -255,9 +272,13 @@ export async function executeExternalThreadRollback(input: {
       error: { code: -32080, message: "External Revert boundary is unavailable" },
     };
   }
-  if (rollback.numTurns === 1 && derived.session.capabilities.history.rollbackLastTurn) {
-    return executeCurrentLastTurnRollback({
+  if (
+    (rollback.numTurns === 1 && derived.session.capabilities.history.rollbackLastTurn) ||
+    derived.session.capabilities.history.rollbackToCheckpoint
+  ) {
+    return executeCurrentRollback({
       current: derived,
+      numTurns: rollback.numTurns,
       adapters,
       repository,
       runtime,

@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { sanitizeDiagnosticTail } from "@codexhost/harness-adapter";
 import {
@@ -304,6 +305,14 @@ function signalProcessTree(child: ChildProcessWithoutNullStreams, signal: NodeJS
   }
 }
 
+function grokNotificationMetadata(
+  envelope: unknown,
+  update: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(envelope) && !isRecord(update)) return undefined;
+  return { ...(isRecord(update) ? update : {}), ...(isRecord(envelope) ? envelope : {}) };
+}
+
 function transportEvent(
   update: SessionUpdate,
   metadata?: Record<string, unknown>,
@@ -561,7 +570,7 @@ function parseNativeHistory(contents: string, sessionId: string): GrokTransportE
     if (!isRecord(record) || !isRecord(record.params)) continue;
     const params = record.params;
     if (params.sessionId !== sessionId || !isRecord(params.update)) continue;
-    const metadata = isRecord(params._meta) ? params._meta : undefined;
+    const metadata = grokNotificationMetadata(params._meta, params.update._meta);
     const event = transportEvent(params.update as SessionUpdate, metadata);
     if (event) events.push(metadata ? { ...event, metadata } : event);
   }
@@ -792,6 +801,8 @@ export class GrokAcpTransport {
   async #rewindSession(params: GrokRewindParams): Promise<void> {
     if (!this.#connection) throw new GrokTransportError("unavailable", "Grok ACP is unavailable");
     try {
+      const before = await this.readHistory(params.sessionId);
+      const markerCount = before.filter((event) => event.type === "rewind.marker").length;
       const raw = await withTimeout(
         this.#connection.request(GROK_REWIND_EXECUTE_METHOD, params),
         this.#options.commandTimeoutMs,
@@ -808,6 +819,33 @@ export class GrokAcpTransport {
             ? `Grok Native Rewind failed: ${parsed.error}`
             : "Grok Native Rewind did not truncate history",
         );
+      }
+      if (
+        parsed.targetPromptIndex !== params.targetPromptIndex ||
+        (parsed.mode !== undefined && parsed.mode !== params.mode)
+      ) {
+        throw new GrokTransportError(
+          "protocolError",
+          "Grok Rewind did not confirm the requested conversation boundary",
+        );
+      }
+      const deadline = Date.now() + 3_000;
+      for (;;) {
+        const markers = (await this.readHistory(params.sessionId)).filter(
+          (event) => event.type === "rewind.marker",
+        );
+        if (
+          markers.length > markerCount &&
+          markers.at(-1)?.targetPromptIndex === params.targetPromptIndex
+        )
+          break;
+        if (this.#closing || this.#closed || Date.now() >= deadline) {
+          throw new GrokTransportError(
+            "protocolError",
+            "Grok Rewind marker is not available in Native history",
+          );
+        }
+        await delay(25);
       }
     } catch (error) {
       if (error instanceof GrokTransportError) throw error;
@@ -953,10 +991,36 @@ export class GrokAcpTransport {
     const active = { onEvent, onPermission, onElicitation, onQuestion };
     this.#activePrompt = active;
     try {
-      return await connection.prompt({
+      const response = await connection.prompt({
         sessionId: this.#sessionId,
         prompt: [{ type: "text", text }],
       });
+      // Prompt replies can precede the persistence actor's durable TurnCompleted append.
+      const promptId = response._meta?.promptId;
+      if (
+        response.stopReason === "end_turn" &&
+        typeof promptId === "string" &&
+        promptId.length > 0
+      ) {
+        const deadline = Date.now() + 3_000;
+        for (;;) {
+          const history = await this.getHistory();
+          if (
+            history.some(
+              (event) => event.type === "turn.completed" && event.nativeTurnKey === promptId,
+            )
+          )
+            break;
+          if (this.#closing || this.#closed || Date.now() >= deadline) {
+            throw new GrokTransportError(
+              "protocolError",
+              "Grok completed Prompt is not available in Native history",
+            );
+          }
+          await delay(25);
+        }
+      }
+      return response;
     } finally {
       // The SDK can resolve prompt before dispatching notifications from the same read.
       await yieldToEventLoop();
@@ -1150,7 +1214,10 @@ export class GrokAcpTransport {
       this.#availableCommands = parseGrokAvailableCommands(update.availableCommands);
       return;
     }
-    const metadata = isRecord(notification._meta) ? notification._meta : undefined;
+    const metadata = grokNotificationMetadata(
+      notification._meta,
+      (notification.update as unknown as Record<string, unknown>)._meta,
+    );
     const event = transportEvent(notification.update, metadata);
     if (!event) return;
     const enriched = metadata ? { ...event, metadata } : event;

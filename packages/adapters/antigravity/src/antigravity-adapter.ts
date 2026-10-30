@@ -1701,6 +1701,16 @@ export class AntigravityAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.#closed) return { ok: false, error: invalidState("Antigravity Adapter is closed") };
     let permissionMode: AntigravityPermissionMode = "dangerously-skip-permissions";
     if (input.kind !== "fork" && input.permissionModeId) {

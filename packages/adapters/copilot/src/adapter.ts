@@ -167,6 +167,16 @@ export class CopilotAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.closed) return failure("invalidState", "Copilot Adapter is closed.");
     if (
       input.kind === "create" &&

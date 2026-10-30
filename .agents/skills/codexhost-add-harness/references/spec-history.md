@@ -96,3 +96,9 @@ Fork 只分叉会话上下文：不回滚文件，不自动创建 Worktree，也
 7. 支持导入时，验证 list、resolve 和 resume 的身份一致，已消失的会话返回 `sessionNotFound`，损坏的存储被跳过。
 
 Host 集成参考 `packages/host-runtime/src/external-thread-runtime.ts`、`external-thread-fork.ts`、`external-thread-rollback.ts`。
+
+## Optional rollback to a checkpoint
+
+A plugin may declare `history.rollbackToCheckpoint: true` and accept `open({ kind: "rollbackToCheckpoint", sourceRef, checkpoint, cwd, ...configuration })`. Remove the selected checkpoint's Turn and every later Turn; retain the exact earlier prefix, including zero Turns. This differs from Fork's inclusive boundary. Validate the Harness, Session and checkpoint before mutation, preserve current configuration, and return typed errors. Omitted capability remains unavailable; unsupported plugins explicitly reject the open kind.
+
+Host owns revision-checked mapping replacement and retains Host Turn IDs. The plugin owns native operations and verifies the resulting prefix. Conversation-only rewind does not restore files. If native in-place mutation cannot be atomic with Host persistence, document that failure boundary; a failed mapping commit must never be reported as a successful edit. Grok is the current native checkpoint implementation; see `docs/harnesses/grok/goals-and-history.md`.

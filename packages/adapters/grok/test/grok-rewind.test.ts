@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  harnessIdSchema,
+  nativeSessionRefSchema,
+  nativeCheckpointRefSchema,
+} from "@codexhost/shared-contracts";
+import type { GrokTransportEvent } from "../src/acp-transport.js";
 
 import {
   GROK_REWIND_EXECUTE_METHOD,
   GROK_REWIND_POINTS_METHOD,
   buildGrokRewindParams,
   parseGrokRewindResponse,
+  rewindGrokSession,
 } from "../src/grok-rewind.js";
 
 describe("Grok Rewind ACP envelope", () => {
@@ -65,5 +72,117 @@ describe("Grok Rewind ACP envelope", () => {
     expect(parseGrokRewindResponse({ result: {} })).toBeNull();
     expect(parseGrokRewindResponse({ success: true })).toBeNull();
     expect(parseGrokRewindResponse({ success: true, targetPromptIndex: -1 })).toBeNull();
+  });
+});
+
+describe("Grok checkpoint rewind", () => {
+  const harnessId = harnessIdSchema.parse("grok");
+  const sourceRef = nativeSessionRefSchema.parse({
+    harnessId,
+    nativeSessionId: "session",
+    formatVersion: 1,
+  });
+  const history: GrokTransportEvent[] = [
+    { type: "user.text", text: "first", metadata: { eventId: "user-1" } },
+    { type: "agent.text", text: "answer one" },
+    { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
+    {
+      type: "user.text",
+      text: "<system-reminder>native goal continuation</system-reminder>",
+      metadata: { eventId: "synthetic" },
+    },
+    { type: "user.text", text: "second", metadata: { eventId: "user-2" } },
+    { type: "agent.text", text: "answer two" },
+    { type: "turn.completed", nativeTurnKey: "prompt-2", stopReason: "end_turn" },
+    { type: "user.text", text: "third", metadata: { eventId: "user-3" } },
+    { type: "agent.text", text: "answer three" },
+    { type: "turn.completed", nativeTurnKey: "prompt-3", stopReason: "end_turn" },
+  ];
+
+  it.each([0, 2])(
+    "rewinds directly to native prompt %i, including an empty prefix",
+    async (targetPromptIndex) => {
+      const events = [...history];
+      const rewindAndLoad = vi.fn(async () => {
+        events.push({ type: "rewind.marker", targetPromptIndex });
+        return { sessionId: "session" };
+      });
+      const result = await rewindGrokSession({
+        cwd: "/synthetic",
+        harnessId,
+        sourceRef,
+        checkpoint: nativeCheckpointRefSchema.parse({
+          harnessId,
+          nativeSessionId: "session",
+          checkpointId: String(targetPromptIndex),
+          formatVersion: 1,
+        }),
+        locateSource: async () => ({ cwd: "/synthetic" }),
+        readHistory: async () => events,
+        rewindAndLoad,
+      });
+      expect(result).toEqual({ ok: true, value: { sessionId: "session" } });
+      expect(rewindAndLoad).toHaveBeenCalledExactlyOnceWith({
+        sessionId: "session",
+        targetPromptIndex,
+        force: true,
+        mode: "conversation_only",
+      });
+    },
+  );
+
+  it.each(["another-session", "stale-checkpoint"])(
+    "rejects %s before native mutation",
+    async (invalid) => {
+      const rewindAndLoad = vi.fn();
+      const result = await rewindGrokSession({
+        cwd: "/synthetic",
+        harnessId,
+        sourceRef,
+        checkpoint: nativeCheckpointRefSchema.parse({
+          harnessId,
+          nativeSessionId: invalid === "another-session" ? invalid : "session",
+          checkpointId: invalid === "stale-checkpoint" ? "999" : "0",
+          formatVersion: 1,
+        }),
+        locateSource: async () => ({ cwd: "/synthetic" }),
+        readHistory: async () => history,
+        rewindAndLoad,
+      });
+      expect(result).toMatchObject({ ok: false, error: { code: "checkpointNotFound" } });
+      expect(rewindAndLoad).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects legacy local controls before any native history mutation", async () => {
+    const rewindAndLoad = vi.fn();
+    const result = await rewindGrokSession({
+      cwd: "/synthetic",
+      harnessId,
+      sourceRef,
+      locateSource: async () => ({ cwd: "/synthetic" }),
+      readHistory: async () => [{ type: "user.text", text: "/goal status" }, ...history],
+      rewindAndLoad,
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "unsupported" } });
+    expect(rewindAndLoad).not.toHaveBeenCalled();
+  });
+
+  it("rejects native success if the retained history is not the selected prefix", async () => {
+    const result = await rewindGrokSession({
+      cwd: "/synthetic",
+      harnessId,
+      sourceRef,
+      checkpoint: nativeCheckpointRefSchema.parse({
+        harnessId,
+        nativeSessionId: "session",
+        checkpointId: "2",
+        formatVersion: 1,
+      }),
+      locateSource: async () => ({ cwd: "/synthetic" }),
+      readHistory: async () => history,
+      rewindAndLoad: async () => ({ sessionId: "session" }),
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "protocolError" } });
   });
 });

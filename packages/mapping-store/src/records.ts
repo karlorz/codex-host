@@ -307,3 +307,7 @@ export interface ReplaceReadySessionAfterLastTurnInput {
   nativeSessionRef: NativeSessionRef;
   turnMappings: StoredTurnMappingV1[];
 }
+
+export interface ReplaceReadySessionAfterRollbackInput extends ReplaceReadySessionAfterLastTurnInput {
+  numTurns: number;
+}

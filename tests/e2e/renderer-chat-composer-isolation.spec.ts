@@ -10,10 +10,10 @@ if (browserExecutable) test.use({ launchOptions: { executablePath: browserExecut
 
 test.beforeEach(async ({ page }) => {
   // The Renderer reads localStorage; about:blank does not provide an origin.
-  await page.route("http://codexhost.test/", (route) =>
+  await page.route("http://localhost/", (route) =>
     route.fulfill({ contentType: "text/html", body: "<!doctype html><body></body>" }),
   );
-  await page.goto("http://codexhost.test/");
+  await page.goto("http://localhost/");
 });
 
 const { outputFiles } = await build({

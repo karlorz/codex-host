@@ -3,13 +3,15 @@ import path from "node:path";
 import type { HarnessError, HarnessResult, HostThreadSnapshot } from "@codexhost/harness-adapter";
 import {
   nativeSessionRefSchema,
+  nativeCheckpointRefSchema,
   type HarnessId,
+  type NativeCheckpointRef,
   type NativeSessionRef,
 } from "@codexhost/shared-contracts";
 
 import type { GrokNativeSessionLocation, GrokTransportEvent } from "./acp-transport.js";
 import { isGrokMethodNotFound } from "./grok-fork.js";
-import { mapGrokReplay, resolveGrokLastTurnPromptIndex } from "./grok-history.js";
+import { mapGrokReplay, resolveGrokTargetPromptIndex } from "./grok-history.js";
 
 export const GROK_REWIND_EXECUTE_METHOD = "_x.ai/rewind/execute";
 export const GROK_REWIND_POINTS_METHOD = "_x.ai/rewind/points";
@@ -36,6 +38,7 @@ export interface GrokRewindInput {
   readHistory(cwd: string, sessionId: string): Promise<GrokTransportEvent[]>;
   rewindAndLoad(params: GrokRewindParams): Promise<{ sessionId: string }>;
   sourceRef: NativeSessionRef;
+  checkpoint?: NativeCheckpointRef;
 }
 
 function error(code: HarnessError["code"], message: string, retryable = false): HarnessError {
@@ -116,14 +119,31 @@ async function readSnapshot(
   }
 }
 
-export async function rewindGrokLastTurn(
+export async function rewindGrokSession(
   input: GrokRewindInput,
 ): Promise<HarnessResult<{ sessionId: string }>> {
   const sourceRef = nativeSessionRefSchema.safeParse(input.sourceRef);
   if (!sourceRef.success || sourceRef.data.harnessId !== input.harnessId) {
     return {
       ok: false,
-      error: error("invalidRequest", "Grok last-Turn Rewind identity does not belong to Grok"),
+      error: error("invalidRequest", "Grok Rewind identity does not belong to Grok"),
+    };
+  }
+  const checkpoint = input.checkpoint
+    ? nativeCheckpointRefSchema.safeParse(input.checkpoint)
+    : null;
+  if (
+    checkpoint &&
+    (!checkpoint.success ||
+      checkpoint.data.harnessId !== input.harnessId ||
+      checkpoint.data.nativeSessionId !== sourceRef.data.nativeSessionId)
+  ) {
+    return {
+      ok: false,
+      error: error(
+        "checkpointNotFound",
+        "Grok Rewind Checkpoint does not belong to the source Session",
+      ),
     };
   }
 
@@ -139,17 +159,58 @@ export async function rewindGrokLastTurn(
   if (sourceCwd !== targetCwd) {
     return {
       ok: false,
-      error: error("invalidRequest", "Grok last-Turn Rewind must stay in the source cwd"),
+      error: error("invalidRequest", "Grok Rewind must stay in the source cwd"),
     };
   }
 
-  const source = await readSnapshot({ ...input, cwd: sourceCwd }, sourceRef.data.nativeSessionId);
-  if (!source.ok) return source;
-  const targetPromptIndex = resolveGrokLastTurnPromptIndex(source.value);
-  if (source.value.turns.length === 0 || targetPromptIndex === null) {
+  let sourceHistory: GrokTransportEvent[];
+  try {
+    sourceHistory = await input.readHistory(sourceCwd, sourceRef.data.nativeSessionId);
+  } catch {
     return {
       ok: false,
-      error: error("invalidState", "Grok Native Session has no Turn to rewind"),
+      error: error("nativeFailure", "Grok Native Session history could not be read", true),
+    };
+  }
+  // Older shells persisted local goal controls without marking them as non-prompt host Turns.
+  // Their apparent sequential indices are not native rewind boundaries.
+  if (
+    sourceHistory.some(
+      (event) =>
+        event.type === "user.text" &&
+        /^\/goal(?:\s+(?:status|pause|clear|resume))?\s*$/u.test(event.text.trim()) &&
+        event.metadata?.hostTurn !== true &&
+        event.metadata?.host_turn !== true,
+    )
+  ) {
+    return {
+      ok: false,
+      error: error(
+        "unsupported",
+        "Grok history contains legacy goal controls without native rewind boundaries; use a newer Grok build",
+      ),
+    };
+  }
+  const source = await readSnapshot(
+    { ...input, cwd: sourceCwd, readHistory: async () => sourceHistory },
+    sourceRef.data.nativeSessionId,
+  );
+  if (!source.ok) return source;
+  const checkpointId = checkpoint?.success
+    ? checkpoint.data.checkpointId
+    : source.value.turns.at(-1)?.checkpoint?.checkpointId;
+  const retainedCount = source.value.turns.findIndex(
+    (turn) => turn.checkpoint?.checkpointId === checkpointId,
+  );
+  const targetPromptIndex =
+    checkpointId === undefined ? null : resolveGrokTargetPromptIndex(source.value, checkpointId);
+  if (retainedCount < 0 || targetPromptIndex === null) {
+    return {
+      ok: false,
+      error: error(
+        input.checkpoint ? "checkpointNotFound" : "invalidState",
+        "Grok Rewind boundary is unavailable",
+      ),
     };
   }
 
@@ -186,11 +247,11 @@ export async function rewindGrokLastTurn(
   const derived = await readSnapshot({ ...input, cwd: targetCwd }, sessionId);
   if (!derived.ok) return derived;
   const expectedKeys = source.value.turns
-    .slice(0, -1)
+    .slice(0, retainedCount)
     .map((turn) => turn.nativeTurnRef.nativeTurnKey);
   const actualKeys = derived.value.turns.map((turn) => turn.nativeTurnRef.nativeTurnKey);
   if (
-    derived.value.turns.length !== source.value.turns.length - 1 ||
+    derived.value.turns.length !== retainedCount ||
     actualKeys.some((key, index) => key !== expectedKeys[index]) ||
     derived.value.turns.some((turn) => turn.nativeTurnRef.nativeSessionId !== sessionId)
   ) {

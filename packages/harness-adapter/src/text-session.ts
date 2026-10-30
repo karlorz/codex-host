@@ -128,8 +128,21 @@ export interface RollbackLastTurnSessionInput {
   environment?: Record<string, string | undefined>;
 }
 
+/** Remove this checkpoint's Turn and the subsequent conversation suffix. */
+export interface RollbackToCheckpointSessionInput extends Omit<
+  RollbackLastTurnSessionInput,
+  "kind"
+> {
+  kind: "rollbackToCheckpoint";
+  checkpoint: NativeCheckpointRef;
+}
+
 export type OpenSessionInput =
-  CreateSessionInput | ResumeSessionInput | ForkSessionInput | RollbackLastTurnSessionInput;
+  | CreateSessionInput
+  | ResumeSessionInput
+  | ForkSessionInput
+  | RollbackLastTurnSessionInput
+  | RollbackToCheckpointSessionInput;
 
 export interface HarnessSessionState {
   nativeRef?: NativeSessionRef;

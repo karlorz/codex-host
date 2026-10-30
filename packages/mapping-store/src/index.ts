@@ -18,6 +18,7 @@ export type {
   FindRecentDelegationInput,
   RebindSubagentSessionInput,
   ReplaceReadySessionAfterLastTurnInput,
+  ReplaceReadySessionAfterRollbackInput,
   ReplaceReadySessionInput,
   StoredDelegationRecordV1,
   StoredThreadMetadataV1,

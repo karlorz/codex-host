@@ -99,6 +99,7 @@ export type {
   PermissionModeSelectCompleted,
   ResumeSessionInput,
   RollbackLastTurnSessionInput,
+  RollbackToCheckpointSessionInput,
   SessionFaultedEvent,
   SessionStateChangedEvent,
   SessionUsageChangedEvent,

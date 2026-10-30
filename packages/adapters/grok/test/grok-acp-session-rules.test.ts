@@ -24,7 +24,8 @@ async function capturedMeta(
   await writeFile(
     command,
     `#!${process.execPath}
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 const capture = process.env.CODEXHOST_ACP_CAPTURE;
 const send = (value) => process.stdout.write(JSON.stringify({jsonrpc:'2.0',...value})+'\\n');
@@ -43,6 +44,11 @@ createInterface({input:process.stdin}).on('line', line => {
     send({id:request.id,result:{newSessionId:'forked',parentSessionId:request.params.sourceSessionId}});
   } else if (request.method === '_x.ai/rewind/execute') {
     send({id:request.id,result:{success:true,targetPromptIndex:request.params.targetPromptIndex}});
+    setTimeout(() => {
+      const directory = path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(${JSON.stringify(root)}), request.params.sessionId);
+      mkdirSync(directory, {recursive:true});
+      appendFileSync(path.join(directory, 'updates.jsonl'), JSON.stringify({params:{sessionId:request.params.sessionId,update:{sessionUpdate:'rewind_marker',target_prompt_index:request.params.targetPromptIndex}}})+'\\n');
+    }, 50);
   }
 });
 `,

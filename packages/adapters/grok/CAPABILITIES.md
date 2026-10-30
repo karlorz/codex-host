@@ -28,7 +28,7 @@
 | B4 | 无人值守执行 | 必做（支持或明确拒绝） | P1 | 支持 | src/grok-adapter.ts | test/grok-adapter.test.ts | unattended-full-access 映射为 always-approve |
 | B5 | Fork | 原生有则必做 | P1 | 支持 | src/grok-fork.ts、src/grok-adapter.ts | test/grok-fork.test.ts、test/grok-adapter.test.ts |  |
 | B6 | 跨目录 Fork | 原生有则必做 | P2 | 支持 | src/grok-fork.ts、src/grok-adapter.ts | test/grok-adapter.test.ts |  |
-| B7 | 回滚最后一轮 | 原生有则必做 | P1 | 支持 | src/grok-rewind.ts、src/grok-adapter.ts | test/grok-rewind.test.ts、test/grok-adapter.test.ts |  |
+| B7 | 回滚最后一轮 / checkpoint | 原生有则必做 | P1 | 受限 | src/grok-rewind.ts、src/grok-adapter.ts | test/grok-rewind.test.ts、test/grok-adapter.test.ts |  |
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | 支持 | src/grok-tool-output.ts、src/grok-file-change.ts、src/grok-adapter.ts | test/grok-tool-output.test.ts、test/grok-file-change.test.ts |  |
 | B9 | 审批 | 原生有则必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts | ACP request_permission |
 | B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts | test/grok-questions.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 专属按钮不投影；真实 Desktop 已验收单选与文本 |
@@ -53,6 +53,10 @@
 | D5 | 其他 | 可选 | P2 | 不适用 | — | 无需新增插件或展示分支 |  |
 
 ## 受限与已知缺口
+
+- Checkpoint rollback: implemented through optional `history.rollbackToCheckpoint` and native conversation-only rewind; validates exact retained Turn identities and supports an empty prefix. Isolated 1.0.45 real-model history trial passed; installed Desktop acceptance is pending. Legacy unmarked goal-control history is rejected before mutation.
+- `/grok-goal`: implemented native objective / optional trailing budget / status / pause / resume / clear routing. Local no-goal controls and same-ID reopen passed on 1.0.45 with zero model calls. Active-goal lifecycle and background continuation projection remain unqualified; B12 remains limited. Host owns no goal scheduler or goal state.
+- Installed Desktop acceptance for these extensions requires an approved restart. Running codexhost/Desktop sessions must remain untouched until Karl approves.
 
 - B3：Grok 1.0.67 的权限扩展没有 RPC 回执，`session/info` 和 `configOptions` 不包含权限。生效确认必须取自原生权限管理器的实际状态，不能由发送结果推断。仅在无活动 Turn 或压缩操作时切换；通知作用于独立进程内的匹配会话。原生受管策略和 Auto 功能开关始终生效。
 - B10：原生超时仍由 grokgod 管理，Host 不合成计时器或自动选择。原生撤回通知没有区分超时原因，Host 仅记录取消。多选复用 Host multiple 与答案数组，通过共享 Renderer 卡片承载；原生 Desktop 卡片仍无多选字段。Plan 专属按钮不投影。活动重置通过可选 questionActivity 与原生确认同步，需补丁 0028 及原生配置开启。
@@ -84,3 +88,12 @@
 | 原生提问：Desktop | 2026-10-26，更新应用并重启后的新 Grok 会话；人工单选与文本回复 | 通过：Alpha（40.096 秒）、Other + notes hello（16.467 秒）；原生 UserAnswered，均早于 120 秒超时；未验收预览或 Plan 专属控件，未运行 SSH / Windows 或完整委派 |
 
 多选实现验证：440 项聚焦测试通过、2 项 opt-in 原生测试跳过；真实 grokgod / grok-4.6 经 GrokAdapter 自动选择 Alpha + Gamma，原生 UserAnswered 保留两项。共享卡片、Host 边界及多选 ACP 回传均有测试。安装版 Desktop 人工多选已在 117.012 秒后回传 Alpha + Beta，用户确认功能正常；用户已认可 Grok 卡片样式；允许 Other 的单选组也使用共享卡片以保留聊天输入框。只读倒计时需 grokgod 0027，用户已确认显示并递减；活动重置及同步需 0028 与原生配置开启，22:34 JST 手动重启后，用户确认交互会重置倒计时；该次最终由原生超时选择推荐 Alpha，未提交多选答案，未测量最后交互至超时的精确时长。
+
+## Goal and checkpoint implementation evidence (2026-10-30)
+
+- Current native trial version: Grok `1.0.45 (2bdd1d6a6369)` at `/Users/karlchow/.grokgod/bin/grok`; the earlier 1.0.67 permission result above is separate evidence.
+- Implementation: `src/grok-commands.ts`, `src/grok-rewind.ts`, `src/acp-transport.ts`, `src/grok-adapter.ts`. Transport preserves update-level host-Turn metadata and waits for matching persisted prompt/rewind terminal records.
+- Public extension: optional browser-safe `history.rollbackToCheckpoint`, `RollbackToCheckpointSessionInput`, generic Host dispatch and Mapping Store expected-revision prefix replacement. Unsupported adapters reject the new open kind. No Harness-specific Host or Renderer branch was added.
+- Regression evidence: `test/grok-commands.test.ts`, `test/grok-rewind.test.ts`, `test/grok-acp-history-settlement.test.ts`, Adapter tests, Host multi-Turn rollback tests, Mapping Store conflict tests and legacy capability-schema coverage.
+- Native opt-in test: `CODEXHOST_GROK_GOAL_HISTORY_LIVE=1` verifies local controls/reopen without inference; `CODEXHOST_GROK_MODEL_HISTORY_LIVE=1` verifies real model-backed checkpoint rewind. Both isolate GROK_HOME/project, preserve workspace sentinel contents and close only their own processes.
+- User-facing limitations and matrix criteria: `docs/harnesses/grok/goals-and-history.md`. Running installed sessions were not restarted or replaced.

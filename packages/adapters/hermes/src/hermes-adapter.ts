@@ -139,6 +139,16 @@ export class HermesAdapter implements HarnessAdapter {
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {
+    if (input.kind === "rollbackToCheckpoint") {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Checkpoint rollback is not supported by this Adapter",
+          retryable: false,
+        },
+      };
+    }
     if (this.#closed) return failure("invalidState", "Hermes Adapter is closed");
     if (typeof input.cwd !== "string" || input.cwd.trim().length === 0)
       return failure("invalidRequest", "open requires a cwd");
