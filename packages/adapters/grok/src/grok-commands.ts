@@ -27,6 +27,12 @@ export const grokCommandCatalog = harnessCommandCatalogSchema.parse({
   ],
 });
 
+const GROK_GOAL_CONTROL_PATTERN = /^\/goal(?:\s+(?:status|pause|clear|resume))?\s*$/u;
+
+export function isGrokGoalControlPrompt(value: string): boolean {
+  return GROK_GOAL_CONTROL_PATTERN.test(value.trim());
+}
+
 /** Keep argument interpretation and goal state in Grok's native slash-command handler. */
 export function grokGoalPrompt(arguments_: JsonObject | undefined): HarnessResult<string> {
   if (

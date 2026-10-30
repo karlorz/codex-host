@@ -31,14 +31,16 @@ export function findScopedDraftModelBinding(
     element = element.parentElement;
   }
   const rows: unknown[][] = [];
-  const groups = new Map<unknown[], unknown[][]>();
+  const previousRows = new Map<unknown[], unknown[] | undefined>();
   const updates = new Set<UpdateDraft>();
   for (const ancestor of committedReactAncestors(fiber)) {
     const queue = ancestor.updateQueue as { memoCache?: { data?: unknown[] } } | null;
-    const data = (queue?.memoCache?.data ?? []).filter(Array.isArray);
-    for (const row of data) {
+    const data = (queue?.memoCache?.data ?? []).filter((value): value is unknown[] =>
+      Array.isArray(value),
+    );
+    for (const [index, row] of data.entries()) {
       rows.push(row);
-      groups.set(row, data);
+      previousRows.set(row, data[index - 1]);
       if (!Array.isArray(row) || row.length !== 14 || row[6] !== draftId || row[7] !== draftId)
         continue;
       const result = row[13] as {
@@ -89,8 +91,7 @@ export function findScopedDraftModelBinding(
       // Background creation receives a new client Thread id. The reviewed
       // collaboration-mode memo retains the originating draft's Model hook.
       const settings = result.modelSettings as Draft | null;
-      const group = groups.get(row);
-      const candidate = group?.[group.indexOf(row) - 1];
+      const candidate = previousRows.get(row);
       const mode = candidate?.[44] as Draft | null;
       const value = candidate?.[51] as Draft | null;
       if (

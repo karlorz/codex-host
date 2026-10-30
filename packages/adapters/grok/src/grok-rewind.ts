@@ -10,6 +10,7 @@ import {
 } from "@codexhost/shared-contracts";
 
 import type { GrokNativeSessionLocation, GrokTransportEvent } from "./acp-transport.js";
+import { isGrokGoalControlPrompt } from "./grok-commands.js";
 import { isGrokMethodNotFound } from "./grok-fork.js";
 import { mapGrokReplay, resolveGrokTargetPromptIndex } from "./grok-history.js";
 
@@ -178,7 +179,7 @@ export async function rewindGrokSession(
     sourceHistory.some(
       (event) =>
         event.type === "user.text" &&
-        /^\/goal(?:\s+(?:status|pause|clear|resume))?\s*$/u.test(event.text.trim()) &&
+        isGrokGoalControlPrompt(event.text) &&
         event.metadata?.hostTurn !== true &&
         event.metadata?.host_turn !== true,
     )
