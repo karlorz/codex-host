@@ -59,6 +59,12 @@ export class GrokGoals implements HarnessGoalCapability {
   #active = false;
   #closed = false;
   #version = 0;
+  #creation: {
+    objective: string;
+    tokenBudget: number | null;
+    promise: Promise<HarnessResult<HarnessGoal>>;
+    nativeId: string | undefined;
+  } | null = null;
   #latest: { id: unknown; goal: HarnessGoal; observedAt: number } | null = null;
   constructor(
     readonly directory: string,
@@ -75,6 +81,7 @@ export class GrokGoals implements HarnessGoalCapability {
   close() {
     this.#closed = true;
     this.#active = false;
+    this.#creation = null;
     this.#version++;
   }
   async observe(update: Record<string, unknown> | null): Promise<void> {
@@ -82,6 +89,7 @@ export class GrokGoals implements HarnessGoalCapability {
     if (update === null) {
       this.#active = false;
       this.#latest = null;
+      this.#creation = null;
       if (!this.#closed) this.changed(null);
       return;
     }
@@ -105,17 +113,20 @@ export class GrokGoals implements HarnessGoalCapability {
     if (this.#closed) return failure("Grok goal Session is closed");
     try {
       const stored = await readGrokGoal(this.directory);
-      const latest = this.#latest;
-      const goal = stored
-        ? latest && latest.id === stored.state.goal_id && latest.observedAt >= stored.updatedAt
-          ? latest.goal
-          : projectGrokGoal(stored.state, stored.updatedAt)
-        : null;
+      const goal = this.#projectStored(stored);
       this.#active = goal?.status === "active";
       return { ok: true, value: goal };
     } catch {
       return failure("Grok native goal accounting is unavailable");
     }
+  }
+  #projectStored(stored: Awaited<ReturnType<typeof readGrokGoal>>): HarnessGoal | null {
+    const latest = this.#latest;
+    return stored
+      ? latest && latest.id === stored.state.goal_id && latest.observedAt >= stored.updatedAt
+        ? latest.goal
+        : projectGrokGoal(stored.state, stored.updatedAt)
+      : null;
   }
   async set(input: HarnessGoalSet): Promise<HarnessResult<HarnessGoal>> {
     if (
@@ -152,6 +163,59 @@ export class GrokGoals implements HarnessGoalCapability {
       };
     if (!input.objective && !input.status)
       return failure("Grok goal mutation has no supported change");
+    if (this.#closed) return failure("Grok goal Session is closed");
+    if (!input.objective) return this.#setNative(input);
+    const creation = this.#creation;
+    if (
+      creation?.objective === input.objective &&
+      creation.tokenBudget === (input.tokenBudget ?? null)
+    ) {
+      // Desktop starts a new Goal chat with a /goal Turn, then sends the same
+      // objective via thread/goal/set. Both acknowledge one native creation.
+      if (!creation.nativeId) return creation.promise;
+      try {
+        const stored = await readGrokGoal(this.directory);
+        if (
+          stored?.state.goal_id === creation.nativeId &&
+          stored.state.status === "active" &&
+          stored.state.objective === input.objective &&
+          (stored.state.token_budget ?? null) === creation.tokenBudget
+        ) {
+          const goal = this.#projectStored(stored);
+          if (
+            goal?.status === "active" &&
+            goal.objective === input.objective &&
+            goal.tokenBudget === creation.tokenBudget
+          )
+            return { ok: true, value: goal };
+        }
+      } catch {
+        return failure("Grok native goal accounting is unavailable");
+      }
+    }
+    if (this.#mutating) return failure("Grok goal operation is unavailable");
+    const pending = {
+      objective: input.objective,
+      tokenBudget: input.tokenBudget ?? null,
+      promise: this.#setNative(input).catch(() =>
+        failure("Grok native goal accounting is unavailable"),
+      ),
+      nativeId: undefined as string | undefined,
+    };
+    this.#creation = pending;
+    const result = await pending.promise;
+    if (result.ok && this.#creation === pending) {
+      try {
+        const id = (await readGrokGoal(this.directory))?.state.goal_id;
+        if (typeof id === "string") pending.nativeId = id;
+        else this.#creation = null;
+      } catch {
+        this.#creation = null;
+      }
+    } else if (this.#creation === pending) this.#creation = null;
+    return result;
+  }
+  async #setNative(input: HarnessGoalSet): Promise<HarnessResult<HarnessGoal>> {
     const prompt = input.objective
       ? `/goal ${input.objective}${input.tokenBudget == null ? "" : ` --budget ${input.tokenBudget}`}`
       : `/goal ${input.status === "paused" ? "pause" : "resume"}`;

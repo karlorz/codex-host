@@ -21,6 +21,8 @@ Requests reuse the per-Thread operation queue and idle-release guard. Goal opera
 
 A native goal command alone does not establish panel support. Harnesses lacking required metrics can still have native goals; a limited display would require its own supported contract. No Host-managed fallback is enabled.
 
+Desktop Goal-mode entry and model-created goals are separate paths. New-chat Goal mode submits an opening `/goal objective` Turn and then the goal-set RPC. Grok admits that opening through a curated native command and coalesces the follow-up against the confirmed native identity. Plain-language goal creation remains unavailable: native Grok supplies progress/completion through `update_goal`, but has no model-facing creation tool. A model-tool extension must account for creation during an active Turn; it cannot simply call a control that waits for the same Turn to finish.
+
 ## Acceptance
 
 Focused checks cover unsupported routing/no official fall-through, official pass-through, absent origin, native accounting validation, clear/pause without fabricated Turns, plugin loading, goal background ownership and independent worker identity. Native trials are separate from installed Desktop acceptance. Desktop acceptance must compare native state/usage to the panel, observe completion auto-clear, pause/resume/Stop, budget exhaustion and paused restore. Restart and installation are user-controlled.

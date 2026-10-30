@@ -13,6 +13,38 @@ const state = {
   created_at: "2026-10-30T06:49:54.871Z",
 };
 describe("Grok native goal controls", () => {
+  it("coalesces Desktop's opening /goal and follow-up set only for the confirmed native identity", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "grok-goals-desktop-"));
+    await mkdir(path.join(directory, "goal"));
+    const ready = Promise.withResolvers<undefined>();
+    const control = vi.fn(async () => {
+      await ready.promise;
+      if (control.mock.calls.length > 1) return;
+      await writeFile(path.join(directory, "goal/state.json"), JSON.stringify(state));
+      await goals.observe({ ...state, tokens_used: 42 });
+    });
+    const goals = new GrokGoals(directory, control, () => {}, 150);
+    const input = { objective: state.objective, tokenBudget: 1000, origin: null } as const;
+    try {
+      const opening = goals.set(input);
+      const duplicate = goals.set({ ...input, status: "active" });
+      ready.resolve(undefined);
+      expect(await opening).toMatchObject({ ok: true, value: { status: "active" } });
+      expect(await duplicate).toEqual(await goals.read());
+      expect(await goals.set({ ...input, status: "active" })).toEqual(await goals.read());
+      expect(control).toHaveBeenCalledTimes(1);
+      await writeFile(
+        path.join(directory, "goal/state.json"),
+        JSON.stringify({ ...state, goal_id: "different-goal" }),
+      );
+      expect(await goals.set(input)).toMatchObject({ ok: false });
+      expect(control).toHaveBeenCalledTimes(2);
+    } finally {
+      ready.resolve(undefined);
+      goals.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it("maps native high-water accounting and paused families without synthetic defaults", () => {
     expect(projectGrokGoal(state, 1793343010000)).toMatchObject({
       tokensUsed: 42,

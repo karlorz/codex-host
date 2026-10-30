@@ -12,6 +12,13 @@ export const grokCommandCatalog = harnessCommandCatalogSchema.parse({
       argumentMode: "text",
     },
     {
+      id: "grok.desktop-goal",
+      invocation: "/goal",
+      label: "Goal",
+      description: "Start a native goal through Desktop Goal mode",
+      argumentMode: "text",
+    },
+    {
       id: "grok.goal",
       invocation: "/grok-goal",
       label: "Grok goal",

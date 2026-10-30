@@ -3480,6 +3480,7 @@ describe("Grok Adapter ACP projection", () => {
       value: {
         commands: [
           { id: "grok.compact", invocation: "/compact", argumentMode: "text" },
+          { id: "grok.desktop-goal", invocation: "/goal", argumentMode: "text" },
           { id: "grok.goal", invocation: "/grok-goal", argumentMode: "text" },
         ],
       },

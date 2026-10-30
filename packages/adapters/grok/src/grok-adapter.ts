@@ -813,7 +813,7 @@ class GrokHarnessSession implements HarnessSession {
   ): Promise<HarnessResult<HarnessCommandAccepted>> {
     if (this.#phase !== "open")
       return { ok: false, error: invalidState("Grok Session is not open") };
-    if (command.commandId === "grok.goal") {
+    if (command.commandId === "grok.goal" || command.commandId === "grok.desktop-goal") {
       const prompt = grokGoalPrompt(command.arguments);
       if (!prompt.ok) return prompt;
       const goals = this.goals;

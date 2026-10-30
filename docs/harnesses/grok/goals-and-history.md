@@ -1,9 +1,10 @@
 # Grok goals and conversation rewind
 
-The Grok plugin exposes `/grok-goal` through the shared Harness command menu. It forwards the command to Grok's native `/goal` handler; Grok owns objective interpretation, token accounting, goal status, persistence and execution.
+The Grok plugin supports Desktop's `/goal` Goal mode and exposes `/grok-goal` through the shared Harness command menu. Both use Grok's native `/goal` handler; Grok owns objective interpretation, token accounting, goal status, persistence and execution.
 
 | Input | Native operation |
 | --- | --- |
+| Desktop `/goal` mode + objective | Admit the opening `/goal` command and acknowledge Desktop's matching goal-set request without a second native creation |
 | `/grok-goal <objective>` | Set the objective with Grok's native default budget |
 | `/grok-goal <objective> --budget <tokens>` | Set an explicit native token budget |
 | `/grok-goal` or `/grok-goal status` | Show native goal status |
@@ -11,7 +12,11 @@ The Grok plugin exposes `/grok-goal` through the shared Harness command menu. It
 | `/grok-goal resume` | Resume the native goal; this can invoke the model |
 | `/grok-goal clear` | Clear the native goal |
 
-The budget flag is trailing native syntax. The Adapter preserves the argument text and does not insert a budget. Native state confirmation and a status summary are returned through the command output. Raw live `/goal` remains excluded by the shared command filter; the curated `/grok-goal` descriptor is the supported entry point.
+The budget flag is trailing native syntax. The Adapter preserves the argument text and does not insert a budget. Native state confirmation and a status summary are returned through the command output. The plugin declares curated `/goal` and `/grok-goal` descriptors; the shared filter still excludes unqualified live goal commands from other plugins.
+
+Desktop 26.1023.51421 starts a new Goal-mode chat with `/goal <objective>` as its opening Turn, then sends `thread/goal/set` for that objective. Matching in-flight creation requests share one native operation. A later duplicate acknowledges the existing goal only while its confirmed native ID, objective, budget and active status still match. Older persisted goals with the same text do not satisfy that confirmation.
+
+Ordinary text such as “set a goal to implement …” remains model input. Grok's native `update_goal` tool reports progress/completion for an existing goal; it cannot create one. Model-driven creation requires an additional native tool/control integration. No phrase matching or official Codex goal-tool injection is enabled.
 
 Commands submitted while a Turn is running use the Host's existing stop-then-start path: cancel the active execution, wait for its terminal outcome, then execute the command. Stopping a Turn alone does not establish that the native goal is paused. Use `/grok-goal pause` to request that state transition.
 

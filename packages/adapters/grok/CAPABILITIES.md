@@ -100,4 +100,6 @@
 
 ## Shared native goals
 
+Desktop Goal-mode entry: curated `/goal` admits the new-chat opening Turn; the matching `thread/goal/set` shares in-flight creation or acknowledges the same confirmed native ID/objective/budget/active state. The isolated native alias + duplicate-set + worker + pause/reopen/clear trial passed. Installed UI acceptance remains pending. Model-created goals from ordinary natural language remain a separate missing native tool; native `update_goal` only updates progress/completion of an existing goal.
+
 P1: optional public goals capability, native goal accounting and autonomous worker observation are implemented. Native hidden goal input is hydrated from persisted Prompt Index boundaries; real terminal IDs remain required. Focused regressions: `test/grok-goals.test.ts`, autonomous worker test in `test/grok-adapter.test.ts`, Host goal routing/unknown-plugin test. Native 1.0.45 active-control acceptance passed creation, worker observation, cancelled terminal identity, pause, same-ID paused reopen and clear (`CODEXHOST_GROK_GOAL_CONTROL_LIVE=1`). Full native completion trials timed out; completion, budget exhaustion and installed Desktop acceptance remain unqualified. Native goal scheduler stays in Grok; no Host-managed fallback.

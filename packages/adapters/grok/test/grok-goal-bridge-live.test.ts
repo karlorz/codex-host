@@ -1,4 +1,4 @@
-import { harnessModelRefSchema } from "@codexhost/shared-contracts";
+import { harnessModelRefSchema, hostTurnIdSchema } from "@codexhost/shared-contracts";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -10,7 +10,8 @@ import { GrokAdapter } from "../src/grok-adapter.js";
 
 it.skipIf(
   process.env.CODEXHOST_GROK_GOAL_BRIDGE_LIVE !== "1" &&
-    process.env.CODEXHOST_GROK_GOAL_CONTROL_LIVE !== "1",
+    process.env.CODEXHOST_GROK_GOAL_CONTROL_LIVE !== "1" &&
+    process.env.CODEXHOST_GROK_GOAL_DESKTOP_LIVE !== "1",
 )(
   "confirms a real native goal and observes its independent worker without a failed control Turn",
   async () => {
@@ -43,22 +44,48 @@ it.skipIf(
       const filename = path.join(cwd, `goal-${randomUUID()}.txt`);
       const goals = session.goals;
       if (!goals) throw new Error("Missing native goals capability");
-      const set = await goals.set({
-        objective: `Create ${filename} containing exactly one line: ok. Use a shell write, read it once to verify, then stop. This is a disposable empty workspace; change no other files.`,
-        origin: "user",
-      });
+      const objective = `Create ${filename} containing exactly one line: ok. Use a shell write, read it once to verify, then stop. This is a disposable empty workspace; change no other files.`;
+      const desktop = process.env.CODEXHOST_GROK_GOAL_DESKTOP_LIVE === "1";
+      const openingTurnId = hostTurnIdSchema.parse("desktop-goal-opening");
+      if (desktop) {
+        expect(
+          await session.commands?.execute({
+            turnId: openingTurnId,
+            commandId: "grok.desktop-goal",
+            arguments: { text: objective },
+          }),
+        ).toMatchObject({ ok: true });
+      }
+      const set = await goals.set({ objective, status: "active", origin: desktop ? null : "user" });
       if (!set.ok) throw new Error(set.error.message);
       expect(set.value.status).toBe("active");
       expect(session.hasBackgroundWork?.()).toBe(true);
       const deadline = Date.now() + 600_000;
       let completed = false;
-      if (process.env.CODEXHOST_GROK_GOAL_CONTROL_LIVE === "1") {
+      if (process.env.CODEXHOST_GROK_GOAL_CONTROL_LIVE === "1" || desktop) {
         while (
           Date.now() < deadline &&
           !events.some((event) => event.type === "turn.autonomous.started")
         )
           await delay(100);
         expect(events.some((event) => event.type === "turn.autonomous.started")).toBe(true);
+        if (desktop) {
+          expect(
+            events.find(
+              (event) => event.type === "turn.completed" && event.turnId === openingTurnId,
+            ),
+          ).toMatchObject({ ephemeral: true, outcome: { status: "succeeded" } });
+          const current = await goals.read();
+          expect(await goals.set({ objective, status: "active", origin: null })).toMatchObject({
+            ok: true,
+            value: { objective },
+          });
+          if (!current.ok || !current.value) throw new Error("Missing confirmed native goal");
+          expect(await goals.read()).toMatchObject({
+            ok: true,
+            value: { objective, createdAt: current.value.createdAt },
+          });
+        }
         const paused = await goals.set({ status: "paused", origin: "user" });
         if (!paused.ok) throw new Error(paused.error.message);
         expect(paused.value.status).toBe("paused");

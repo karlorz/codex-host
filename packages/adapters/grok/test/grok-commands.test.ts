@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { grokCommandCatalog, grokGoalPrompt } from "../src/grok-commands.js";
 
 describe("Grok native goals", () => {
-  it("has a static goal command distinct from Desktop's /goal", () => {
+  it("admits Desktop's opening /goal and retains the explicit /grok-goal command", () => {
+    expect(grokCommandCatalog.commands).toContainEqual(
+      expect.objectContaining({
+        id: "grok.desktop-goal",
+        invocation: "/goal",
+        argumentMode: "text",
+      }),
+    );
     expect(grokCommandCatalog.commands).toContainEqual(
       expect.objectContaining({ id: "grok.goal", invocation: "/grok-goal", argumentMode: "text" }),
     );
