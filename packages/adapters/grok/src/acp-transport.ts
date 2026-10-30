@@ -94,6 +94,11 @@ export class GrokTransportError extends Error {
 }
 
 export type GrokTransportEvent =
+  | {
+      type: "goal.changed";
+      update: Record<string, unknown> | null;
+      metadata?: Record<string, unknown>;
+    }
   | { type: "user.text"; text: string; messageId?: string; metadata?: Record<string, unknown> }
   | { type: "agent.text"; text: string; messageId?: string; metadata?: Record<string, unknown> }
   | { type: "agent.thought"; text: string; messageId?: string; metadata?: Record<string, unknown> }
@@ -318,6 +323,9 @@ function transportEvent(
   metadata?: Record<string, unknown>,
 ): GrokTransportEvent | null {
   const extension = update as unknown as Record<string, unknown>;
+  if (extension.sessionUpdate === "goal_updated")
+    return { type: "goal.changed", update: extension };
+  if (extension.sessionUpdate === "goal_cleared") return { type: "goal.changed", update: null };
   if (extension.sessionUpdate === "response_completed") {
     return {
       type: "response.completed",
@@ -584,6 +592,8 @@ export class GrokAcpTransport {
     GrokAcpTransportOptions;
   #activeCompact: ActiveCompact | null = null;
   #activePrompt: ActivePrompt | null = null;
+  #background: ActivePrompt | null = null;
+  #goalPrompts = 0;
   #child: ChildProcessWithoutNullStreams | null = null;
   #closed = false;
   #closing = false;
@@ -775,7 +785,7 @@ export class GrokAcpTransport {
     if (
       !this.#connection ||
       !this.#sessionId ||
-      !this.#activePrompt ||
+      (!this.#activePrompt && !this.#background) ||
       this.#closed ||
       this.#closing
     )
@@ -974,6 +984,27 @@ export class GrokAcpTransport {
     return initialize;
   }
 
+  observeBackground(observer: ActivePrompt): void {
+    this.#background = observer;
+  }
+
+  async goalControl(text: string): Promise<PromptResponse> {
+    if (!this.#connection || !this.#sessionId || this.#closed || this.#closing)
+      throw new GrokTransportError("unavailable", "Grok goal Session is unavailable");
+    if (this.#goalPrompts > 0 && ["/goal pause", "/goal clear"].includes(text)) {
+      await this.#connection.cancel({ sessionId: this.#sessionId });
+    }
+    this.#goalPrompts++;
+    try {
+      return await this.#connection.prompt({
+        sessionId: this.#sessionId,
+        prompt: [{ type: "text", text }],
+      });
+    } finally {
+      this.#goalPrompts--;
+    }
+  }
+
   async runTurn(
     text: string,
     onEvent: ActivePrompt["onEvent"],
@@ -1105,7 +1136,11 @@ export class GrokAcpTransport {
 
   cancel(): Promise<void> {
     const connection = this.#connection;
-    if (!connection || !this.#sessionId || (!this.#activePrompt && !this.#activeCompact)) {
+    if (
+      !connection ||
+      !this.#sessionId ||
+      (!this.#activePrompt && !this.#activeCompact && !this.#background && !this.#goalPrompts)
+    ) {
       return Promise.reject(new Error("Grok ACP Session has no cancellable operation"));
     }
     if (this.#activeCompact) this.#activeCompact.cancellationRequested = true;
@@ -1223,7 +1258,10 @@ export class GrokAcpTransport {
     const enriched = metadata ? { ...event, metadata } : event;
     if (this.#replay) this.#replay.push(enriched);
     else if (this.#activePrompt) this.#activePrompt.onEvent(enriched);
-    else this.#activeCompact?.onEvent(enriched);
+    else if (this.#activeCompact) this.#activeCompact.onEvent(enriched);
+    else this.#background?.onEvent(enriched);
+    if (event.type === "goal.changed" && (this.#activePrompt || this.#activeCompact))
+      this.#background?.onEvent(enriched);
   }
 
   #handleExtensionNotification(method: string, params: Record<string, unknown>): void {
@@ -1233,10 +1271,14 @@ export class GrokAcpTransport {
   }
 
   #handlePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
-    if (params.sessionId !== this.#sessionId || !this.#activePrompt) {
+    const observer = this.#activePrompt ?? this.#background;
+    if (params.sessionId !== this.#sessionId || !observer) {
       return Promise.resolve({ outcome: { outcome: "cancelled" } });
     }
-    return this.#activePrompt.onPermission({ request: params, options: params.options });
+    return observer.onPermission({
+      request: params,
+      options: params.options,
+    });
   }
 
   async #handleExtMethod(
@@ -1245,7 +1287,7 @@ export class GrokAcpTransport {
   ): Promise<Record<string, unknown>> {
     const activePrompt =
       !this.#closed && !this.#closing && this.#replay === null && this.#activeCompact === null
-        ? this.#activePrompt
+        ? (this.#activePrompt ?? this.#background)
         : null;
     if (method === GROK_ASK_USER_QUESTION_METHOD) {
       let request: GrokQuestionRequest;

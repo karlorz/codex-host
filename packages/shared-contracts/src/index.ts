@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./goals.js";
 export * from "./delegation-read.js";
 export * from "./credential-imports.js";
 export * from "./harness-display-settings.js";

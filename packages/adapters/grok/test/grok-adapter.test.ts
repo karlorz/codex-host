@@ -4130,3 +4130,61 @@ describe("Grok Adapter ACP projection", () => {
     }
   });
 });
+
+it("observes independent native goal worker rounds without admitting a command Turn", async () => {
+  const transport = new FakeGrokTransport();
+  let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
+  Object.assign(transport, {
+    observeBackground: (value: NonNullable<typeof observer>) => {
+      observer = value;
+    },
+    goalControl: async () => ({ stopReason: "end_turn" }),
+  });
+  const { adapter, session } = await openedSession(transport);
+  const events: HostEvent[] = [];
+  const output = (async () => {
+    for await (const o of session.outputs) if (o.kind === "event") events.push(o.event);
+  })();
+  try {
+    expect(session.capabilities.autonomousTurns?.observe).toBe(true);
+    const user: GrokTransportEvent = {
+      type: "user.text",
+      text: "<system-reminder>A goal has been set</system-reminder>",
+      metadata: { promptIndex: 0 },
+    };
+    const agent: GrokTransportEvent = {
+      type: "agent.text",
+      text: "Done.",
+      messageId: "native-answer",
+    };
+    const terminal: GrokTransportEvent = {
+      type: "turn.completed",
+      nativeTurnKey: "native-goal-worker",
+      stopReason: "end_turn",
+    };
+    if (!observer) throw new Error("Missing native observer");
+    // Native goal inputs persist without a live user notification.
+    transport.replay.push(user);
+    observer.onEvent({ type: "goal.changed", update: null });
+    observer.onEvent(agent);
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === "turn.autonomous.started")).toBe(true),
+    );
+    // Native notifications can precede the persistence actor's append.
+    observer.onEvent(terminal);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    transport.replay.push(agent, terminal);
+    await vi.waitFor(() => expect(events.some((e) => e.type === "turn.completed")).toBe(true));
+    expect(events.find((e) => e.type === "turn.completed")).toMatchObject({
+      nativeTurnRef: { nativeTurnKey: "native-goal-worker" },
+      outcome: { status: "succeeded" },
+    });
+    expect(await session.readSnapshot()).toMatchObject({
+      ok: true,
+      value: { turns: [{ nativeTurnRef: { nativeTurnKey: "native-goal-worker" } }] },
+    });
+  } finally {
+    await adapter.close();
+    await output;
+  }
+});

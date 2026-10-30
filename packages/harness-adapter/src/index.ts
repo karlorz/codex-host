@@ -1,3 +1,4 @@
+export type { HarnessGoalCapability } from "./goals.js";
 import { WORKSPACE_CONTRACT_VERSION } from "@codexhost/shared-contracts";
 
 export type {
@@ -22,6 +23,7 @@ export type {
 } from "./usage-statistics.js";
 export type {
   AutonomousTurnStartedEvent,
+  GoalChangedEvent,
   CreateSessionInput,
   ForkSessionInput,
   HarnessAdapter,

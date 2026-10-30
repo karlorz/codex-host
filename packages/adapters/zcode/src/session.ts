@@ -94,6 +94,8 @@ export class ZcodeSession implements HarnessSession {
   #faulted = false;
   #configuring = false;
   #goalActive = false;
+  #goalControl = false;
+  #goalMessages: NativeMessage[] = [];
   #lastSeq = 0;
   #closePromise: Promise<void> | undefined;
   #terminalTask: Promise<void> | undefined;
@@ -121,8 +123,11 @@ export class ZcodeSession implements HarnessSession {
   get sessionId() {
     return this.#snapshot.session.sessionId;
   }
+  hasBackgroundWork(): boolean {
+    return this.#goalActive;
+  }
   get busy() {
-    return Boolean(this.#active || this.#configuring || this.isLocked());
+    return Boolean(this.#active || this.#configuring || this.#goalControl || this.isLocked());
   }
   #emit(event: HostEvent) {
     this.#channel.emit({ kind: "event", event });
@@ -388,26 +393,78 @@ export class ZcodeSession implements HarnessSession {
       return failure("invalidRequest", "ZCode command arguments must contain only text");
     try {
       const argument = text(command.arguments?.text);
-      return await this.#start(
-        command.turnId,
-        command.commandId === "compact" ? "compactSession" : "goalSession",
-        command.commandId === "compact"
-          ? { inputId: command.turnId, ...(argument ? { instructions: argument } : {}) }
-          : { inputId: command.turnId, ...goalArguments(argument) },
-      );
+      if (command.commandId === "goal") return await this.#controlGoal(command, argument);
+      return await this.#start(command.turnId, "compactSession", {
+        inputId: command.turnId,
+        ...(argument ? { instructions: argument } : {}),
+      });
     } catch (error) {
       return { ok: false, error: nativeError(error) };
     }
   }
+  async #controlGoal(
+    command: HarnessCommandInvocation,
+    argument: string,
+  ): Promise<HarnessResult<TurnStartAccepted>> {
+    if (this.busy) return failure("sessionBusy", "ZCode goal control is already running", true);
+    this.#goalControl = true;
+    const params = goalArguments(argument);
+    const previous = this.#goalActive;
+    if (["set", "replace", "resume"].includes(params.action ?? "")) this.#goalActive = true;
+    this.#emit({ type: "turn.started", turnId: command.turnId });
+    try {
+      const result = record(
+        await this.transport.request("goalSession", {
+          sessionId: this.sessionId,
+          inputId: command.turnId,
+          ...params,
+        }),
+      );
+      if (this.#closed || this.#faulted)
+        throw new ZcodeError("invalidState", "ZCode closed during goal control");
+      if (result.snapshot) this.#apply(snapshotSchema.parse(result.snapshot));
+      const response = text(result.response);
+      if (response) {
+        const item = {
+          type: "agentMessage" as const,
+          itemId: hostItemIdSchema.parse(`command:${command.turnId}`),
+          text: response,
+        };
+        this.#emit({ type: "item.started", turnId: command.turnId, item });
+        this.#emit({
+          type: "item.completed",
+          turnId: command.turnId,
+          snapshot: { item, outcome: { status: "succeeded" } },
+        });
+      }
+      this.#emit({
+        type: "turn.completed",
+        turnId: command.turnId,
+        ephemeral: true,
+        outcome: { status: "succeeded" },
+      });
+      return { ok: true, value: { turnId: command.turnId } };
+    } catch (error) {
+      this.#goalActive = previous;
+      const normalized = nativeError(error);
+      this.#emit({
+        type: "turn.completed",
+        turnId: command.turnId,
+        ephemeral: true,
+        outcome: { status: "failed", error: normalized },
+      });
+      return { ok: true, value: { turnId: command.turnId } };
+    } finally {
+      this.#goalControl = false;
+      for (const message of this.#goalMessages.splice(0)) this.#message(message);
+    }
+  }
   async #start(
     id: HostTurnId,
-    method: "sendText" | "compactSession" | "goalSession",
+    method: "sendText" | "compactSession",
     params: Record<string, unknown>,
   ): Promise<HarnessResult<TurnStartAccepted>> {
     if (this.busy) return failure("sessionBusy", "ZCode already has an active operation", true);
-    const previousGoalActive = this.#goalActive;
-    if (method === "goalSession" && ["set", "replace", "resume"].includes(text(params.action)))
-      this.#goalActive = true;
     const active: ActiveTurn = {
       id,
       accepted: false,
@@ -416,16 +473,12 @@ export class ZcodeSession implements HarnessSession {
       projection: new TurnProjection(id, this.transport.options.cwd, (event) => this.#emit(event)),
     };
     this.#active = active;
-    let result: Record<string, unknown>;
     try {
-      result = record(
-        method === "sendText"
-          ? await this.transport.command(this.sessionId, "sendText", params, id)
-          : await this.transport.request(method, { sessionId: this.sessionId, ...params }),
-      );
+      if (method === "sendText")
+        await this.transport.command(this.sessionId, "sendText", params, id);
+      else await this.transport.request(method, { sessionId: this.sessionId, ...params });
     } catch (error) {
       if (this.#active === active) this.#active = undefined;
-      this.#goalActive = previousGoalActive;
       throw error;
     }
     if (this.#closed || this.#faulted)
@@ -433,24 +486,14 @@ export class ZcodeSession implements HarnessSession {
     active.accepted = true;
     this.#emit({ type: "turn.started", turnId: id });
     for (const message of active.pending.splice(0)) this.#message(message);
-    if (method === "goalSession" && result.startedTurn !== true) {
-      const response = text(result.response);
-      if (response)
-        active.projection.complete({
-          item: {
-            type: "agentMessage",
-            itemId: hostItemIdSchema.parse(`command:${id}`),
-            text: response,
-          },
-          outcome: { status: "succeeded" },
-        });
-      if (result.snapshot) this.#apply(snapshotSchema.parse(result.snapshot));
-      this.#finish(active, { status: "succeeded" });
-    }
     return { ok: true, value: { turnId: id } };
   }
   #message(message: NativeMessage) {
     if (this.#closed || this.#faulted) return;
+    if (this.#goalControl && !this.#active) {
+      this.#goalMessages.push(message);
+      return;
+    }
     const p = record(message.params);
     // The transport reports each business request once, so no re-announcement merging is needed.
     if (message.requestId !== undefined) {

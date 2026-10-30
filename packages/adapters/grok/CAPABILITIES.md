@@ -33,7 +33,7 @@
 | B9 | 审批 | 原生有则必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts | ACP request_permission |
 | B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts | test/grok-questions.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 专属按钮不投影；真实 Desktop 已验收单选与文本 |
 | B11 | 原生 Subagent | 原生有则必做 | P2 | 支持 | src/grok-subagent.ts、src/grok-subagent-lifecycle.ts | test/grok-subagent.test.ts、test/grok-adapter.test.ts |  |
-| B12 | 自主 Turn | 原生有则必做 | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | 当前仅在活动 Turn 中投影原生输出 |
+| B12 | 自主 Turn | 原生有则必做 | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | Structured goal updates and independent native worker observation; installed Desktop lifecycle pending |
 | B13 | 会话用量 | 原生有则必做 | P1 | 支持 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-usage.test.ts、test/grok-acp-usage.test.ts |  |
 | B14 | 请求级计量 | 原生有则必做 | P2 | 受限 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-adapter.test.ts | 当前发布原生费用快照，不发布 usage.request / usage.history |
 | B15 | 接收委派 | 必做（验证项） | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | 执行策略与环境有测试；真实完整委派未验收 |
@@ -55,7 +55,7 @@
 ## 受限与已知缺口
 
 - Checkpoint rollback: implemented through optional `history.rollbackToCheckpoint` and native conversation-only rewind; validates exact retained Turn identities and supports an empty prefix. Isolated 1.0.45 real-model history trial passed; installed Desktop acceptance is pending. Legacy unmarked goal-control history is rejected before mutation.
-- `/grok-goal`: implemented native objective / optional trailing budget / status / pause / resume / clear routing. Local no-goal controls and same-ID reopen passed on 1.0.45 with zero model calls. Active-goal lifecycle and background continuation projection remain unqualified; B12 remains limited. Host owns no goal scheduler or goal state.
+- `/grok-goal`: implemented native objective / optional trailing budget / status / pause / resume / clear routing. Local no-goal controls and same-ID reopen passed on 1.0.45 with zero model calls. Independent background continuation projection is implemented; active-control, budget and installed Desktop acceptance remain partly unqualified; B12 remains limited. Host owns no goal scheduler or goal state.
 - Installed Desktop acceptance for these extensions requires an approved restart. Running codexhost/Desktop sessions must remain untouched until Karl approves.
 
 - B3：Grok 1.0.67 的权限扩展没有 RPC 回执，`session/info` 和 `configOptions` 不包含权限。生效确认必须取自原生权限管理器的实际状态，不能由发送结果推断。仅在无活动 Turn 或压缩操作时切换；通知作用于独立进程内的匹配会话。原生受管策略和 Auto 功能开关始终生效。
@@ -97,3 +97,7 @@
 - Regression evidence: `test/grok-commands.test.ts`, `test/grok-rewind.test.ts`, `test/grok-acp-history-settlement.test.ts`, Adapter tests, Host multi-Turn rollback tests, Mapping Store conflict tests and legacy capability-schema coverage.
 - Native opt-in test: `CODEXHOST_GROK_GOAL_HISTORY_LIVE=1` verifies local controls/reopen without inference; `CODEXHOST_GROK_MODEL_HISTORY_LIVE=1` verifies real model-backed checkpoint rewind. Both isolate GROK_HOME/project, preserve workspace sentinel contents and close only their own processes.
 - User-facing limitations and matrix criteria: `docs/harnesses/grok/goals-and-history.md`. Running installed sessions were not restarted or replaced.
+
+## Shared native goals
+
+P1: optional public goals capability, native goal accounting and autonomous worker observation are implemented. Native hidden goal input is hydrated from persisted Prompt Index boundaries; real terminal IDs remain required. Focused regressions: `test/grok-goals.test.ts`, autonomous worker test in `test/grok-adapter.test.ts`, Host goal routing/unknown-plugin test. Native 1.0.45 active-control acceptance passed creation, worker observation, cancelled terminal identity, pause, same-ID paused reopen and clear (`CODEXHOST_GROK_GOAL_CONTROL_LIVE=1`). Full native completion trials timed out; completion, budget exhaustion and installed Desktop acceptance remain unqualified. Native goal scheduler stays in Grok; no Host-managed fallback.

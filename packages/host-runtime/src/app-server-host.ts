@@ -1,3 +1,5 @@
+import { EXTERNAL_GOAL_METHODS, executeExternalGoal } from "./external-thread-goals.js";
+import { projectCodexGoalChanged } from "@codexhost/protocol-core";
 import {
   VOICE_SETTINGS_METHOD,
   VOICE_GATEWAY_STATUS_METHOD,
@@ -538,6 +540,7 @@ const HOST_APPROVAL_REQUEST_ID_MAX = -1_000_001;
 const HOST_QUESTION_REQUEST_ID_MIN = -1_000_000;
 const HOST_QUESTION_REQUEST_ID_MAX = -1;
 const EXPLICIT_EXTERNAL_THREAD_METHODS = new Set([
+  ...EXTERNAL_GOAL_METHODS,
   "thread/archive",
   "thread/delete",
   "thread/fork",
@@ -2046,6 +2049,29 @@ export class AppServerHost {
           return;
         }
         await this.#revertExternalThread(request, resolution.thread, revert);
+        return;
+      }
+    }
+    if (EXTERNAL_GOAL_METHODS.has(request.method)) {
+      const params = routingParams(request);
+      const resolution =
+        typeof params.threadId === "string"
+          ? await this.#resolveExternalThread(params.threadId)
+          : ({ kind: "official" } as const);
+      if (await this.#writeResolutionError(request, resolution)) return;
+      if (resolution.kind === "external") {
+        const thread = resolution.thread;
+        const response = await executeExternalGoal(
+          thread.session,
+          thread.id,
+          request.method,
+          params,
+        );
+        if (this.#externalRuntime.get(thread.id) !== thread) {
+          await this.#writer.json(rpcError(request, -32076, "External goal Session was replaced"));
+        } else {
+          await this.#writer.json(rpcEnvelope(request, response));
+        }
         return;
       }
     }
@@ -5409,6 +5435,11 @@ export class AppServerHost {
       return;
     }
     let event = output.event;
+    if (event.type === "goal.changed") {
+      if (this.#externalRuntime.get(thread.id) !== thread) return;
+      await this.#writer.json(projectCodexGoalChanged(thread.id, event.goal));
+      return;
+    }
     if (this.#meterTurnTiming(thread, event)) await this.#notifyThreadUsage(thread);
     if (event.type === "item.started" && event.item.type === "subagentDelegation") {
       event = {

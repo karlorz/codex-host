@@ -108,3 +108,9 @@ CODEXHOST_TEST_ZCODE_APP=/Applications/ZCode.app npx vitest run --config tests/v
 ```
 
 Host 集成测试需要先 `npm run build:typescript` 生成插件包。2026-09-28 在 macOS arm64 / ZCode 3.14.3（CLI 0.16.9）上，Host 分别使用 Node 22.22 与 Node 24 均通过：目录、检测不留会话、多轮/恢复、取消后继续、并行工作区工具环境、原生提问、审批、配置、文件差异，以及 Start Plan 的 JWT 与验证码 Header 注入、多个 Session 共用一个验证器且只预热一次；真实 Loader → Host 路由 → 原生 Turn → 历史路径另有集成测试。验证页的共享队列、取消隔离、预热、每次验证新实例、过期回调隔离、F008 与“`show()` 后再次 `getInstance` 再 success”另有单元测试和使用合成 SDK 的浏览器测试（`tests/e2e/zcode-verification.spec.ts`，可用 `CODEXHOST_PLAYWRIGHT_EXECUTABLE_PATH` 指定本机 Chrome）。真实 Start Plan 验收见上文“账号验证页”。2026-09-30 在 macOS arm64 / ZCode 3.14.4 上实测：CLI 及其 MCP 子进程以 Helper 运行，登记为 `UIElement`，Dock 无图标；服务端配置 `skip_model_request: true` 时多步工具任务的 6 次模型请求均未触发验证；目录只列出套餐允许的 Start Plan 模型；自定义 Provider 会话正常；恢复后的会话立即给出已用上下文与缓存用量。Windows、Linux 的安装识别只有模拟目录结构的单元测试，未在真机验证；SSH 未验证。
+
+## Native goals
+
+`/goal` uses typed `session/goal` controls. The command completes as an ephemeral control entry before a separately started native worker is projected as an autonomous Turn. Active native target state keeps the Session alive between worker rounds. Native request failures remain command failures; controls do not create a durable history identity.
+
+The shared Desktop goal panel is not advertised for ZCode: the available protocol types do not establish goal-level token usage, elapsed active time or timestamps, and no ZCode runtime is installed on the implementation host to qualify those fields. Request-level usage is not substituted. The public bridge remains available for a future qualified mapping; see [Native goals](../../architecture/harness-goals.md).

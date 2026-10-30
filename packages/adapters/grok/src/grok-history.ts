@@ -360,7 +360,7 @@ export function mapGrokReplay(
         checkpointId: grokCheckpointId(currentPromptIndex),
         formatVersion: 1,
       }),
-      input: [{ type: "text", text: input }],
+      input: systemReminderPattern.test(input) ? [] : [{ type: "text", text: input }],
       items,
       outcome,
     });
@@ -374,6 +374,19 @@ export function mapGrokReplay(
     items = [];
   };
 
+  // Native goal continuations use hidden user input but own a real prompt index and
+  // terminal ID. Task-completed reminders remain excluded from conversation history.
+  const durableSynthetic = new Set<GrokTransportEvent>();
+  let candidate: GrokTransportEvent | undefined;
+  for (const event of replay) {
+    if (event.type === "user.text")
+      candidate = explicitPromptIndex(event) !== null ? event : undefined;
+    else if (event.type === "turn.completed") {
+      if (candidate && !isSyntheticGrokTurnKey(event.nativeTurnKey))
+        durableSynthetic.add(candidate);
+      candidate = undefined;
+    } else if (event.type === "rewind.marker") candidate = undefined;
+  }
   for (const event of replay) {
     if (event.type === "rewind.marker") {
       turns = turns.filter((turn) => {
@@ -399,7 +412,7 @@ export function mapGrokReplay(
     }
     if (event.type === "user.text") {
       if (isHostTurnEvent(event)) continue;
-      if (isSyntheticGrokUserText(event.text)) {
+      if (isSyntheticGrokUserText(event.text) && !durableSynthetic.has(event)) {
         if (input.length > 0) {
           completeTurn({
             status: "unknown",

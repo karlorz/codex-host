@@ -187,6 +187,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 | 斜杠命令 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | 修订上一条消息 | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 原生目标生命周期 | ? | ? | ? | ? | ◐ | ✅ | ? | — | — | ? | ? | ? | ? | ? |
+| Shared goal panel | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
+| Host-managed goals | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | 实时语音 | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
 | 多选提问 | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |
 | 提问超时倒计时 | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
@@ -197,7 +199,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 图例：✅ 已接入 · ◐ 部分接入、降级或仅保存意向 · — 当前插件未投影该能力 · ? 未验证。
 
-- **Native goals and Grok editing**: `/grok-goal` forwards objective, optional native budget, status, pause, resume and clear. Grok is ◐: command and checkpoint regression coverage plus isolated native history trials do not establish full background goal observation or installed Desktop acceptance. DSH exposes `/dsh-goal`; Antigravity advertises an objective command but its autonomous lifecycle is unverified (?). Other ? cells are unverified, and — means no current plugin exposure. Grok edits use conversation-only native rewind and preserve workspace files. See [Grok goals and history](../harnesses/grok/goals-and-history.md).
+- **Native goals and Grok editing**: Grok implements the shared native-goal bridge and independent background worker observation; ◐ retains pending installed Desktop lifecycle acceptance. DSH's ✅ describes its existing native command lifecycle, not shared-panel parity. ZCode has typed native controls/background ownership, but its shared-panel accounting remains unqualified. Unsupported shared goal RPCs fail explicitly; no Host-managed scheduler or official goal-tool injection is enabled. Other ? cells remain unverified. Grok editing uses conversation-only native rewind. See [Native goal bridge](../architecture/harness-goals.md).
 - **实时语音**使用本 fork 按 Desktop 版本审计的 hook 与已配置的 gateway。Host 的 `thread/realtime/*` 和新会话继承所选 Harness 的路径是通用的。Claude Code 有已记录的有人值守 Desktop 通话；Grok 标为 ◐，因为验证覆盖真实 gateway 通话和公共插件的隔离 Host 试验，尚不等于已安装 Desktop 按钮验收。其他 Harness 未验证（?）。详见 [CPA live-voice Desktop hook](../operations/cpa-live-voice-desktop-hook.md)。
 - **多选提问**：Adapter 发出 `multiple: true` 时使用共享 codexhost 复选框卡片，选中值以数组回传；允许 Other 的单选组也使用 Composer 上方的共享卡片，保留普通聊天输入框；其他单选/文本组仍使用原生 Desktop 卡片。Grok 保留原生多选标记及全部选中标签。共享 Host/浏览器路径有回归测试，安装版 Desktop 人工测试已同时回传 Alpha 与 Beta。其他 Adapter 的原生多选全链路未验证时仍标为 ◐。OMP 使用独立单选/文本交互；Pi 固定单选，Antigravity 拒绝多选。详见 [Grok 原生提问](../harnesses/grok/questions.md)、[Antigravity 提问交互复盘](../harnesses/antigravity/antigravity-question-interaction-postmortem.md) 与 [OMP 交互](../harnesses/omp/omp-interactions.md)。
 - **提问倒计时与活动重置**目前仅由 Grok 插件在共享提问卡片上提供。纯文本问题组保留原生 Desktop 卡片，不显示该倒计时或转发该活动。倒计时需 grokgod 补丁 `0027`；确认式重置还需 `0028` 与原生 `timeout_reset_on_activity = true`。两行因界面与构建限制标为 ◐，其他插件目前未提供（—）。这些行描述外部 Harness 接入，不代表原生 Codex 模型提问工具的能力。详见 [Grok 原生提问](../harnesses/grok/questions.md)。

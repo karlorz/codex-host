@@ -1,3 +1,5 @@
+import type { HarnessGoalCapability } from "./goals.js";
+import type { HarnessGoal } from "@codexhost/shared-contracts";
 import type { HarnessUsageStatisticsCapability } from "./usage-statistics.js";
 import type {
   HarnessAccountSnapshot,
@@ -591,7 +593,13 @@ export interface SessionFaultedEvent {
   error: HarnessError;
 }
 
+export interface GoalChangedEvent {
+  type: "goal.changed";
+  goal: HarnessGoal | null;
+}
+
 export type HostEvent =
+  | GoalChangedEvent
   | SessionStateChangedEvent
   | SessionUsageChangedEvent
   | UsageRequestEvent
@@ -625,6 +633,7 @@ export interface HarnessSession {
   readonly initialUsage: HostUsage | null;
   readonly outputs: AsyncIterable<HarnessOutput>;
   readonly commands?: HarnessCommandCapability;
+  readonly goals?: HarnessGoalCapability;
   /** Real question-card activity. Only return a deadline acknowledged by the native timer. */
   questionActivity?(
     interactionId: HostInteractionId,

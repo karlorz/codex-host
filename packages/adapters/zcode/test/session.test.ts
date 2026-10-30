@@ -1,3 +1,4 @@
+import type { HostEvent } from "@codexhost/harness-adapter";
 import { describe, expect, it, vi } from "vitest";
 import { hostInteractionIdSchema, hostTurnIdSchema } from "@codexhost/shared-contracts";
 import { sessionUsage } from "../src/models.js";
@@ -221,5 +222,82 @@ describe("ZCode Session usage", () => {
   });
   it("reports nothing when the Session has neither a window nor runtime usage", () => {
     expect(sessionUsage(session({ contextUsed: 0, contextWindow: 0 }), catalog())).toBeNull();
+  });
+});
+
+describe("ZCode goal controls and background ownership", () => {
+  it("keeps an active native goal alive between rounds and releases paused goals", async () => {
+    const state = fixture();
+    await state.session.subscribe();
+    state.emit({
+      type: "session.event",
+      event: {
+        eventId: "goal-active",
+        sessionId: SESSION_ID,
+        seq: 1,
+        timestamp: 1,
+        type: "session.updated",
+        payload: { target: { status: "active" } },
+      },
+    });
+    expect(state.session.hasBackgroundWork()).toBe(true);
+    state.emit({
+      type: "session.event",
+      event: {
+        eventId: "goal-paused",
+        sessionId: SESSION_ID,
+        seq: 2,
+        timestamp: 2,
+        type: "session.updated",
+        payload: { target: { status: "paused" } },
+      },
+    });
+    expect(state.session.hasBackgroundWork()).toBe(false);
+    state.closing.resolve(undefined);
+    await state.session.close();
+  });
+  it("finishes the ephemeral control before projecting a native worker with its own identity", async () => {
+    const state = fixture();
+    await state.session.subscribe();
+    const events: HostEvent[] = [];
+    const output = (async () => {
+      for await (const o of state.session.outputs) if (o.kind === "event") events.push(o.event);
+    })();
+    state.transport.request.mockImplementationOnce(async () => {
+      state.emit({
+        type: "session.event",
+        event: {
+          eventId: "worker-start",
+          sessionId: SESSION_ID,
+          turnId: "native-worker",
+          seq: 1,
+          timestamp: 1,
+          type: "turn.started",
+          payload: { messageId: "native-user", input: "native continuation" },
+        },
+      });
+      return { ...snapshot, startedTurn: true };
+    });
+    expect(
+      await state.session.commands.execute({
+        turnId: hostTurnIdSchema.parse("goal-control"),
+        commandId: "goal",
+        arguments: { text: "native goal" },
+      }),
+    ).toMatchObject({ ok: true });
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === "turn.autonomous.started")).toBe(true),
+    );
+    const control = events.findIndex(
+      (e) => e.type === "turn.completed" && e.turnId === "goal-control",
+    );
+    const worker = events.findIndex((e) => e.type === "turn.autonomous.started");
+    expect(control).toBeGreaterThanOrEqual(0);
+    expect(worker).toBeGreaterThan(control);
+    expect(events[control]).toMatchObject({ ephemeral: true, outcome: { status: "succeeded" } });
+    expect(state.session.hasBackgroundWork()).toBe(true);
+    state.closing.resolve(undefined);
+    await state.session.close();
+    await output;
   });
 });

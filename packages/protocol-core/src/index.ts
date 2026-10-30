@@ -114,6 +114,8 @@ export {
   writeJsonFrame,
 } from "./jsonl.js";
 
+export { projectCodexGoal, projectCodexGoalChanged } from "./codex-goals.js";
+
 export const packageMetadata = {
   name: "@codexhost/protocol-core",
   contractVersion: WORKSPACE_CONTRACT_VERSION,
