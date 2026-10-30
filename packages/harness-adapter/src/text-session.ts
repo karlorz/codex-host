@@ -538,6 +538,7 @@ export interface TurnStartedEvent {
 }
 
 export interface AutonomousTurnStartedEvent {
+  /** Admit a native worker; emit turn.started next, before its Items or terminal. */
   type: "turn.autonomous.started";
   turnId: HostTurnId;
   input: HostTextInput[];

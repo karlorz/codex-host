@@ -4171,6 +4171,14 @@ it("observes independent native goal worker rounds without admitting a command T
     await vi.waitFor(() =>
       expect(events.some((e) => e.type === "turn.autonomous.started")).toBe(true),
     );
+    const workerStart = events.findIndex((e) => e.type === "turn.autonomous.started");
+    expect(events[workerStart + 1]).toMatchObject({
+      type: "turn.started",
+      turnId:
+        events[workerStart]?.type === "turn.autonomous.started"
+          ? events[workerStart].turnId
+          : undefined,
+    });
     // Native notifications can precede the persistence actor's append.
     observer.onEvent(terminal);
     await new Promise((resolve) => setTimeout(resolve, 30));

@@ -95,7 +95,7 @@ close 同样必须终结活动中的生命周期，并且幂等。可恢复的�
 
 ## Autonomous Turn 与原生 Subagent
 
-原生可能在没有 Host `turn.start` 的情况下产生输出。能完整观测时声明 `autonomousTurns.observe`：用 `turn.autonomous.started` 分配公共 Turn 身份并提供原生可见的输入（没有输入时用空数组），之后遵循普通的 Item/Turn 规则，不能与另一个活动 Turn 混写。不能只因漏声明能力就丢弃原生的后台结果；如果暂时无法安全投影自主行为，记录限制并处理相关的原生模式。
+Native work without a Host `turn.start` requires `autonomousTurns.observe`. Emit `turn.autonomous.started` with the public Turn identity and native-visible input (an empty array when hidden), then emit `turn.started` before Items, Interactions or the terminal. The autonomous event admits the identity; it does not start the Turn projector. Continue with the ordinary lifecycle rules and never mix another active Turn's output. Missing capability declarations must not silently discard native background results; document and handle native modes that cannot yet be projected safely.
 
 Subagent 的 `observe` 和 `readTranscript` 分别声明。原生后台子任务可以在父 Turn 终态之后继续运行：使用稳定身份，通过 `subagent.state.changed` / `subagent.transcript.changed` 通知，而不是向已完成的父 Turn 追加 Item。支持读取 Transcript 时，实现 `adapter.subagents.readSnapshot({ parent, nativeSubagentId, cwd })`。参考 Pi（pi-subagents）、OMP（需订阅原生事件）、Grok、Antigravity。
 

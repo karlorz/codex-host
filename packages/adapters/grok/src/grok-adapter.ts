@@ -771,6 +771,7 @@ class GrokHarnessSession implements HarnessSession {
         turnId: command.turnId,
         input: /^\s*<system-reminder>/u.test(user.text) ? [] : command.input,
       });
+      this.#event({ type: "turn.started", turnId: command.turnId });
     }
     const active = this.#active;
     if (!active) return;
