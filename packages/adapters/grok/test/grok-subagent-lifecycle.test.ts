@@ -63,6 +63,53 @@ describe("Grok Subagent publication", () => {
     expect(lifecycle.size).toBe(0);
   });
 
+  it("deduplicates standalone helper attempts by native child identity", () => {
+    const { lifecycle, events } = fixture();
+    lifecycle.bindNativeId(turnId, {
+      nativeSubagentId: "planner",
+      parentPromptId: "worker",
+      description: "plan",
+      model: "grok-4.6",
+    });
+    lifecycle.bindNativeId(turnId, {
+      nativeSubagentId: "planner",
+      parentPromptId: "worker",
+      description: "revised plan",
+      model: "sonnet",
+    });
+    lifecycle.completeByNativeId(turnId, "planner", {
+      failed: false,
+      cancellationRequested: false,
+    });
+    lifecycle.bindNativeId(turnId, { nativeSubagentId: "planner", parentPromptId: "worker" });
+    expect(events.filter((e) => e.type === "item.started")).toHaveLength(1);
+    expect(events.find((e) => e.type === "item.completed")).toMatchObject({
+      snapshot: {
+        item: {
+          subagents: [
+            {
+              nativeSubagentId: "planner",
+              model: "sonnet",
+              description: "revised plan",
+              status: "completed",
+            },
+          ],
+        },
+      },
+    });
+  });
+  it("keeps tool and standalone helpers with the same description distinct", () => {
+    const { lifecycle, events } = fixture();
+    start(lifecycle, 0);
+    lifecycle.bindNativeId(turnId, {
+      nativeSubagentId: "helper",
+      parentPromptId: "worker",
+      description: "Review 0",
+    });
+    expect(lifecycle.nativeSubagentId("call-0")).toBeUndefined();
+    lifecycle.bindNativeId(turnId, { nativeSubagentId: "tool-child", description: "Review 0" });
+    expect(events.filter((e) => e.type === "item.started")).toHaveLength(2);
+  });
   it("publishes a child identity supplied directly by the spawn result", () => {
     const { lifecycle, events } = fixture();
     start(lifecycle, 0);

@@ -177,6 +177,9 @@ export type GrokSubagentTransportEvent =
   | {
       type: "subagent.spawned";
       nativeSubagentId: string;
+      parentPromptId?: string;
+      childSessionId?: string;
+      attemptId?: string;
       description?: string;
       role?: string;
       model?: string;
@@ -194,14 +197,21 @@ export function grokSubagentEventFromUpdate(update: unknown): GrokSubagentTransp
   if (!nativeSubagentId) return null;
   if (update.sessionUpdate === "subagent_spawned") {
     const description = bounded(stringField(update, "description"), DESCRIPTION_LIMIT);
+    const nativeType = stringField(update, "subagent_type");
     const role = bounded(
-      stringField(update, "subagent_type") ?? stringField(update, "role"),
+      stringField(update, "role") ?? (nativeType === "general-purpose" ? undefined : nativeType),
       DESCRIPTION_LIMIT,
     );
     const model = bounded(stringField(update, "model"), DESCRIPTION_LIMIT);
+    const parentPromptId = idField(update, "parent_prompt_id");
+    const childSessionId = idField(update, "child_session_id");
+    const attemptId = idField(update, "attempt_id");
     return {
       type: "subagent.spawned",
       nativeSubagentId,
+      ...(parentPromptId ? { parentPromptId } : {}),
+      ...(childSessionId ? { childSessionId } : {}),
+      ...(attemptId ? { attemptId } : {}),
       ...(description ? { description } : {}),
       ...(role ? { role } : {}),
       ...(model ? { model } : {}),

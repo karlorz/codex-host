@@ -45,6 +45,36 @@ describe("Grok native goal controls", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+  it("aborts pending control work at its deadline and never sends a late control", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "grok-goal-deadline-"));
+    await mkdir(path.join(directory, "goal"));
+    await writeFile(
+      path.join(directory, "goal/state.json"),
+      JSON.stringify({ ...state, status: "complete" }),
+    );
+    const worker = Promise.withResolvers<undefined>();
+    const sent = vi.fn();
+    const goals = new GrokGoals(
+      directory,
+      async (_prompt, signal) => {
+        await worker.promise;
+        signal.throwIfAborted();
+        sent();
+      },
+      () => {},
+      30,
+    );
+    try {
+      expect(await goals.clear()).toMatchObject({ ok: false });
+      worker.resolve(undefined);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      worker.resolve(undefined);
+      goals.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it("maps native high-water accounting and paused families without synthetic defaults", () => {
     expect(projectGrokGoal(state, 1793343010000)).toMatchObject({
       tokensUsed: 42,

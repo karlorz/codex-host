@@ -138,6 +138,7 @@ describe("Grok Subagent ACP mapping", () => {
     ).toEqual({
       type: "subagent.spawned",
       nativeSubagentId: "child-1",
+      childSessionId: "child-1",
       description: "Scan repo entry points",
       role: "explore",
       model: "grok-4.6",

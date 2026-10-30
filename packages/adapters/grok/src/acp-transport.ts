@@ -160,6 +160,9 @@ export type GrokTransportEvent =
   | {
       type: "subagent.spawned";
       nativeSubagentId: string;
+      parentPromptId?: string;
+      childSessionId?: string;
+      attemptId?: string;
       description?: string;
       role?: string;
       model?: string;
@@ -1022,6 +1025,7 @@ export class GrokAcpTransport {
     const active = { onEvent, onPermission, onElicitation, onQuestion };
     this.#activePrompt = active;
     try {
+      const historyStart = (await this.getHistory()).length;
       const response = await connection.prompt({
         sessionId: this.#sessionId,
         prompt: [{ type: "text", text }],
@@ -1037,9 +1041,9 @@ export class GrokAcpTransport {
         for (;;) {
           const history = await this.getHistory();
           if (
-            history.some(
-              (event) => event.type === "turn.completed" && event.nativeTurnKey === promptId,
-            )
+            history
+              .slice(historyStart)
+              .some((event) => event.type === "turn.completed" && event.nativeTurnKey === promptId)
           )
             break;
           if (this.#closing || this.#closed || Date.now() >= deadline) {

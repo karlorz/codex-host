@@ -17,6 +17,14 @@ import {
 } from "@codexhost/shared-contracts";
 
 import type { GrokTransportEvent } from "./acp-transport.js";
+import {
+  classifyGrokHistory,
+  grokHiddenInput,
+  grokHostTurn,
+  grokPromptIndex,
+  GrokNativeIdentityReuseError,
+} from "./grok-history-groups.js";
+import { placeGrokGoalHelpers } from "./grok-goal-helpers.js";
 import { grokTextItemId } from "./grok-text-item-id.js";
 import { projectGrokFileChanges } from "./grok-file-change.js";
 import {
@@ -68,32 +76,12 @@ function terminalOutcome(stopReason: string): HistoricalTurnOutcome {
   };
 }
 
-const systemReminderPattern = /^\s*<system-reminder>[\s\S]*$/u;
-const notificationTurnKeyPattern = /^(?:task|subagent)-completed-/u;
-
-function isSyntheticGrokUserText(text: string): boolean {
-  return systemReminderPattern.test(text);
-}
-
-function isSyntheticGrokTurnKey(nativeTurnKey: string): boolean {
-  return notificationTurnKeyPattern.test(nativeTurnKey);
-}
-
-function isHostTurnEvent(event: GrokTransportEvent): boolean {
-  return event.metadata?.hostTurn === true || event.metadata?.host_turn === true;
-}
-
 function userEventIdentity(
   event: Extract<GrokTransportEvent, { type: "user.text" }>,
 ): string | null {
   const eventId = event.metadata?.eventId;
   if (typeof eventId === "string" && eventId.length > 0) return eventId;
   return event.messageId && event.messageId.length > 0 ? event.messageId : null;
-}
-
-function explicitPromptIndex(event: GrokTransportEvent): number | null {
-  const value = event.metadata?.promptIndex ?? event.metadata?.prompt_index;
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 export function grokCheckpointId(promptIndex: number): string {
@@ -122,6 +110,7 @@ export function mapGrokReplay(
   );
   let turns: HostTurnSnapshot[] = [];
   let input = "";
+  let hiddenInput = false;
   let items: HostItemSnapshot[] = [];
   let turnIndex = 0;
   let messageIndex = 0;
@@ -360,7 +349,7 @@ export function mapGrokReplay(
         checkpointId: grokCheckpointId(currentPromptIndex),
         formatVersion: 1,
       }),
-      input: systemReminderPattern.test(input) ? [] : [{ type: "text", text: input }],
+      input: hiddenInput ? [] : [{ type: "text", text: input }],
       items,
       outcome,
     });
@@ -374,26 +363,13 @@ export function mapGrokReplay(
     items = [];
   };
 
-  // Native goal continuations own a prompt index and a new terminal ID. Background
-  // notifications and interruption records reusing an earlier ID are not new Turns.
-  const durableSynthetic = new Set<GrokTransportEvent>();
-  const seenTerminalKeys = new Set<string>();
-  let candidate: GrokTransportEvent | undefined;
-  for (const event of replay) {
-    if (event.type === "user.text")
-      candidate = explicitPromptIndex(event) !== null ? event : undefined;
-    else if (event.type === "turn.completed") {
-      if (
-        candidate &&
-        !isSyntheticGrokTurnKey(event.nativeTurnKey) &&
-        !seenTerminalKeys.has(event.nativeTurnKey)
-      )
-        durableSynthetic.add(candidate);
-      seenTerminalKeys.add(event.nativeTurnKey);
-      candidate = undefined;
-    } else if (event.type === "rewind.marker") candidate = undefined;
-  }
-  for (const event of replay) {
+  const groups = classifyGrokHistory(replay);
+  const durableSynthetic = new Set(
+    groups.filter((g) => g.disposition === "durable").map((g) => g.user),
+  );
+  const reused = groups.find((g) => g.disposition === "reused");
+  if (reused) throw new GrokNativeIdentityReuseError(reused.terminal.nativeTurnKey);
+  for (const event of placeGrokGoalHelpers(replay, groups)) {
     if (event.type === "rewind.marker") {
       turns = turns.filter((turn) => {
         const index = turn.checkpoint ? parseGrokPromptIndex(turn.checkpoint.checkpointId) : null;
@@ -417,30 +393,30 @@ export function mapGrokReplay(
       continue;
     }
     if (event.type === "user.text") {
-      if (isHostTurnEvent(event)) continue;
-      if (isSyntheticGrokUserText(event.text) && !durableSynthetic.has(event)) {
+      if (grokHostTurn(event)) continue;
+      if (grokHiddenInput(event) && !durableSynthetic.has(event)) {
         if (input.length > 0) {
           completeTurn({
             status: "unknown",
             reason: "Grok Native history has no terminal signal",
           });
         }
-        nativePromptIndex = (explicitPromptIndex(event) ?? nativePromptIndex) + 1;
+        nativePromptIndex = (grokPromptIndex(event) ?? nativePromptIndex) + 1;
         continue;
       }
       if (input.length > 0) {
         input += event.text;
         continue;
       }
-      currentPromptIndex = explicitPromptIndex(event) ?? nativePromptIndex;
+      currentPromptIndex = grokPromptIndex(event) ?? nativePromptIndex;
       nativePromptIndex = currentPromptIndex + 1;
       input = event.text;
+      hiddenInput = grokHiddenInput(event);
       nativeTurnKey = userEventIdentity(event);
       continue;
     }
     if (input.length === 0) continue;
     if (event.type === "turn.completed") {
-      if (isSyntheticGrokTurnKey(event.nativeTurnKey)) continue;
       completeTurn(terminalOutcome(event.stopReason), event.nativeTurnKey);
     } else if (event.type === "compaction.started") {
       completeReasoning();
@@ -589,11 +565,13 @@ export function mapGrokReplay(
         }
       }
     } else if (event.type === "subagent.spawned") {
+      let bound = false;
       for (const [callId, current] of subagents) {
         const agent = current.subagents[0];
         if (!agent) continue;
         const matchesId = agent.nativeSubagentId === event.nativeSubagentId;
         const matchesDescription =
+          !event.parentPromptId &&
           !agent.nativeSubagentId &&
           event.description !== undefined &&
           agent.description === event.description;
@@ -611,7 +589,38 @@ export function mapGrokReplay(
             },
           ],
         });
+        bound = true;
         break;
+      }
+      if (
+        !bound &&
+        event.parentPromptId &&
+        !items.some(
+          (s) =>
+            s.item.type === "subagentDelegation" &&
+            s.item.subagents.some((a) => a.nativeSubagentId === event.nativeSubagentId),
+        )
+      ) {
+        completeReasoning();
+        completeAgent();
+        const callId = `grok-helper-${event.nativeSubagentId}`;
+        rememberSubagentAlias(callId, event.nativeSubagentId);
+        subagents.set(callId, {
+          type: "subagentDelegation",
+          itemId: hostItemIdSchema.parse(callId),
+          operation: "spawn",
+          subagents: [
+            {
+              subagentId: event.nativeSubagentId,
+              nativeSubagentId: event.nativeSubagentId,
+              description: event.description ?? "Grok Subagent",
+              ...(event.model ? { model: event.model } : {}),
+              ...(event.role ? { role: event.role } : {}),
+              background: true,
+              status: "running",
+            },
+          ],
+        });
       }
     } else if (event.type === "subagent.finished") {
       settleWatchedSubagents(

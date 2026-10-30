@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm, copyFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, copyFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -21,176 +21,292 @@ import {
   writeRequest,
 } from "./app-server-host-fixture.js";
 
-it("projects a real Grok goal worker through the Host after Desktop's ephemeral opening command", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "grok-host-goal-"));
-  const cwd = path.join(root, "project");
-  const environment = {
-    HOME: root,
-    GROK_HOME: path.join(root, "grok"),
-    CODEXHOST_DATA_DIR: path.join(root, "host"),
-  };
-  await mkdir(cwd);
-  const sessionId = "native-goal-session";
-  const directory = grokNativeSessionDirectory({ cwd, environment }, sessionId);
-  const history: GrokTransportEvent[] = [];
-  let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
-  const initialize = {
-    protocolVersion: 1,
-    agentCapabilities: {},
-    authMethods: [],
-    _meta: {
-      modelState: {
-        currentModelId: "grok-4.6",
-        availableModels: [{ modelId: "grok-4.6", name: "Grok 4.6" }],
+it.each(["native-worker", "subagent-completed", "task-completed"])(
+  "projects real Grok %s responses, helpers and housekeeping through the Host",
+  async (prefix) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "grok-host-goal-"));
+    const cwd = path.join(root, "project");
+    const environment = {
+      HOME: root,
+      GROK_HOME: path.join(root, "grok"),
+      CODEXHOST_DATA_DIR: path.join(root, "host"),
+    };
+    await mkdir(cwd);
+    const sessionId = "native-goal-session";
+    const directory = grokNativeSessionDirectory({ cwd, environment }, sessionId);
+    const history: GrokTransportEvent[] = [];
+    let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
+    const initialize = {
+      protocolVersion: 1,
+      agentCapabilities: {},
+      authMethods: [],
+      _meta: {
+        modelState: {
+          currentModelId: "grok-4.6",
+          availableModels: [{ modelId: "grok-4.6", name: "Grok 4.6" }],
+        },
       },
-    },
-  };
-  const nativeControl = vi.fn(async (prompt: string) => {
-    if (prompt === "/goal clear") {
-      await rm(path.join(directory, "goal/state.json"));
-      observer?.onEvent({ type: "goal.changed", update: null });
-    } else {
-      await mkdir(path.join(directory, "goal"), { recursive: true });
-      const state = {
-        goal_id: "native-goal",
-        objective: "smoke",
-        status: "active",
-        token_budget: null,
-        tokens_used_high_water: 0,
-        elapsed_ms: 0,
-        created_at: new Date().toISOString(),
-      };
-      await writeFile(path.join(directory, "goal/state.json"), JSON.stringify(state));
-      observer?.onEvent({ type: "goal.changed", update: { ...state, tokens_used: 0 } });
-    }
-    return { stopReason: "end_turn" as const };
-  });
-  const transport: GrokAcpTransportLike = {
-    sessionId,
-    inspect: async () => initialize,
-    open: async () => ({ sessionId, initialize, session: { sessionId }, replay: [] }),
-    getHistory: async () => [...history],
-    getUsage: async () => undefined,
-    readHistory: async () => [...history],
-    locateSession: async () => null,
-    deleteSession: async () => {},
-    runTurn: async () => {
-      throw new Error("Goal control must not run an ordinary prompt");
-    },
-    compact: async () => {
-      throw new Error("Unexpected compaction");
-    },
-    setModel: async () => {},
-    setPermissionMode: async () => {},
-    cancel: async () => {},
-    close: async () => {},
-    goalControl: nativeControl,
-    observeBackground: (value) => {
-      observer = value;
-    },
-  };
-  const adapter = new GrokAdapter(
-    { environment },
-    { createTransport: () => transport, randomUUID, fetchCredits: async () => null },
-  );
-  const input = new PassThrough();
-  const output = new PassThrough();
-  const diagnostic = new PassThrough();
-  const collector = new JsonLineCollector(output);
-  const official = new FakeOfficialProcess();
-  const store = new MappingStore({ directory: path.join(root, "mapping") });
-  const host = new AppServerHost({
-    stockCodexPath: "/synthetic/codex",
-    arguments: ["app-server"],
-    desktopInput: input,
-    desktopOutput: output,
-    diagnosticOutput: diagnostic,
-    mappingStore: store,
-    environment,
-    externalAdapters: new Map([["grok", adapter]]),
-    spawnOfficial: (() =>
-      official as unknown as ChildProcessWithoutNullStreams) as unknown as typeof spawn,
-    officialCloseTimeoutMs: 50,
-  });
-  const running = host.run();
-  try {
-    writeRequest(input, {
-      id: 1,
-      method: "thread/start",
-      params: { model: "codexhost/grok-native", cwd },
+    };
+    const nativeControl = vi.fn(async (prompt: string) => {
+      if (prompt === "/goal clear") {
+        await rm(path.join(directory, "goal/state.json"));
+        observer?.onEvent({ type: "goal.changed", update: null });
+      } else {
+        await mkdir(path.join(directory, "goal"), { recursive: true });
+        const state = {
+          goal_id: "native-goal",
+          objective: "smoke",
+          status: "active",
+          token_budget: null,
+          tokens_used_high_water: 0,
+          elapsed_ms: 0,
+          created_at: new Date().toISOString(),
+        };
+        await writeFile(path.join(directory, "goal/state.json"), JSON.stringify(state));
+        observer?.onEvent({ type: "goal.changed", update: { ...state, tokens_used: 0 } });
+      }
+      return { stopReason: "end_turn" as const };
     });
-    const opened = await collector.waitFor((m) => requestId(m, 1));
-    expect(opened.error, JSON.stringify(opened)).toBeUndefined();
-    const threadId = (opened.result as { thread: { id: string } }).thread.id;
-    writeRequest(input, {
-      id: 2,
-      method: "turn/start",
-      params: { threadId, input: [{ type: "text", text: "/goal smoke" }] },
-    });
-    const opening = await collector.waitFor((m) => requestId(m, 2));
-    expect(opening.error).toBeUndefined();
-    writeRequest(input, {
-      id: 3,
-      method: "thread/goal/set",
-      params: { threadId, objective: "smoke", status: "active" },
-    });
-    expect(await collector.waitFor((m) => requestId(m, 3))).toMatchObject({
-      result: { goal: { objective: "smoke", status: "active" } },
-    });
-    await collector.waitFor((m) => m.method === "turn/completed");
-    expect(nativeControl).toHaveBeenCalledTimes(1);
-    if (!observer) throw new Error("Grok background observer not installed");
-    for (const round of [0, 1]) {
-      const user: GrokTransportEvent = {
-        type: "user.text",
-        text: "<system-reminder>Continue the goal</system-reminder>",
-        metadata: { promptIndex: round },
-      };
-      const agent: GrokTransportEvent = {
-        type: "agent.text",
-        text: `worker ${round}`,
-        messageId: `answer-${round}`,
-      };
-      const terminal: GrokTransportEvent = {
-        type: "turn.completed",
-        nativeTurnKey: `native-worker-${round}`,
-        stopReason: "end_turn",
-      };
-      history.push(user, agent, terminal);
-      const start = collector.messages.length;
-      observer.onEvent(agent);
-      observer.onEvent(terminal);
-      await vi.waitFor(() =>
-        expect(
-          collector.messages.slice(start).find((m) => m.method === "turn/completed"),
-        ).toMatchObject({ params: { turn: { status: "completed" } } }),
-      );
-      const messages = collector.messages.slice(start);
-      expect(messages.findIndex((m) => m.method === "turn/started")).toBeGreaterThanOrEqual(0);
-      expect(messages.findIndex((m) => m.method === "item/started")).toBeGreaterThan(
-        messages.findIndex((m) => m.method === "turn/started"),
-      );
-    }
-    writeRequest(input, { id: 4, method: "thread/read", params: { threadId, includeTurns: true } });
-    expect(await collector.waitFor((m) => requestId(m, 4))).toMatchObject({
-      result: { thread: { turns: [{ status: "completed" }, { status: "completed" }] } },
-    });
-    expect((await store.getThread(hostThreadIdSchema.parse(threadId)))?.turnMappings).toHaveLength(
-      2,
+    const transport: GrokAcpTransportLike = {
+      sessionId,
+      inspect: async () => initialize,
+      open: async () => ({ sessionId, initialize, session: { sessionId }, replay: [] }),
+      getHistory: async () => [...history],
+      getUsage: async () => undefined,
+      readHistory: async () => [...history],
+      locateSession: async () => null,
+      deleteSession: async () => {},
+      runTurn: async () => {
+        throw new Error("Goal control must not run an ordinary prompt");
+      },
+      compact: async () => {
+        throw new Error("Unexpected compaction");
+      },
+      setModel: async () => {},
+      setPermissionMode: async () => {},
+      cancel: vi.fn(async () => {}),
+      close: async () => {},
+      goalControl: nativeControl,
+      observeBackground: (value) => {
+        observer = value;
+      },
+    };
+    const adapter = new GrokAdapter(
+      { environment },
+      { createTransport: () => transport, randomUUID, fetchCredits: async () => null },
     );
-    writeRequest(input, { id: 5, method: "thread/goal/clear", params: { threadId } });
-    expect(await collector.waitFor((m) => requestId(m, 5))).toMatchObject({
-      result: { cleared: true },
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const diagnostic = new PassThrough();
+    const collector = new JsonLineCollector(output);
+    const official = new FakeOfficialProcess();
+    const store = new MappingStore({ directory: path.join(root, "mapping") });
+    const host = new AppServerHost({
+      stockCodexPath: "/synthetic/codex",
+      arguments: ["app-server"],
+      desktopInput: input,
+      desktopOutput: output,
+      diagnosticOutput: diagnostic,
+      mappingStore: store,
+      environment,
+      externalAdapters: new Map([["grok", adapter]]),
+      spawnOfficial: (() =>
+        official as unknown as ChildProcessWithoutNullStreams) as unknown as typeof spawn,
+      officialCloseTimeoutMs: 50,
     });
-    expect(diagnostic.read()?.toString() ?? "").not.toContain("External Harness output failed");
-  } finally {
-    input.end();
-    await running;
-    await rm(root, { recursive: true, force: true });
-  }
-});
+    const running = host.run();
+    try {
+      writeRequest(input, {
+        id: 1,
+        method: "thread/start",
+        params: { model: "codexhost/grok-native", cwd },
+      });
+      const opened = await collector.waitFor((m) => requestId(m, 1));
+      expect(opened.error, JSON.stringify(opened)).toBeUndefined();
+      const threadId = (opened.result as { thread: { id: string } }).thread.id;
+      writeRequest(input, {
+        id: 2,
+        method: "turn/start",
+        params: { threadId, input: [{ type: "text", text: "/goal smoke" }] },
+      });
+      const opening = await collector.waitFor((m) => requestId(m, 2));
+      expect(opening.error).toBeUndefined();
+      writeRequest(input, {
+        id: 3,
+        method: "thread/goal/set",
+        params: { threadId, objective: "smoke", status: "active" },
+      });
+      expect(await collector.waitFor((m) => requestId(m, 3))).toMatchObject({
+        result: { goal: { objective: "smoke", status: "active" } },
+      });
+      await collector.waitFor((m) => m.method === "turn/completed");
+      expect(nativeControl).toHaveBeenCalledTimes(1);
+      if (!observer) throw new Error("Grok background observer not installed");
+      const nativeObserver = observer;
+      const helperIds = ["planner", "skeptic-1", "skeptic-2", "skeptic-3", "summarizer"];
+      for (const id of helperIds) {
+        const childDirectory = grokNativeSessionDirectory({ cwd, environment }, id);
+        await mkdir(childDirectory, { recursive: true });
+        await writeFile(
+          path.join(childDirectory, "updates.jsonl"),
+          [
+            {
+              sessionUpdate: "user_message_chunk",
+              content: { type: "text", text: "helper input" },
+              _meta: { promptIndex: 0 },
+            },
+            {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: `child transcript ${id}` },
+            },
+            {
+              sessionUpdate: "turn_completed",
+              prompt_id: `child-turn-${id}`,
+              stop_reason: "end_turn",
+            },
+          ]
+            .map((update) => JSON.stringify({ params: { sessionId: id, update } }))
+            .join("\n") + "\n",
+        );
+      }
+      for (const round of [0, 1, 2]) {
+        const user: GrokTransportEvent = {
+          type: "user.text",
+          text: "<system-reminder>Continue the goal</system-reminder>",
+          metadata: { promptIndex: round },
+        };
+        const agent: GrokTransportEvent = {
+          type: "agent.text",
+          text: `worker ${round}`,
+          messageId: `answer-${round}`,
+        };
+        const terminal: GrokTransportEvent = {
+          type: "turn.completed",
+          nativeTurnKey: `${prefix}-${round}`,
+          stopReason: "end_turn",
+        };
+        const start = collector.messages.length;
+        const emit = (event: GrokTransportEvent) => {
+          history.push(event);
+          nativeObserver.onEvent(event);
+        };
+        const helper = (id: string) => {
+          emit({
+            type: "subagent.spawned",
+            nativeSubagentId: id,
+            parentPromptId: `${prefix}-${round}`,
+            childSessionId: id,
+            attemptId: `attempt-${id}`,
+            description: id,
+            model: id === "planner" ? "grok-4.6" : "sonnet",
+          });
+          emit({ type: "subagent.finished", nativeSubagentId: id, status: "completed" });
+        };
+        if (round === 0) helper("planner");
+        emit(user);
+        if (round < 2) emit(agent);
+        if (round === 0) for (const id of helperIds.slice(1, -1)) helper(id);
+        if (round === 1) {
+          await vi.waitFor(() =>
+            expect(collector.messages.slice(start).some((m) => m.method === "turn/started")).toBe(
+              true,
+            ),
+          );
+          const state = JSON.parse(await readFile(path.join(directory, "goal/state.json"), "utf8"));
+          await writeFile(
+            path.join(directory, "goal/state.json"),
+            JSON.stringify({ ...state, status: "complete" }),
+          );
+          writeRequest(input, { id: 50, method: "thread/goal/clear", params: { threadId } });
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          expect(nativeControl.mock.calls.some(([prompt]) => prompt === "/goal clear")).toBe(false);
+          expect(transport.cancel).not.toHaveBeenCalled();
+          helper("summarizer");
+        }
+        emit(terminal);
+        await vi.waitFor(
+          () =>
+            expect(
+              collector.messages.slice(start).find((m) => m.method === "turn/completed"),
+              `round ${round}`,
+            ).toMatchObject({ params: { turn: { status: "completed" } } }),
+          { timeout: 5000 },
+        );
+        const messages = collector.messages.slice(start);
+        expect(messages.findIndex((m) => m.method === "turn/started")).toBeGreaterThanOrEqual(0);
+        if (round < 2)
+          expect(messages.findIndex((m) => m.method === "item/started")).toBeGreaterThan(
+            messages.findIndex((m) => m.method === "turn/started"),
+          );
+        if (round === 1)
+          expect(await collector.waitFor((m) => requestId(m, 50))).toMatchObject({
+            result: { cleared: true },
+          });
+      }
+      writeRequest(input, {
+        id: 4,
+        method: "thread/read",
+        params: { threadId, includeTurns: true },
+      });
+      expect(await collector.waitFor((m) => requestId(m, 4))).toMatchObject({
+        result: { thread: { turns: [{ status: "completed" }, { status: "completed" }] } },
+      });
+      expect(
+        (await store.getThread(hostThreadIdSchema.parse(threadId)))?.turnMappings,
+      ).toHaveLength(2);
+      await vi.waitFor(async () =>
+        expect((await store.listThreads()).filter((r) => r.subagent)).toHaveLength(5),
+      );
+      const children = (await store.listThreads()).filter((r) => r.subagent);
+      for (const [index, child] of children.entries()) {
+        const id = 100 + index;
+        writeRequest(input, {
+          id,
+          method: "thread/turns/list",
+          params: { threadId: child.hostThreadId, limit: 20, itemsView: "full" },
+        });
+        const read = await collector.waitFor((m) => requestId(m, id));
+        expect(read.error, JSON.stringify(read)).toBeUndefined();
+        expect(JSON.stringify(read.result)).toContain(
+          `child transcript ${child.subagent?.nativeSubagentId}`,
+        );
+      }
+      writeRequest(input, {
+        id: 150,
+        method: "thread/turns/list",
+        params: { threadId, limit: 20, itemsView: "full" },
+      });
+      const parentHistory = await collector.waitFor((m) => requestId(m, 150));
+      for (const child of children)
+        expect(JSON.stringify(parentHistory.result)).toContain(child.hostThreadId);
+      const originalMappings = (await store.getThread(hostThreadIdSchema.parse(threadId)))
+        ?.turnMappings;
+      writeRequest(input, {
+        id: 151,
+        method: "thread/read",
+        params: { threadId, includeTurns: true },
+      });
+      await collector.waitFor((m) => requestId(m, 151));
+      expect((await store.getThread(hostThreadIdSchema.parse(threadId)))?.turnMappings).toEqual(
+        originalMappings,
+      );
+      writeRequest(input, { id: 5, method: "thread/goal/clear", params: { threadId } });
+      expect(await collector.waitFor((m) => requestId(m, 5))).toMatchObject({
+        result: { cleared: false },
+      });
+      expect(diagnostic.read()?.toString() ?? "").not.toContain("External Harness output failed");
+    } finally {
+      input.end();
+      await running;
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
-it.skipIf(process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1")(
+it.skipIf(
+  process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1" &&
+    process.env.CODEXHOST_GROK_GOAL_HOST_COMPLETE_LIVE !== "1",
+)(
   "projects native Grok worker output and pause through the full Host goal path",
   async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "grok-host-live-"));
@@ -213,6 +329,22 @@ it.skipIf(process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1")(
     const output = new PassThrough();
     const diagnostic = new PassThrough();
     const collector = new JsonLineCollector(output);
+    const answeredApprovals = new Set<string | number>();
+    const approvalTimer = setInterval(() => {
+      for (const message of collector.messages) {
+        if (
+          message.method !== "mcpServer/elicitation/request" ||
+          (typeof message.id !== "string" && typeof message.id !== "number") ||
+          answeredApprovals.has(message.id)
+        )
+          continue;
+        answeredApprovals.add(message.id);
+        writeRequest(input, {
+          id: message.id,
+          result: { action: "accept", content: {}, _meta: null },
+        });
+      }
+    }, 25);
     const official = new FakeOfficialProcess();
     const store = new MappingStore({ directory: path.join(root, "mapping") });
     const host = new AppServerHost({
@@ -247,18 +379,36 @@ it.skipIf(process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1")(
       });
       const opened = await response(1);
       const threadId = (opened.result as { thread: { id: string } }).thread.id;
+      writeRequest(input, {
+        id: 60,
+        method: "codexhost/thread/permission-mode/select",
+        params: { threadId, permissionModeId: "always-approve" },
+      });
+      await response(60);
+      const completionTrial = process.env.CODEXHOST_GROK_GOAL_HOST_COMPLETE_LIVE === "1";
+      const budget = completionTrial ? 150000 : undefined;
       const objective = `Write ${path.join(cwd, "smoke.txt")} with one line ok plus the current UTC ISO timestamp, then stop. Do not modify any other files.`;
       writeRequest(input, {
         id: 2,
         method: "turn/start",
-        params: { threadId, input: [{ type: "text", text: `/goal ${objective}` }] },
+        params: {
+          threadId,
+          input: [
+            { type: "text", text: `/goal ${objective}${budget ? ` --budget ${budget}` : ""}` },
+          ],
+        },
       });
       const opening = await response(2);
       const openingId = (opening.result as { turn: { id: string } }).turn.id;
       writeRequest(input, {
         id: 3,
         method: "thread/goal/set",
-        params: { threadId, objective, status: "active" },
+        params: {
+          threadId,
+          objective,
+          status: "active",
+          ...(budget ? { tokenBudget: budget } : {}),
+        },
       });
       expect(await response(3)).toMatchObject({
         result: { goal: { objective, status: "active" } },
@@ -281,6 +431,55 @@ it.skipIf(process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1")(
       );
       expect(workerStart).toBeDefined();
       const workerId = (workerStart?.params as { turn: { id: string } }).turn.id;
+      if (completionTrial) {
+        await vi.waitFor(
+          () =>
+            expect(
+              collector.messages.some(
+                (m) =>
+                  m.method === "thread/goal/updated" &&
+                  (m.params as { goal?: { status?: string } })?.goal?.status === "complete",
+              ),
+            ).toBe(true),
+          { timeout: 180000, interval: 100 },
+        );
+        writeRequest(input, { id: 4, method: "thread/goal/clear", params: { threadId } });
+        expect(await response(4)).toMatchObject({ result: { cleared: true } });
+        await vi.waitFor(
+          () =>
+            expect(
+              collector.messages.find(
+                (m) =>
+                  m.method === "turn/completed" &&
+                  (m.params as { turn?: { id?: string } })?.turn?.id === workerId,
+              ),
+            ).toMatchObject({ params: { turn: { status: "completed" } } }),
+          { timeout: 10000 },
+        );
+        const children = (await store.listThreads()).filter((r) => r.subagent);
+        expect(children.length).toBeGreaterThanOrEqual(5);
+        for (const [index, child] of children.entries()) {
+          writeRequest(input, {
+            id: 100 + index,
+            method: "thread/turns/list",
+            params: { threadId: child.hostThreadId, limit: 20, itemsView: "full" },
+          });
+          const snapshot = await response(100 + index);
+          expect((snapshot.result as { data: unknown[] }).data.length).toBeGreaterThan(0);
+        }
+        expect(await readFile(path.join(cwd, "smoke.txt"), "utf8")).toMatch(/^ok .+Z\n$/u);
+        console.info(
+          JSON.stringify({
+            nativeCompletion: true,
+            approvedTestRequests: answeredApprovals.size,
+            parentTurn: "completed",
+            clear: true,
+            children: children.map((c) => ({ id: c.subagent?.nativeSubagentId })),
+            budget,
+          }),
+        );
+        return;
+      }
       writeRequest(input, {
         id: 4,
         method: "thread/goal/set",
@@ -305,7 +504,9 @@ it.skipIf(process.env.CODEXHOST_GROK_GOAL_HOST_LIVE !== "1")(
       expect(await response(5)).toMatchObject({ result: { cleared: true } });
       expect(diagnostic.read()?.toString() ?? "").not.toContain("precedes turn.started");
     } finally {
+      clearInterval(approvalTimer);
       input.end();
+      await adapter.close();
       await running;
       await rm(root, { recursive: true, force: true });
     }

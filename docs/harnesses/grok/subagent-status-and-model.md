@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Grok Adapter maps native spawn/task tools to the existing Host `subagentDelegation` contract. Desktop receives native `subAgentActivity` Items and remains responsible for its Subagent list, collapse behavior, navigation, and visual presentation.
+The Grok Adapter maps native goal helper events and spawn/task tools to the existing Host `subagentDelegation` contract. Desktop receives native `subAgentActivity` Items and remains responsible for its Subagent list, collapse behavior, navigation, and visual presentation.
 
 This integration does not inject a replacement list, custom status subtitles, avatars, or a history panel. It does not inspect React Fiber, add child `thread/read` requests, or scan and rewrite official Codex protocol frames. Native Codex Subagent behavior is unchanged.
 
@@ -13,6 +13,14 @@ This integration does not inject a replacement list, custom status subtitles, av
 - A completed background spawn tool does not mean the child has completed. Observed native completion events, terminal wait results, and successful kill tools settle child states. A failed kill tool does not imply that the child stopped.
 - Child transcripts are read-only snapshots of the child Native Session; they are not separate writable Host Sessions.
 - Parent Native history is projected back into Subagent Items when the Thread is reopened. Presentation uses the existing Desktop history path rather than a Renderer-maintained copy of the list.
+
+## Standalone native goal helpers
+
+Goal planners, skeptics and summarizers can spawn without a tool call. Their native `subagent_id` identifies the child; `child_session_id`, `attempt_id` and `parent_prompt_id` remain Adapter-owned metadata. The parent prompt ID matches the worker's terminal key. Helpers use the existing delegation Items and generic Host child materialization; the goal worker remains a parent autonomous Turn.
+
+Live standalone events wait in an Adapter buffer until the owning terminal key is confirmed. They are then published in that still-open Turn, preventing a planner or late notification from being attached to an unrelated Turn. Replay places pre-input and post-terminal helper events into the native owning Turn. Post-terminal helpers appear after reopen. Missing ownership never creates a parent Turn. Repeated identity notifications do not create another child.
+
+Native descriptions and raw child models are preserved. Generic `general-purpose` type does not become a role. Final child transcript snapshots are supported; continuous transcript streaming is unclaimed. Cancelled children keep their actual interrupted status and may have no transcript.
 
 ## Read-only native presentation
 

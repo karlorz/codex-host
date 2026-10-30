@@ -1,4 +1,4 @@
-import { GrokGoals } from "./grok-goals.js";
+import { GrokGoals, readGrokGoal } from "./grok-goals.js";
 import { createGrokUsageStatistics } from "./usage-statistics.js";
 import { grokCommandCatalog, grokGoalPrompt } from "./grok-commands.js";
 import { randomUUID } from "node:crypto";
@@ -129,6 +129,11 @@ import {
 } from "./grok-generated-image.js";
 import { forkGrokSession } from "./grok-fork.js";
 import { mapGrokReplay } from "./grok-history.js";
+import {
+  classifyGrokHistory,
+  grokPromptIndex,
+  GrokNativeIdentityReuseError,
+} from "./grok-history-groups.js";
 import { rewindGrokSession } from "./grok-rewind.js";
 import {
   GROK_DEFAULT_PERMISSION_MODE_ID,
@@ -263,6 +268,8 @@ interface ActiveTurn {
   questions: GrokQuestions;
   cancellationRequested: boolean;
   beforeNativeTurnKeys: Set<string>;
+  historyStart: number;
+  backgroundPromptIndex?: number;
   catalogCommand: boolean;
   completion: Promise<void>;
   resolveCompletion(): void;
@@ -396,6 +403,10 @@ class GrokHarnessSession implements HarnessSession {
   #usage: HostUsage | null = null;
   readonly #initialCostUsd: number;
   #costRequest = 0;
+  #historyLength: number;
+  #goalHelpers: Array<
+    Extract<GrokTransportEvent, { type: "subagent.spawned" | "subagent.finished" }>
+  > = [];
 
   constructor(
     cwd: string,
@@ -416,6 +427,7 @@ class GrokHarnessSession implements HarnessSession {
     },
   ) {
     this.#cwd = cwd;
+    this.#historyLength = options.history.length;
     this.#sessionDirectory = options.sessionDirectory;
     this.#mediaRoots = grokMediaResolveRoots(cwd, options.sessionDirectory);
     this.#transport = transport;
@@ -458,20 +470,41 @@ class GrokHarnessSession implements HarnessSession {
     if (goalControl && transport.observeBackground) {
       const goals = new GrokGoals(
         options.sessionDirectory,
-        async (prompt) => {
+        async (prompt, signal) => {
           if (this.#phase !== "open" || this.#configuring)
             throw new Error("Grok Session cannot control goals during configuration");
           const active = this.#active;
           if (active) {
             if (!["/goal pause", "/goal clear"].includes(prompt))
               throw new Error("Pause the active Grok worker before changing its goal");
-            const cancelled = await this.#cancel({
-              type: "turn.cancel",
-              turnId: active.command.turnId,
+            const before = await readGrokGoal(this.#sessionDirectory);
+            const current = await goals.read();
+            if (!current.ok) throw new Error(current.error.message);
+            signal.throwIfAborted();
+            if (prompt !== "/goal clear" || current.value?.status !== "complete") {
+              const cancelled = await this.#cancel({
+                type: "turn.cancel",
+                turnId: active.command.turnId,
+              });
+              if (!cancelled.ok) throw new Error(cancelled.error.message);
+            }
+            await new Promise<void>((resolve, reject) => {
+              const aborted = () =>
+                reject(new Error("Grok goal control timed out waiting for its worker"));
+              signal.addEventListener("abort", aborted, { once: true });
+              if (signal.aborted) aborted();
+              void active.completion.then(() => {
+                signal.removeEventListener("abort", aborted);
+                resolve();
+              });
             });
-            if (!cancelled.ok) throw new Error(cancelled.error.message);
-            await active.completion;
+            const after = await readGrokGoal(this.#sessionDirectory);
+            if (before?.state.goal_id !== after?.state.goal_id)
+              throw new Error("Grok goal changed while waiting for its worker");
           }
+          signal.throwIfAborted();
+          if (this.#phase !== "open" || this.#active)
+            throw new Error("Grok Session changed while controlling its goal");
           return goalControl(prompt);
         },
         (goal) => this.#event({ type: "goal.changed", goal }),
@@ -709,6 +742,7 @@ class GrokHarnessSession implements HarnessSession {
       beforeNativeTurnKeys: new Set(
         this.#snapshot.turns.map((turn) => turn.nativeTurnRef.nativeTurnKey),
       ),
+      historyStart: this.#historyLength,
       catalogCommand,
       completion,
       resolveCompletion,
@@ -723,6 +757,16 @@ class GrokHarnessSession implements HarnessSession {
   async #backgroundEvent(event: GrokTransportEvent): Promise<void> {
     await this.#goalCommand;
     if (this.#phase !== "open") return;
+    if (this.#bufferGoalHelper(event)) return;
+    if (!this.#active && event.type === "subagent.finished") {
+      this.#event({
+        type: "subagent.state.changed",
+        nativeSubagentId: event.nativeSubagentId,
+        status: event.status,
+        ...(event.resultSummary ? { resultSummary: event.resultSummary } : {}),
+      });
+      return;
+    }
     let user = event.type === "user.text" ? event : undefined;
     if (
       !this.#active &&
@@ -765,6 +809,8 @@ class GrokHarnessSession implements HarnessSession {
         input: [{ type: "text", text: user.text }],
       };
       const active = this.#newActive(command);
+      const promptIndex = grokPromptIndex(user);
+      if (promptIndex !== null) active.backgroundPromptIndex = promptIndex;
       this.#active = active;
       this.#event({
         type: "turn.autonomous.started",
@@ -781,10 +827,12 @@ class GrokHarnessSession implements HarnessSession {
       while (Date.now() < deadline && this.#phase === "open") {
         const history = await this.#transport.getHistory();
         if (
-          history.some(
-            (entry) =>
-              entry.type === "turn.completed" && entry.nativeTurnKey === event.nativeTurnKey,
-          )
+          history
+            .slice(active.historyStart)
+            .some(
+              (entry) =>
+                entry.type === "turn.completed" && entry.nativeTurnKey === event.nativeTurnKey,
+            )
         )
           break;
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -795,6 +843,8 @@ class GrokHarnessSession implements HarnessSession {
           { stopReason: event.stopReason } as PromptResponse,
           active.cancellationRequested,
         ),
+        undefined,
+        event.nativeTurnKey,
       );
     }
   }
@@ -1002,6 +1052,7 @@ class GrokHarnessSession implements HarnessSession {
       ),
       cancellationRequested: false,
       beforeNativeTurnKeys: new Set(),
+      historyStart: this.#historyLength,
       catalogCommand: true,
       completion,
       resolveCompletion,
@@ -1099,6 +1150,7 @@ class GrokHarnessSession implements HarnessSession {
       this.#sessionDirectory,
     );
     this.#snapshot.turns = refreshed.turns;
+    this.#historyLength = history.length;
     return history;
   }
 
@@ -1811,6 +1863,7 @@ class GrokHarnessSession implements HarnessSession {
     active: ActiveTurn,
     event: Extract<GrokTransportEvent, { type: "subagent.spawned" }>,
   ): void {
+    if (this.#bufferGoalHelper(event)) return;
     active.subagents.bindNativeId(active.command.turnId, {
       nativeSubagentId: event.nativeSubagentId,
       ...(event.description ? { description: event.description } : {}),
@@ -1823,12 +1876,47 @@ class GrokHarnessSession implements HarnessSession {
     active: ActiveTurn,
     event: Extract<GrokTransportEvent, { type: "subagent.finished" }>,
   ): void {
+    if (this.#bufferGoalHelper(event)) return;
     active.subagents.completeByNativeId(active.command.turnId, event.nativeSubagentId, {
       failed: event.status === "failed",
       cancellationRequested: active.cancellationRequested || event.status === "interrupted",
       status: event.status,
       ...(event.resultSummary ? { resultSummary: event.resultSummary } : {}),
     });
+  }
+
+  #bufferGoalHelper(event: GrokTransportEvent): boolean {
+    if (event.type === "subagent.spawned" && event.parentPromptId) {
+      // The terminal supplies the native owning key. Do not guess from arrival order.
+      if (!this.#snapshot.turns.some((t) => t.nativeTurnRef.nativeTurnKey === event.parentPromptId))
+        this.#goalHelpers.push(event);
+      return true;
+    }
+    if (
+      event.type === "subagent.finished" &&
+      this.#goalHelpers.some(
+        (e) => e.type === "subagent.spawned" && e.nativeSubagentId === event.nativeSubagentId,
+      )
+    ) {
+      this.#goalHelpers.push(event);
+      return true;
+    }
+    return false;
+  }
+
+  #publishGoalHelpers(active: ActiveTurn, key: string): void {
+    const ids = new Set(
+      this.#goalHelpers
+        .filter((e) => e.type === "subagent.spawned" && e.parentPromptId === key)
+        .map((e) => e.nativeSubagentId),
+    );
+    const events = this.#goalHelpers.filter((e) => ids.has(e.nativeSubagentId));
+    this.#goalHelpers = this.#goalHelpers.filter((e) => !ids.has(e.nativeSubagentId));
+    for (const event of events) {
+      if (event.type === "subagent.spawned")
+        active.subagents.bindNativeId(active.command.turnId, event);
+      else this.#finishNativeSubagent(active, event);
+    }
   }
 
   #completeAgent(active: ActiveTurn, outcome: HostItemOutcome): void {
@@ -1876,6 +1964,7 @@ class GrokHarnessSession implements HarnessSession {
     active: ActiveTurn,
     outcome: TurnOutcome,
     response?: PromptResponse,
+    terminalKey?: string,
   ): Promise<void> {
     let history: GrokTransportEvent[] = [];
     let nativeTurnRef: NativeTurnRef | undefined;
@@ -1883,28 +1972,48 @@ class GrokHarnessSession implements HarnessSession {
     let ephemeral = false;
     try {
       history = await this.#refreshSnapshot();
+      const expectedKey =
+        terminalKey ??
+        (typeof response?._meta?.promptId === "string" ? response._meta.promptId : undefined);
+      const group = expectedKey
+        ? classifyGrokHistory(history).findLast(
+            (g) =>
+              g.terminalIndex >= active.historyStart &&
+              g.terminal.nativeTurnKey === expectedKey &&
+              (active.backgroundPromptIndex === undefined ||
+                (g.user && grokPromptIndex(g.user) === active.backgroundPromptIndex)),
+          )
+        : undefined;
       const created = this.#snapshot.turns.filter(
         (turn) => !active.beforeNativeTurnKeys.has(turn.nativeTurnRef.nativeTurnKey),
       );
       const lastUser = history.findLast((event) => event.type === "user.text");
       ephemeral =
-        created.length === 0 &&
-        active.catalogCommand &&
-        outcome.status === "succeeded" &&
-        response?.stopReason === "end_turn" &&
-        response._meta?.totalTokens === 0 &&
-        lastUser?.type === "user.text" &&
-        lastUser.text === active.command.input.map(({ text }) => text).join("\n") &&
-        (lastUser?.metadata?.hostTurn === true || lastUser?.metadata?.host_turn === true);
+        (terminalKey !== undefined && group?.disposition === "ephemeral" && created.length === 0) ||
+        (created.length === 0 &&
+          active.catalogCommand &&
+          outcome.status === "succeeded" &&
+          response?.stopReason === "end_turn" &&
+          response._meta?.totalTokens === 0 &&
+          lastUser?.type === "user.text" &&
+          lastUser.text === active.command.input.map(({ text }) => text).join("\n") &&
+          (lastUser?.metadata?.hostTurn === true || lastUser?.metadata?.host_turn === true));
       if (created.length !== 1 && !ephemeral) {
         throw new Error(
           `Grok Turn persisted ${created.length} new Native Turns; exactly one is required`,
         );
       }
+      if (
+        !ephemeral &&
+        expectedKey &&
+        (created[0]?.nativeTurnRef.nativeTurnKey !== expectedKey || (terminalKey && !group))
+      )
+        throw new Error("Grok persisted terminal does not match the live Turn occurrence");
       nativeTurnRef = created[0]?.nativeTurnRef;
       checkpoint = created[0]?.checkpoint;
+      if (nativeTurnRef) this.#publishGoalHelpers(active, nativeTurnRef.nativeTurnKey);
     } catch (error) {
-      if (outcome.status === "succeeded") {
+      if (outcome.status === "succeeded" || error instanceof GrokNativeIdentityReuseError) {
         outcome = { status: "failed", error: normalizeError(error, "protocolError") };
       }
     }

@@ -68,7 +68,7 @@ export class GrokGoals implements HarnessGoalCapability {
   #latest: { id: unknown; goal: HarnessGoal; observedAt: number } | null = null;
   constructor(
     readonly directory: string,
-    readonly control: (prompt: string) => Promise<unknown>,
+    readonly control: (prompt: string, signal: AbortSignal) => Promise<unknown>,
     readonly changed: (goal: HarnessGoal | null) => void,
     readonly timeoutMs = 30_000,
   ) {}
@@ -248,6 +248,8 @@ export class GrokGoals implements HarnessGoalCapability {
   ): Promise<HarnessResult<HarnessGoal | null>> {
     if (this.#mutating || this.#closed) return failure("Grok goal operation is unavailable");
     this.#mutating = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const before = await this.read();
       if (!before.ok) return before;
@@ -258,7 +260,7 @@ export class GrokGoals implements HarnessGoalCapability {
       const version = this.#version;
       // GoalSet can keep its ACP response open while planning. Confirmation is native state,
       // and the ongoing native prompt remains owned by the transport's background observer.
-      void this.control(prompt).then(
+      void this.control(prompt, controller.signal).then(
         () => {
           settled = true;
         },
@@ -285,6 +287,8 @@ export class GrokGoals implements HarnessGoalCapability {
       }
       return failure("Grok goal change was not confirmed; re-read native state before retrying");
     } finally {
+      clearTimeout(timer);
+      controller.abort();
       this.#mutating = false;
     }
   }

@@ -93,13 +93,13 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
-| [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok Subagent 状态、Model、Transcript 与 Desktop 投影；修改 Grok Subagent 时阅读。 |
+| [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok native goal helpers, Subagent identity/status, final child transcripts and Desktop projection. |
 | [`harnesses/grok/generated-images.md`](harnesses/grok/generated-images.md) | Grok Imagine files project to Desktop `imageGeneration`; keep Markdown rewrite for videos and cited paths. |
 | [`harnesses/grok/questions.md`](harnesses/grok/questions.md) | Grok native ACP questions, shared choice/Other cards, Composer availability, native timeout countdowns, and grokgod limits. |
 | [`harnesses/grok/mcp-elicitation.md`](harnesses/grok/mcp-elicitation.md) | Grok MCP consent forms project to Desktop approval, including offered Always allow; bounded empty forms only. |
 | [`harnesses/grok/computer-use-release.md`](harnesses/grok/computer-use-release.md) | Grok native turn-end Computer Use cleanup, Mac Sky bridge, failure behavior, and runtime limits. |
 | [`harnesses/grok/computer-use-settings.md`](harnesses/grok/computer-use-settings.md) | Grok `cua_repl` Computer Use and in-app browser (IAB) switches, surface matrix, IAB vs Computer Use vs Chrome extension, fail-closed binding. |
-| [`harnesses/grok/goals-and-history.md`](harnesses/grok/goals-and-history.md) | Native `/grok-goal` controls, conversation-only checkpoint rewind, persistence ordering and qualification limits. |
+| [`harnesses/grok/goals-and-history.md`](harnesses/grok/goals-and-history.md) | Native `/goal` controls, completion/clear ordering, background-response history, helper links, checkpoint rewind and qualification limits. |
 | [`harnesses/grok/permission-modes.md`](harnesses/grok/permission-modes.md) | Grok 会话内权限切换、原生生效确认、失败处理与验证范围。 |
 
 ### Copilot

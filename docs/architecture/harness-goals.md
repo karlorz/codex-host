@@ -14,7 +14,7 @@ Requests reuse the per-Thread operation queue and idle-release guard. Goal opera
 
 | Producer | Native controls | Shared native panel | Model-facing goal tools |
 | --- | --- | --- | --- |
-| Grok | Native `/goal`; structured updates and persisted goal state | Implemented; installed Desktop acceptance pending | Native Harness owns its available tools; official Codex tools are not injected |
+| Grok | Native `/goal`; structured updates and persisted goal state | Implemented; installed Desktop acceptance pending | Creation unsupported on native 2bdd1d6; `update_goal` only updates an existing goal |
 | ZCode | Typed `session/goal`, independent worker events; active goals block idle release | Not exposed: goal-level accounting/timestamp mapping remains unqualified and ZCode is not installed on the implementation host | Native tools unqualified |
 | DeepSeek Harness | Existing `/dsh-goal` lifecycle | Not exposed pending native accounting/control qualification | Separate native qualification |
 | Other plugins | Existing native capabilities vary | Optional contract available; no implicit support | Separate native qualification |
@@ -27,4 +27,4 @@ Desktop Goal-mode entry and model-created goals are separate paths. New-chat Goa
 
 Focused checks cover unsupported routing/no official fall-through, official pass-through, absent origin, native accounting validation, clear/pause without fabricated Turns, plugin loading, goal background ownership and independent worker identity. Native trials are separate from installed Desktop acceptance. Desktop acceptance must compare native state/usage to the panel, observe completion auto-clear, pause/resume/Stop, budget exhaustion and paused restore. Restart and installation are user-controlled.
 
-The contract matches the generated goal definitions of bundled Codex CLI 0.165.0-alpha.1.2 and inspected Desktop 26.1023.51421. Grok 1.0.45 native active-control acceptance covers creation, independent worker observation, pause with native terminal identity, paused reopen and clear. Full native completion trials timed out; completion and budget exhaustion remain unqualified. Installed Desktop acceptance is pending. Future Desktop versions require compatibility verification.
+The contract matches the generated goal definitions of bundled Codex CLI 0.165.0-alpha.1.2 and inspected Desktop 26.1023.51421. Grok 1.0.45 native active-control acceptance covers creation, independent worker observation, pause with native terminal identity, paused reopen and clear. Native completion was observed in a recorded installed smoke run, separately from its cancelled parent Turn. Grok clear-after-completion now waits for the active worker/summarizer instead of cancelling; timeout and changed identity reject explicitly. Installed completion housekeeping and the full lifecycle/budget matrix remain subject to acceptance. Installed Desktop acceptance is pending. Future Desktop versions require compatibility verification.

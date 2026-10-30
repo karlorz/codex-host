@@ -7,12 +7,14 @@ import type { GrokTransportEvent } from "../src/acp-transport.js";
 import { GrokAcpTransport } from "../src/acp-transport.js";
 
 describe.skipIf(process.platform === "win32")("Grok native persistence ordering", () => {
-  it("waits for the matching persisted terminal before admitting the next command", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "grok-acp-history-"));
-    const command = path.join(root, "fixture.mjs");
-    await writeFile(
-      command,
-      `#!${process.execPath}
+  it.each([false, true])(
+    "waits for a new matching persisted terminal occurrence, reused=%s",
+    async (reused) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "grok-acp-history-"));
+      const command = path.join(root, "fixture.mjs");
+      await writeFile(
+        command,
+        `#!${process.execPath}
 import { createInterface } from 'node:readline';
 import { mkdirSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -25,7 +27,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (request.method === 'initialize') send({ id: request.id, result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] } });
   else if (request.method === 'session/new') send({ id: request.id, result: { sessionId: 'fixture' } });
   else if (request.method === 'session/prompt') {
-    const promptId = 'prompt-' + ++ordinal;
+    const promptId = ${reused ? "'prompt-reused'" : "'prompt-' + ++ordinal"};
     send({ id: request.id, result: { stopReason: 'end_turn', _meta: { promptId, totalTokens: 0 } } });
     setTimeout(() => {
       const records = [
@@ -37,39 +39,40 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
 });
 `,
-      { mode: 0o755 },
-    );
-    const transport = new GrokAcpTransport({
-      cwd: root,
-      command,
-      environment: { HOME: root, GROK_HOME: root },
-      closeTimeoutMs: 100,
-    });
-    try {
-      await transport.open({
-        kind: "create",
-        permissionModeId: harnessPermissionModeIdSchema.parse("ask"),
+        { mode: 0o755 },
+      );
+      const transport = new GrokAcpTransport({
+        cwd: root,
+        command,
+        environment: { HOME: root, GROK_HOME: root },
+        closeTimeoutMs: 100,
       });
-      for (const ordinal of [1, 2]) {
-        await transport.runTurn(
-          "/goal status",
-          () => undefined,
-          async () => ({ outcome: { outcome: "cancelled" } }),
-          async () => ({ outcome: "cancel" }),
-        );
-        const history = await transport.getHistory();
-        expect(history.filter((event) => event.type === "turn.completed")).toHaveLength(ordinal);
-        expect(history.at(-1)).toMatchObject({
-          type: "turn.completed",
-          nativeTurnKey: `prompt-${ordinal}`,
+      try {
+        await transport.open({
+          kind: "create",
+          permissionModeId: harnessPermissionModeIdSchema.parse("ask"),
         });
-        expect(history[0]?.metadata).toMatchObject({ host_turn: true });
+        for (const ordinal of [1, 2]) {
+          await transport.runTurn(
+            "/goal status",
+            () => undefined,
+            async () => ({ outcome: { outcome: "cancelled" } }),
+            async () => ({ outcome: "cancel" }),
+          );
+          const history = await transport.getHistory();
+          expect(history.filter((event) => event.type === "turn.completed")).toHaveLength(ordinal);
+          expect(history.at(-1)).toMatchObject({
+            type: "turn.completed",
+            nativeTurnKey: reused ? "prompt-reused" : `prompt-${ordinal}`,
+          });
+          expect(history[0]?.metadata).toMatchObject({ host_turn: true });
+        }
+      } finally {
+        await transport.close();
+        await rm(root, { recursive: true, force: true });
       }
-    } finally {
-      await transport.close();
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });
 
 it.skipIf(process.platform === "win32")(

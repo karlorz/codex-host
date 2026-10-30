@@ -15,6 +15,80 @@ const grokHarnessId = harnessIdSchema.parse("grok");
 
 describe("Grok history Fork mapping", () => {
   it.each(["task-completed-child", "subagent-completed-child"])(
+    "retains real background responses with %s identity and native checkpoint",
+    (nativeTurnKey) => {
+      const snapshot = mapGrokReplay(
+        [
+          {
+            type: "user.text",
+            text: "<system-reminder>Reminder</system-reminder>",
+            metadata: { promptIndex: 9, hideFromScrollback: true },
+          },
+          { type: "agent.text", text: "Observed." },
+          { type: "turn.completed", nativeTurnKey, stopReason: "end_turn" },
+        ],
+        grokHarnessId,
+        "session-1",
+        "/workspace",
+      );
+      expect(snapshot.turns).toMatchObject([
+        {
+          nativeTurnRef: { nativeTurnKey },
+          checkpoint: { checkpointId: "9" },
+          input: [],
+          items: [{ item: { text: "Observed." } }],
+        },
+      ]);
+    },
+  );
+
+  it("rejects reused terminal identity with execution instead of inventing a Turn", () => {
+    expect(() =>
+      mapGrokReplay(
+        [
+          { type: "user.text", text: "first", metadata: { promptIndex: 0 } },
+          { type: "turn.completed", nativeTurnKey: "same", stopReason: "end_turn" },
+          {
+            type: "user.text",
+            text: "<system-reminder>Reminder</system-reminder>",
+            metadata: { promptIndex: 1 },
+          },
+          { type: "agent.text", text: "Real output" },
+          { type: "turn.completed", nativeTurnKey: "same", stopReason: "end_turn" },
+        ],
+        grokHarnessId,
+        "session-1",
+        "/workspace",
+      ),
+    ).toThrow(/reused.*same/i);
+  });
+
+  it("retains a cancelled zero-Item native goal worker", () => {
+    const snapshot = mapGrokReplay(
+      [
+        { type: "goal.changed", update: { status: "active", goal_id: "goal" } },
+        {
+          type: "user.text",
+          text: "<system-reminder>Continue goal</system-reminder>",
+          metadata: { promptIndex: 0 },
+        },
+        { type: "goal.changed", update: { status: "user_paused", goal_id: "goal" } },
+        { type: "turn.completed", nativeTurnKey: "cancelled-worker", stopReason: "cancelled" },
+      ],
+      grokHarnessId,
+      "session-1",
+      "/workspace",
+    );
+    expect(snapshot.turns).toMatchObject([
+      {
+        nativeTurnRef: { nativeTurnKey: "cancelled-worker" },
+        items: [],
+        outcome: { status: "cancelled" },
+      },
+    ]);
+  });
+
+  it.each(["task-completed-child", "subagent-completed-child"])(
     "excludes %s notifications and repeated interruption IDs while retaining goal workers",
     (notificationKey) => {
       const snapshot = mapGrokReplay(

@@ -44,6 +44,7 @@ export class GrokSubagentLifecycle {
   readonly #newItemId: () => HostItemId;
   readonly #delegations = new Map<string, ActiveSubagentDelegation>();
   readonly #callIdByNativeId = new Map<string, string>();
+  readonly #completedNativeIds = new Set<string>();
 
   constructor(options: GrokSubagentLifecycleOptions) {
     this.#emit = options.emit;
@@ -100,6 +101,7 @@ export class GrokSubagentLifecycle {
       description?: string;
       role?: string;
       model?: string;
+      parentPromptId?: string;
     },
   ): HostSubagentState | undefined {
     for (const [callId, active] of this.#delegations) {
@@ -111,10 +113,21 @@ export class GrokSubagentLifecycle {
     }
     for (const [callId, active] of this.#delegations) {
       const current = active.item.subagents[0];
-      if (!current || current.nativeSubagentId) continue;
+      if (input.parentPromptId || !current || current.nativeSubagentId) continue;
       if (input.description && current.description === input.description) {
         return this.update(turnId, callId, input);
       }
+    }
+    if (input.parentPromptId) {
+      if (this.#completedNativeIds.has(input.nativeSubagentId)) return undefined;
+      // Goal helpers have native child identity without a spawn tool call.
+      return this.start(turnId, {
+        ...input,
+        callId: `grok-helper-${input.nativeSubagentId}`,
+        operation: "spawn",
+        description: input.description ?? "Grok Subagent",
+        background: true,
+      });
     }
     return undefined;
   }
@@ -236,6 +249,7 @@ export class GrokSubagentLifecycle {
             : "completed");
     const nativeSubagentId = input.nativeSubagentId ?? current.nativeSubagentId;
     if (nativeSubagentId) this.#callIdByNativeId.set(nativeSubagentId, callId);
+    if (nativeSubagentId) this.#completedNativeIds.add(nativeSubagentId);
     const subagent: HostSubagentState = {
       ...current,
       status,

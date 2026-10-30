@@ -69,8 +69,8 @@ describe("Grok speed omission without verified generation boundaries", () => {
     ]);
     expect(usage).not.toHaveProperty("apiOutputTokensPerSecond");
     expect(usage).not.toHaveProperty("outputTokensPerSecond");
-    expect(usage?.outputTokens).toBe(1671);
-    expect(usage?.totalCostUsd).toBe(0.19840208);
+    expect(usage?.outputTokens).toBe(3242);
+    expect(usage?.totalCostUsd).toBe(0.29760312);
     expect(
       sessionUsageFromHistory([
         ...events,
@@ -85,6 +85,41 @@ describe("Grok speed omission without verified generation boundaries", () => {
 });
 
 describe("sessionUsageFromHistory", () => {
+  it.each(["task-completed-child", "subagent-completed-child"])(
+    "attributes real hidden response usage for %s",
+    (nativeTurnKey) => {
+      expect(
+        sessionUsageFromHistory([
+          {
+            type: "user.text",
+            text: "<system-reminder>Reminder</system-reminder>",
+            metadata: { promptIndex: 0 },
+          },
+          {
+            type: "turn.completed",
+            nativeTurnKey,
+            stopReason: "end_turn",
+            usage: { inputTokens: 10, outputTokens: 2, cachedReadTokens: 0 },
+          },
+          {
+            type: "user.text",
+            text: "<system-reminder>Notification</system-reminder>",
+            metadata: { promptIndex: 1 },
+          },
+          {
+            type: "turn.completed",
+            nativeTurnKey: "fresh-empty",
+            stopReason: "end_turn",
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        ]),
+      ).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 2,
+        sessionCacheUsage: { inputTokens: 10, cachedInputTokens: 0 },
+      });
+    },
+  );
   it("returns null when no persisted Turn Usage exists", () => {
     expect(sessionUsageFromHistory([])).toBeNull();
     expect(
@@ -132,14 +167,13 @@ describe("sessionUsageFromHistory", () => {
         },
       ]),
     ).toEqual({
-      inputTokens: 150,
+      inputTokens: 159,
       outputTokens: 15,
       totalTokens: 165,
       cachedInputTokens: 125,
       cacheWriteInputTokens: 2,
       reasoningOutputTokens: 5,
-      totalCostUsd: 0.25154905,
-      sessionCacheUsage: { inputTokens: 150, cachedInputTokens: 125 },
+      totalCostUsd: 0.2515491499,
     });
   });
 

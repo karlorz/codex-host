@@ -34,6 +34,7 @@ import {
   GrokAdapter,
   GrokTransportError,
   GROK_SESSION_FORK_METHOD,
+  grokNativeSessionDirectory,
   type GrokAcpTransportLike,
   type GrokOpenInput,
   type GrokOpenResult,
@@ -302,10 +303,11 @@ async function openedSession(
   transport: FakeGrokTransport,
   kind: "create" | "resume" = "create",
   knownTurnRefs?: NativeTurnRef[],
+  environment?: NodeJS.ProcessEnv,
 ) {
   let uuid = 0;
   const adapter = new GrokAdapter(
-    {},
+    { ...(environment ? { environment } : {}) },
     {
       randomUUID: () => `grok-id-${++uuid}`,
       createTransport: (options) => {
@@ -4197,3 +4199,258 @@ it("observes independent native goal worker rounds without admitting a command T
     await output;
   }
 });
+
+it.each([
+  { key: "subagent-completed-child", output: true, ephemeral: false },
+  { key: "task-completed-child", output: true, ephemeral: false },
+  { key: "fresh-empty", output: false, ephemeral: true },
+  { key: "old", output: false, ephemeral: true },
+  { key: "old", output: true, ephemeral: false, failed: true },
+  { key: "old", output: true, ephemeral: false, failed: true, stopReason: "cancelled" },
+  { key: "zero-item-worker", output: false, ephemeral: false, stopReason: "cancelled", goal: true },
+])(
+  "settles background occurrence $key with output=$output",
+  async ({ key, output: hasOutput, ephemeral, failed, stopReason, goal }) => {
+    const transport = new FakeGrokTransport();
+    transport.replay = [
+      { type: "user.text", text: "old prompt", metadata: { promptIndex: 0 } },
+      { type: "turn.completed", nativeTurnKey: "old", stopReason: "end_turn" },
+    ];
+    let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
+    Object.assign(transport, {
+      observeBackground: (o: NonNullable<typeof observer>) => {
+        observer = o;
+      },
+      goalControl: async () => ({ stopReason: "end_turn" }),
+    });
+    const { adapter, session } = await openedSession(transport);
+    const events: HostEvent[] = [];
+    const reading = (async () => {
+      for await (const o of session.outputs) if (o.kind === "event") events.push(o.event);
+    })();
+    try {
+      if (!observer) throw new Error("No observer");
+      const user: GrokTransportEvent = {
+        type: "user.text",
+        text: "<system-reminder>Reminder</system-reminder>",
+        metadata: { promptIndex: 1 },
+      };
+      const terminal: GrokTransportEvent = {
+        type: "turn.completed",
+        nativeTurnKey: key,
+        stopReason: stopReason ?? "end_turn",
+      };
+      if (goal)
+        transport.replay.push({
+          type: "goal.changed",
+          update: { goal_id: "goal", status: "active" },
+        });
+      transport.replay.push(user);
+      observer.onEvent(user);
+      await vi.waitFor(() => expect(events.some((e) => e.type === "turn.started")).toBe(true));
+      const agent: GrokTransportEvent = { type: "agent.text", text: "Observed" };
+      if (hasOutput) observer.onEvent(agent);
+      observer.onEvent(terminal);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(events.some((e) => e.type === "turn.completed")).toBe(false);
+      if (hasOutput) transport.replay.push(agent);
+      transport.replay.push(terminal);
+      await vi.waitFor(() => expect(events.some((e) => e.type === "turn.completed")).toBe(true));
+      const end = events.find((e) => e.type === "turn.completed");
+      expect(end).toMatchObject({
+        outcome: {
+          status: failed ? "failed" : stopReason === "cancelled" ? "cancelled" : "succeeded",
+        },
+      });
+      if (ephemeral) expect(end).toMatchObject({ ephemeral: true });
+      else if (!failed) expect(end).toMatchObject({ nativeTurnRef: { nativeTurnKey: key } });
+      if (failed)
+        expect(end).toMatchObject({
+          outcome: { error: { message: expect.stringMatching(/reused.*old/i) } },
+        });
+      else
+        expect(await session.readSnapshot()).toMatchObject({
+          ok: true,
+          value: {
+            turns: ephemeral
+              ? [expect.anything()]
+              : [
+                  expect.anything(),
+                  expect.objectContaining({
+                    nativeTurnRef: expect.objectContaining({ nativeTurnKey: key }),
+                  }),
+                ],
+          },
+        });
+    } finally {
+      await adapter.close();
+      await reading;
+    }
+  },
+);
+
+it.each(["complete", "active"])(
+  "clears a %s goal with an active worker using native completion semantics",
+  async (status) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "grok-clear-worker-"));
+    const environment = { GROK_HOME: root };
+    const transport = new FakeGrokTransport();
+    const directory = grokNativeSessionDirectory(
+      { cwd: "/synthetic", environment },
+      transport.sessionId,
+    );
+    await mkdir(path.join(directory, "goal"), { recursive: true });
+    const state = {
+      goal_id: "goal",
+      objective: "smoke",
+      status,
+      token_budget: null,
+      tokens_used_high_water: 1,
+      elapsed_ms: 1000,
+      created_at: new Date().toISOString(),
+    };
+    await writeFile(path.join(directory, "goal/state.json"), JSON.stringify(state));
+    let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
+    const nativeControl = vi.fn(async () => {
+      await rm(path.join(directory, "goal/state.json"));
+      return { stopReason: "end_turn" };
+    });
+    Object.assign(transport, {
+      observeBackground: (o: NonNullable<typeof observer>) => {
+        observer = o;
+      },
+      goalControl: nativeControl,
+    });
+    const { adapter, session } = await openedSession(transport, "create", undefined, environment);
+    const events: HostEvent[] = [];
+    const reading = (async () => {
+      for await (const o of session.outputs) if (o.kind === "event") events.push(o.event);
+    })();
+    try {
+      if (!observer) throw new Error("No observer");
+      const user: GrokTransportEvent = {
+        type: "user.text",
+        text: "<system-reminder>Goal</system-reminder>",
+        metadata: { promptIndex: 0 },
+      };
+      const agent: GrokTransportEvent = { type: "agent.text", text: "Worker finished" };
+      transport.replay.push(user, agent);
+      observer.onEvent(agent);
+      await vi.waitFor(() => expect(events.some((e) => e.type === "turn.started")).toBe(true));
+      if (!session.goals) throw new Error("Missing goals");
+      const clearing = session.goals.clear({ origin: null });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(transport.cancel).toHaveBeenCalledTimes(status === "complete" ? 0 : 1);
+      expect(nativeControl).not.toHaveBeenCalled();
+      const terminal: GrokTransportEvent = {
+        type: "turn.completed",
+        nativeTurnKey: "worker",
+        stopReason: status === "complete" ? "end_turn" : "cancelled",
+      };
+      transport.replay.push(terminal);
+      observer.onEvent(terminal);
+      expect(await clearing).toMatchObject({ ok: true, value: { cleared: true } });
+      expect(events.find((e) => e.type === "turn.completed")).toMatchObject({
+        outcome: { status: status === "complete" ? "succeeded" : "cancelled" },
+        nativeTurnRef: { nativeTurnKey: "worker" },
+      });
+      expect(nativeControl).toHaveBeenCalledOnce();
+    } finally {
+      await adapter.close();
+      await reading;
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([false, true])(
+  "projects native goal helpers by confirmed parent identity, post-terminal=%s",
+  async (postTerminal) => {
+    const transport = new FakeGrokTransport();
+    let observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0] | undefined;
+    Object.assign(transport, {
+      observeBackground: (o: NonNullable<typeof observer>) => {
+        observer = o;
+      },
+      goalControl: async () => ({ stopReason: "end_turn" }),
+    });
+    const { adapter, session } = await openedSession(transport);
+    const events: HostEvent[] = [];
+    const reading = (async () => {
+      for await (const o of session.outputs) if (o.kind === "event") events.push(o.event);
+    })();
+    try {
+      if (!observer) throw new Error("No observer");
+      const nativeObserver = observer;
+      const emit = (e: GrokTransportEvent) => {
+        transport.replay.push(e);
+        nativeObserver.onEvent(e);
+      };
+      const spawn = (id: string, parentPromptId = "worker"): GrokTransportEvent => ({
+        type: "subagent.spawned",
+        nativeSubagentId: id,
+        parentPromptId,
+        childSessionId: id,
+        attemptId: `attempt-${id}`,
+        description: id,
+        model: id === "planner" ? "grok-4.6" : "sonnet",
+      });
+      const finish = (id: string): GrokTransportEvent => ({
+        type: "subagent.finished",
+        nativeSubagentId: id,
+        status: "completed",
+      });
+      emit(spawn("planner"));
+      emit(finish("planner"));
+      emit({
+        type: "user.text",
+        text: "<system-reminder>Goal</system-reminder>",
+        metadata: { promptIndex: 0 },
+      });
+      emit({ type: "agent.text", text: "Done" });
+      for (const id of ["skeptic-1", "skeptic-2", "skeptic-3"]) {
+        emit(spawn(id));
+        emit(finish(id));
+      }
+      emit(spawn("wrong-parent", "not-worker"));
+      emit(finish("wrong-parent"));
+      await vi.waitFor(() => expect(events.some((e) => e.type === "turn.started")).toBe(true));
+      expect(
+        events.filter((e) => e.type === "item.started" && e.item.type === "subagentDelegation"),
+      ).toHaveLength(0);
+      if (!postTerminal) {
+        emit(spawn("summarizer"));
+        emit(finish("summarizer"));
+      }
+      emit({
+        type: "turn.completed",
+        nativeTurnKey: "worker",
+        stopReason: postTerminal ? "cancelled" : "end_turn",
+      });
+      await vi.waitFor(() => expect(events.some((e) => e.type === "turn.completed")).toBe(true));
+      if (postTerminal) {
+        emit(spawn("summarizer"));
+        emit(finish("summarizer"));
+      }
+      const cards = events
+        .filter((e) => e.type === "item.started")
+        .flatMap((e) => (e.item.type === "subagentDelegation" ? e.item.subagents : []));
+      expect(cards.map((c) => c.nativeSubagentId)).toEqual(
+        postTerminal
+          ? ["planner", "skeptic-1", "skeptic-2", "skeptic-3"]
+          : ["planner", "skeptic-1", "skeptic-2", "skeptic-3", "summarizer"],
+      );
+      const reopened = await session.readSnapshot();
+      expect(reopened.ok).toBe(true);
+      if (reopened.ok)
+        expect(
+          reopened.value.turns[0]?.items
+            .flatMap((s) => (s.item.type === "subagentDelegation" ? s.item.subagents : []))
+            .map((c) => c.nativeSubagentId),
+        ).toEqual(["planner", "skeptic-1", "skeptic-2", "skeptic-3", "summarizer"]);
+    } finally {
+      await adapter.close();
+      await reading;
+    }
+  },
+);

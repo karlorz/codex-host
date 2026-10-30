@@ -1,6 +1,7 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { parseHostUsage, type HostUsage } from "@codexhost/harness-adapter";
 import type { GrokTransportEvent } from "./acp-transport.js";
+import { classifyGrokHistory } from "./grok-history-groups.js";
 
 /** Grok documents `costUsdTicks` as integer ticks where 1 USD = 10^10. */
 const USD_TICKS_PER_DOLLAR = 10_000_000_000;
@@ -211,20 +212,26 @@ export function sessionCostFromNative(value: unknown, initialCostUsd: number): n
 
 function historyTurnKey(event: { nativeTurnKey?: string }, index: number): string | null {
   const key = event.nativeTurnKey;
-  if (typeof key === "string" && key.startsWith("task-completed-")) return null;
   return typeof key === "string" && key.length > 0 ? key : `anon-${index}`;
 }
 
 /** Native Turn totals restore Session cache facts and fees, not a latest-request rate or TPS. */
-export function sessionUsageFromHistory(
-  events: ReadonlyArray<{ type: string; usage?: unknown; nativeTurnKey?: string }>,
-): HostUsage | null {
+export function sessionUsageFromHistory<
+  T extends { type: string; usage?: unknown; nativeTurnKey?: string },
+>(events: readonly T[]): HostUsage | null {
   const latestByKey = new Map<
     string,
     { usage: HostUsage | null; complete: boolean; ticks?: number }
   >();
   let index = 0;
-  for (const event of events) {
+  const groups = classifyGrokHistory(events as readonly GrokTransportEvent[]);
+  for (const group of groups) {
+    if (
+      group.disposition !== "durable" &&
+      (group.user || !latestByKey.has(group.terminal.nativeTurnKey))
+    )
+      continue;
+    const event = group.terminal;
     if (event?.type !== "turn.completed") continue;
     const key = historyTurnKey(event, index);
     index += 1;

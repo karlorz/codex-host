@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { mapGrokReplay } from "../src/grok-history.js";
 import {
   harnessIdSchema,
   nativeSessionRefSchema,
@@ -128,6 +129,52 @@ describe("Grok checkpoint rewind", () => {
         force: true,
         mode: "conversation_only",
       });
+    },
+  );
+
+  it.each([0, 1, 2])(
+    "rewinds native background responses at checkpoint %i",
+    async (targetPromptIndex) => {
+      const events: GrokTransportEvent[] = [
+        { type: "user.text", text: "first", metadata: { promptIndex: 0 } },
+        { type: "turn.completed", nativeTurnKey: "first", stopReason: "end_turn" },
+        {
+          type: "user.text",
+          text: "<system-reminder>Watch</system-reminder>",
+          metadata: { promptIndex: 1 },
+        },
+        { type: "agent.text", text: "Observed" },
+        {
+          type: "turn.completed",
+          nativeTurnKey: "subagent-completed-child",
+          stopReason: "end_turn",
+        },
+        { type: "user.text", text: "last", metadata: { promptIndex: 2 } },
+        { type: "turn.completed", nativeTurnKey: "last", stopReason: "end_turn" },
+      ];
+      const result = await rewindGrokSession({
+        cwd: "/synthetic",
+        harnessId,
+        sourceRef,
+        checkpoint: nativeCheckpointRefSchema.parse({
+          harnessId,
+          nativeSessionId: "session",
+          checkpointId: String(targetPromptIndex),
+          formatVersion: 1,
+        }),
+        locateSource: async () => ({ cwd: "/synthetic" }),
+        readHistory: async () => events,
+        rewindAndLoad: async () => {
+          events.push({ type: "rewind.marker", targetPromptIndex });
+          return { sessionId: "session" };
+        },
+      });
+      expect(result).toMatchObject({ ok: true });
+      expect(
+        mapGrokReplay(events, harnessId, "session", "/synthetic").turns.map(
+          (t) => t.nativeTurnRef.nativeTurnKey,
+        ),
+      ).toEqual(["first", "subagent-completed-child"].slice(0, targetPromptIndex));
     },
   );
 

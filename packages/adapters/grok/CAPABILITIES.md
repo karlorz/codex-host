@@ -18,7 +18,7 @@
 | A4 | 创建 Session | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
 | A5 | 执行 Turn | 必做 | P0 | 支持 | src/grok-adapter.ts | test/grok-adapter.test.ts |  |
 | A6 | 取消 | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
-| A7 | 只读快照 | 必做 | P0 | 支持 | src/grok-history.ts | test/grok-history.test.ts | Hidden worker Turns require a new native terminal ID; task/subagent notifications and repeated interruption IDs are excluded |
+| A7 | 只读快照 | 必做 | P0 | 支持 | src/grok-history.ts | test/grok-history.test.ts | Indexed hidden responses require fresh terminal identity plus native execution evidence; real task/subagent completion responses are retained, notification-only/reused no-output groups are ephemeral; zero-Item cancelled native goal workers are retained |
 | A8 | 持久身份 + resume | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
 | A9 | 错误与并发 | 必做 | P0 | 支持 | src/grok-adapter.ts | test/grok-adapter.test.ts |  |
 | A10 | 关闭 | 必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts |  |
@@ -32,7 +32,7 @@
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | 支持 | src/grok-tool-output.ts、src/grok-file-change.ts、src/grok-adapter.ts | test/grok-tool-output.test.ts、test/grok-file-change.test.ts |  |
 | B9 | 审批 | 原生有则必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts | ACP request_permission |
 | B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts | test/grok-questions.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 专属按钮不投影；真实 Desktop 已验收单选与文本 |
-| B11 | 原生 Subagent | 原生有则必做 | P2 | 支持 | src/grok-subagent.ts、src/grok-subagent-lifecycle.ts | test/grok-subagent.test.ts、test/grok-adapter.test.ts |  |
+| B11 | 原生 Subagent | 原生有则必做 | P2 | 支持 | src/grok-subagent.ts、src/grok-subagent-lifecycle.ts、src/grok-goal-helpers.ts | test/grok-subagent.test.ts、test/grok-adapter.test.ts、test/grok-goal-helpers.test.ts | Native goal helper child links and final transcript hydration implemented; installed helper click-through pending; streaming unclaimed |
 | B12 | 自主 Turn | 原生有则必做 | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | Structured goal updates and independent native worker observation; installed Desktop lifecycle pending |
 | B13 | 会话用量 | 原生有则必做 | P1 | 支持 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-usage.test.ts、test/grok-acp-usage.test.ts |  |
 | B14 | 请求级计量 | 原生有则必做 | P2 | 受限 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-adapter.test.ts | 当前发布原生费用快照，不发布 usage.request / usage.history |
@@ -104,4 +104,14 @@ Desktop Goal-mode entry: curated `/goal` admits the new-chat opening Turn; the m
 
 Installed Desktop trial on `27dff829` failed at the first worker Item because the Grok Adapter omitted `turn.started` after autonomous admission. The Adapter now emits both lifecycle events; full Host regression covers worker projection and native identity persistence. The real-executable full Host trial also passed worker projection, pause with a cancelled native terminal/mapping, and clear (`CODEXHOST_GROK_GOAL_HOST_LIVE=1`). Earlier adapter-only native success did not establish Host/Desktop acceptance. A new candidate and attended retry are required.
 
-P1: optional public goals capability, native goal accounting and autonomous worker observation are implemented. Native hidden goal input is hydrated from persisted Prompt Index boundaries; real terminal IDs remain required. Focused regressions: `test/grok-goals.test.ts`, autonomous worker test in `test/grok-adapter.test.ts`, Host goal routing/unknown-plugin test. Native 1.0.45 active-control acceptance passed creation, worker observation, cancelled terminal identity, pause, same-ID paused reopen and clear (`CODEXHOST_GROK_GOAL_CONTROL_LIVE=1`). Full native completion trials timed out; completion, budget exhaustion and installed Desktop acceptance remain unqualified. Native goal scheduler stays in Grok; no Host-managed fallback.
+P1: optional public goals capability, native goal accounting and autonomous worker observation are implemented. Native hidden goal input is hydrated from persisted Prompt Index boundaries; real terminal IDs remain required. Focused regressions: `test/grok-goals.test.ts`, autonomous worker test in `test/grok-adapter.test.ts`, Host goal routing/unknown-plugin test. Native 1.0.45 active-control acceptance passed creation, worker observation, cancelled terminal identity, pause, same-ID paused reopen and clear (`CODEXHOST_GROK_GOAL_CONTROL_LIVE=1`). The disposable full-Host completion trial passed with an explicit Always approve policy and 150,000-token test budget: completed parent, clear, at least five readable helper histories and correct file (`CODEXHOST_GROK_GOAL_HOST_COMPLETE_LIVE=1`). A separate native TUI run reached budget_limited; shared-panel budget behavior and installed Desktop acceptance remain unqualified. Native goal scheduler stays in Grok; no Host-managed fallback.
+
+## Background responses and goal helpers
+
+- One native history classifier supplies replay, background settlement and usage. Completion-name prefixes are not origin markers. Real response backfill preserves existing Host mappings and native rewind checkpoints; reused IDs with execution fail explicitly.
+- Completed-goal clear waits for worker/summarizer completion within the existing operation deadline, with no delayed clear after timeout or replacement. Active/paused-goal clear and pause keep native cancellation.
+- Standalone helpers retain child/session/attempt/parent identity. Live publication waits for the worker terminal key; replay places pre-input planners and post-terminal summaries by that key. Unknown ownership creates no guessed parent. Native descriptions/models survive; generic type is not a role.
+- Natural-language goal creation is unsupported pending a model-facing native creation tool. Desktop `/goal` and `/grok-goal` are the qualified entry points.
+- Regression coverage: Grok history/usage/Adapter/transport/lifecycle and full Host goal-worker/child-transcript fixtures. Installed Desktop acceptance remains separate and requires Karl's manual restart of an authorized candidate.
+
+- Pre-worker planning approvals: the shared interaction contract needs an active Turn. A planner approval before worker admission cannot be presented as a parent interaction; native planning can pause. Native permission policy must be selected deliberately; the Adapter does not elevate it.
