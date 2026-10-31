@@ -173,6 +173,7 @@ export type GrokTransportEvent =
       nativeSubagentId: string;
       status: "completed" | "failed" | "interrupted";
       resultSummary?: string;
+      output?: string;
       metadata?: Record<string, unknown>;
     }
   | { type: "interaction.resolved"; toolCallId: string; metadata?: Record<string, unknown> };

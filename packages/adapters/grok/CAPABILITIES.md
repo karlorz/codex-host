@@ -115,3 +115,5 @@ P1: optional public goals capability, native goal accounting and autonomous work
 - Regression coverage: Grok history/usage/Adapter/transport/lifecycle and full Host goal-worker/child-transcript fixtures. Installed Desktop acceptance remains separate and requires Karl's manual restart of an authorized candidate.
 
 - Pre-worker planning approvals: the shared interaction contract needs an active Turn. A planner approval before worker admission cannot be presented as a parent interaction; native planning can pause. Native permission policy must be selected deliberately; the Adapter does not elevate it.
+
+Goal presentation: Desktop `/goal` creation omits the static status reply; explicit `/grok-goal` controls retain it. Successful autonomous settlement publishes native persisted closing messages before the Turn completes and assigns the final-answer phase. Persisted summarizer splitting matches the full raw native output rather than its bounded display summary. Full-Host regressions cover streamed and PersistOnly answers with helper bookkeeping; installed visual acceptance remains pending.

@@ -21,7 +21,7 @@ import {
   writeRequest,
 } from "./app-server-host-fixture.js";
 
-it.each(["native-worker", "subagent-completed", "task-completed"])(
+it.each(["native-worker", "subagent-completed", "task-completed", "persisted-boundary"])(
   "projects real Grok %s responses, helpers and housekeeping through the Host",
   async (prefix) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "grok-host-goal-"));
@@ -140,6 +140,13 @@ it.each(["native-worker", "subagent-completed", "task-completed"])(
         result: { goal: { objective: "smoke", status: "active" } },
       });
       await collector.waitFor((m) => m.method === "turn/completed");
+      expect(
+        collector.messages.filter(
+          (m) =>
+            m.method === "item/completed" &&
+            (m.params as { item?: { type?: string } })?.item?.type === "agentMessage",
+        ),
+      ).toHaveLength(0);
       expect(nativeControl).toHaveBeenCalledTimes(1);
       if (!observer) throw new Error("Grok background observer not installed");
       const nativeObserver = observer;
@@ -190,21 +197,33 @@ it.each(["native-worker", "subagent-completed", "task-completed"])(
           history.push(event);
           nativeObserver.onEvent(event);
         };
-        const helper = (id: string) => {
+        const helper = (id: string, summary?: string) => {
           emit({
             type: "subagent.spawned",
             nativeSubagentId: id,
             parentPromptId: `${prefix}-${round}`,
             childSessionId: id,
             attemptId: `attempt-${id}`,
-            description: id,
+            description: id === "summarizer" ? "goal summarizer" : id,
             model: id === "planner" ? "grok-4.6" : "sonnet",
           });
-          emit({ type: "subagent.finished", nativeSubagentId: id, status: "completed" });
+          emit({
+            type: "subagent.finished",
+            nativeSubagentId: id,
+            status: "completed",
+            ...(summary ? { resultSummary: summary } : {}),
+          });
         };
         if (round === 0) helper("planner");
         emit(user);
-        if (round < 2) emit(agent);
+        if (round === 0 && prefix === "persisted-boundary") {
+          history.push(agent);
+          nativeObserver.onEvent({ ...agent, text: "Live worker response." });
+        } else if (round === 0 && prefix === "task-completed") {
+          history.push(agent);
+          nativeObserver.onEvent({ ...agent, text: "worker " });
+        } else if (round === 1 && prefix === "native-worker") history.push(agent);
+        else if (round < 2) emit(agent);
         if (round === 0) for (const id of helperIds.slice(1, -1)) helper(id);
         if (round === 1) {
           await vi.waitFor(() =>
@@ -215,13 +234,30 @@ it.each(["native-worker", "subagent-completed", "task-completed"])(
           const state = JSON.parse(await readFile(path.join(directory, "goal/state.json"), "utf8"));
           await writeFile(
             path.join(directory, "goal/state.json"),
-            JSON.stringify({ ...state, status: "complete" }),
+            JSON.stringify({ ...state, status: "complete", elapsed_ms: 9000 }),
+          );
+          nativeObserver.onEvent({
+            type: "goal.changed",
+            update: { ...state, status: "complete", tokens_used: 512, elapsed_ms: 9000 },
+          });
+          await collector.waitFor(
+            (m) =>
+              m.method === "thread/goal/updated" &&
+              (m.params as { goal?: { status?: string } })?.goal?.status === "complete",
           );
           writeRequest(input, { id: 50, method: "thread/goal/clear", params: { threadId } });
           await new Promise((resolve) => setTimeout(resolve, 30));
           expect(nativeControl.mock.calls.some(([prompt]) => prompt === "/goal clear")).toBe(false);
           expect(transport.cancel).not.toHaveBeenCalled();
-          helper("summarizer");
+          const summary = "Goal achieved: smoke file verified.";
+          helper("summarizer", summary);
+          // Grok persists the worker + GoalSummary echo without streaming the echo.
+          const persisted = history.findLast(
+            (e) => e.type === "agent.text" && e.messageId === agent.messageId,
+          );
+          if (persisted?.type !== "agent.text") throw new Error("Missing worker history");
+          history.splice(history.indexOf(persisted), 1);
+          history.push({ ...persisted, text: persisted.text + summary });
         }
         emit(terminal);
         await vi.waitFor(
@@ -233,6 +269,37 @@ it.each(["native-worker", "subagent-completed", "task-completed"])(
           { timeout: 5000 },
         );
         const messages = collector.messages.slice(start);
+        if (round < 2) {
+          const finals = messages.filter(
+            (m) =>
+              m.method === "item/completed" &&
+              (m.params as { item?: { phase?: string } })?.item?.phase === "final_answer",
+          );
+          expect(finals.at(-1)).toMatchObject({
+            params: {
+              item: {
+                text:
+                  round === 1
+                    ? "Goal achieved: smoke file verified."
+                    : prefix === "persisted-boundary"
+                      ? "Live worker response."
+                      : agent.text,
+              },
+            },
+          });
+          const final = finals.at(-1);
+          if (!final) throw new Error("Missing final answer notification");
+          expect(messages.indexOf(final)).toBeLessThan(
+            messages.findIndex((m) => m.method === "turn/completed"),
+          );
+          const answerStarts = messages.filter(
+            (m) =>
+              m.method === "item/started" &&
+              (m.params as { item?: { type?: string } })?.item?.type === "agentMessage",
+          );
+          const ids = answerStarts.map((m) => (m.params as { item: { id: string } }).item.id);
+          expect(new Set(ids).size).toBe(ids.length);
+        }
         expect(messages.findIndex((m) => m.method === "turn/started")).toBeGreaterThanOrEqual(0);
         if (round < 2)
           expect(messages.findIndex((m) => m.method === "item/started")).toBeGreaterThan(
@@ -456,6 +523,31 @@ it.skipIf(
             ).toMatchObject({ params: { turn: { status: "completed" } } }),
           { timeout: 10000 },
         );
+        const workerEnd = collector.messages.findIndex(
+          (m) =>
+            m.method === "turn/completed" &&
+            (m.params as { turn?: { id?: string } })?.turn?.id === workerId,
+        );
+        const liveFinals = collector.messages
+          .slice(0, workerEnd)
+          .filter(
+            (m) =>
+              m.method === "item/completed" &&
+              (m.params as { turnId?: string; item?: { phase?: string } })?.turnId === workerId &&
+              (m.params as { item?: { phase?: string } })?.item?.phase === "final_answer",
+          );
+        expect(liveFinals.length).toBeGreaterThan(0);
+        expect((liveFinals.at(-1)?.params as { item: { text: string } }).item.text.trim()).not.toBe(
+          "",
+        );
+        expect(
+          collector.messages.filter(
+            (m) =>
+              m.method === "item/completed" &&
+              (m.params as { turnId?: string; item?: { type?: string } })?.turnId === openingId &&
+              (m.params as { item?: { type?: string } })?.item?.type === "agentMessage",
+          ),
+        ).toHaveLength(0);
         const children = (await store.listThreads()).filter((r) => r.subagent);
         expect(children.length).toBeGreaterThanOrEqual(5);
         for (const [index, child] of children.entries()) {
@@ -505,6 +597,10 @@ it.skipIf(
       expect(diagnostic.read()?.toString() ?? "").not.toContain("precedes turn.started");
     } finally {
       clearInterval(approvalTimer);
+      const wireErrors = collector.messages
+        .filter((m) => m.method === "error")
+        .map((m) => (m.params as { error: { message: string } }).error.message);
+      if (wireErrors.length) console.info(JSON.stringify({ wireErrors }));
       input.end();
       await adapter.close();
       await running;

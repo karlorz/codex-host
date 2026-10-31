@@ -529,7 +529,7 @@ describe("Grok history local media Markdown", () => {
 
 describe("Grok goal summarizer history", () => {
   const summary = "A standalone verification file was generated.\n\n- Run cat on it.";
-  const replayWith = (text: string, finishedSummary = summary) =>
+  const replayWith = (text: string, finishedSummary = summary, output?: string) =>
     mapGrokReplay(
       [
         { type: "user.text", text: "goal", metadata: { eventId: "user-1", promptIndex: 0 } },
@@ -544,6 +544,7 @@ describe("Grok goal summarizer history", () => {
           nativeSubagentId: "summarizer",
           status: "completed",
           resultSummary: finishedSummary,
+          ...(output !== undefined ? { output } : {}),
         },
         { type: "agent.text", text },
         { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
@@ -573,6 +574,13 @@ describe("Grok goal summarizer history", () => {
       "Wrote the file. Something else.",
     ]);
     expect(texts(replayWith(summary))).toEqual([summary]);
+  });
+
+  it("matches the full native output even when the display summary is truncated", () => {
+    const output = `  ${"verification details ".repeat(200)}\n`;
+    expect(
+      texts(replayWith("Worker done." + output, output.trim().slice(0, 2000), output)),
+    ).toEqual(["Worker done.", output]);
   });
 });
 

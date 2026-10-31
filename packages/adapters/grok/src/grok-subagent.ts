@@ -189,6 +189,7 @@ export type GrokSubagentTransportEvent =
       nativeSubagentId: string;
       status: "completed" | "failed" | "interrupted";
       resultSummary?: string;
+      output?: string;
     };
 
 export function grokSubagentEventFromUpdate(update: unknown): GrokSubagentTransportEvent | null {
@@ -231,6 +232,7 @@ export function grokSubagentEventFromUpdate(update: unknown): GrokSubagentTransp
       nativeSubagentId,
       status,
       ...(resultSummary ? { resultSummary } : {}),
+      ...(typeof update.output === "string" ? { output: update.output } : {}),
     };
   }
   return null;

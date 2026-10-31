@@ -649,8 +649,9 @@ export function mapGrokReplay(
         });
       }
     } else if (event.type === "subagent.finished") {
-      if (goalSummarizers.has(event.nativeSubagentId) && event.resultSummary) {
-        goalSummaries.push(event.resultSummary);
+      const output = event.output ?? event.resultSummary;
+      if (goalSummarizers.has(event.nativeSubagentId) && event.status === "completed" && output) {
+        goalSummaries.push(output);
       }
       settleWatchedSubagents(
         "get_command_or_subagent_output",

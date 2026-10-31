@@ -3,6 +3,7 @@ import { createGrokUsageStatistics } from "./usage-statistics.js";
 import { grokCommandCatalog, grokGoalPrompt } from "./grok-commands.js";
 import { randomUUID } from "node:crypto";
 import { grokTextItemId } from "./grok-text-item-id.js";
+import { settledGrokAgentMessages } from "./grok-agent-messages.js";
 import { readGrokCredentials } from "./grok-credential-export.js";
 import path from "node:path";
 import { applyGrokComputerUsePreference } from "@codexhost/harness-plugin-files";
@@ -908,7 +909,7 @@ class GrokHarnessSession implements HarnessSession {
                       ...(budget ? { tokenBudget: Number(budget[2]) } : {}),
                       origin: "user",
                     });
-          if (result.ok) {
+          if (result.ok && command.commandId !== "grok.desktop-goal") {
             const value = result.value;
             const text =
               value && typeof value === "object" && "objective" in value
@@ -1970,6 +1971,7 @@ class GrokHarnessSession implements HarnessSession {
     let nativeTurnRef: NativeTurnRef | undefined;
     let checkpoint: NativeCheckpointRef | undefined;
     let ephemeral = false;
+    let persistedItems: readonly HostItemSnapshot[] | undefined;
     try {
       history = await this.#refreshSnapshot();
       const expectedKey =
@@ -2012,6 +2014,8 @@ class GrokHarnessSession implements HarnessSession {
       nativeTurnRef = created[0]?.nativeTurnRef;
       checkpoint = created[0]?.checkpoint;
       if (nativeTurnRef) this.#publishGoalHelpers(active, nativeTurnRef.nativeTurnKey);
+      if (active.backgroundPromptIndex !== undefined && !ephemeral)
+        persistedItems = created[0]?.items;
     } catch (error) {
       if (outcome.status === "succeeded" || error instanceof GrokNativeIdentityReuseError) {
         outcome = { status: "failed", error: normalizeError(error, "protocolError") };
@@ -2043,6 +2047,7 @@ class GrokHarnessSession implements HarnessSession {
       usage,
       nativeTurnRef,
       ephemeral,
+      outcome.status === "succeeded" ? persistedItems : undefined,
     );
   }
 
@@ -2052,9 +2057,33 @@ class GrokHarnessSession implements HarnessSession {
     usage: HostUsage | null = null,
     nativeTurnRef?: NativeTurnRef,
     ephemeral = false,
+    persistedItems?: readonly HostItemSnapshot[],
   ): void {
     if (this.#active !== active) return;
     const itemOutcome: HostItemOutcome = outcome;
+    const persistedMessages = persistedItems
+      ? settledGrokAgentMessages(persistedItems, active.completedItems)
+      : [];
+    const pendingId = active.agent?.itemId;
+    const pendingMessage = persistedMessages.find((item) => item.itemId === pendingId);
+    if (pendingMessage && active.agent) {
+      // Streaming is append-only. Retain bytes already shown when native persistence
+      // uses a different boundary; newly persisted messages still keep their own IDs.
+      const text = pendingMessage.text.startsWith(active.agent.text)
+        ? pendingMessage.text
+        : active.agent.text;
+      const delta = text.slice(active.agent.text.length);
+      if (delta)
+        this.#event({
+          type: "item.updated",
+          turnId: active.command.turnId,
+          itemId: pendingMessage.itemId,
+          update: { type: "text.append", text: delta },
+        });
+      active.agent = { ...pendingMessage, text };
+      active.rawAgentText = text;
+      active.projectedAgentText = text;
+    }
     this.#completeReasoning(active, itemOutcome);
     this.#completeAgent(active, itemOutcome);
     active.subagents.finalize(active.command.turnId, itemOutcome);
@@ -2064,6 +2093,11 @@ class GrokHarnessSession implements HarnessSession {
     }
     for (const tool of active.tools.values()) this.#completeItem(active, tool.item, itemOutcome);
     active.tools.clear();
+    for (const item of persistedMessages) {
+      if (item.itemId === pendingId) continue;
+      this.#event({ type: "item.started", turnId: active.command.turnId, item });
+      this.#completeItem(active, item, itemOutcome);
+    }
     for (const [interactionId, pending] of active.approvals) {
       active.approvals.delete(interactionId);
       pending.resolve({ outcome: { outcome: "cancelled" } });

@@ -157,6 +157,7 @@ describe("Grok Subagent ACP mapping", () => {
       nativeSubagentId: "child-1",
       status: "completed",
       resultSummary: "Inspection complete",
+      output: "Inspection complete",
     });
   });
 });
