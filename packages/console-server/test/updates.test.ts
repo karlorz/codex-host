@@ -175,9 +175,14 @@ describe("console updates", () => {
     ["0.13.2-1", "0.13.2-2"],
   ])("hands off %s → %s to the Updater before returning", async (currentVersion, latestVersion) => {
     const { target, environment } = await npmLayout("linux", currentVersion);
-    const spawnUpdater = vi.fn<(executable: string, requestPath: string) => never>(
-      () => Object.assign(new EventEmitter(), { pid: 4321, kill: vi.fn() }) as never,
-    );
+    let resolveSpawned!: () => void;
+    const spawned = new Promise<void>((resolve) => {
+      resolveSpawned = resolve;
+    });
+    const spawnUpdater = vi.fn<(executable: string, requestPath: string) => never>(() => {
+      resolveSpawned();
+      return Object.assign(new EventEmitter(), { pid: 4321, kill: vi.fn() }) as never;
+    });
     const onHandedOff = vi.fn();
     const updates = createConsoleUpdates({
       onHandedOff,
@@ -200,7 +205,8 @@ describe("console updates", () => {
     expect(spawnUpdater).not.toHaveBeenCalled();
     expect(onHandedOff).not.toHaveBeenCalled();
     const starting = updates.start(target);
-    await vi.waitFor(() => expect(spawnUpdater).toHaveBeenCalledOnce());
+    await Promise.race([spawned, starting]);
+    expect(spawnUpdater).toHaveBeenCalledOnce();
     expect(onHandedOff).not.toHaveBeenCalled();
     const call = spawnUpdater.mock.calls[0];
     if (!call) throw new Error("Updater was not spawned");
@@ -225,9 +231,14 @@ describe("console updates", () => {
     const { target, environment } = await npmLayout("linux");
     await rm(environment.CODEXHOST_NPM_CLI_PATH);
     const onHandedOff = vi.fn();
-    const spawnUpdater = vi.fn<(executable: string, requestPath: string) => never>(
-      () => Object.assign(new EventEmitter(), { pid: 4321, kill: vi.fn() }) as never,
-    );
+    let resolveSpawned!: () => void;
+    const spawned = new Promise<void>((resolve) => {
+      resolveSpawned = resolve;
+    });
+    const spawnUpdater = vi.fn<(executable: string, requestPath: string) => never>(() => {
+      resolveSpawned();
+      return Object.assign(new EventEmitter(), { pid: 4321, kill: vi.fn() }) as never;
+    });
     const updates = createConsoleUpdates({
       onHandedOff,
       waitForHandoff: true,
@@ -245,7 +256,8 @@ describe("console updates", () => {
     await expect(updates.status()).resolves.toMatchObject({ status: { phase: "failed" } });
     await writeFile(environment.CODEXHOST_NPM_CLI_PATH, "");
     const retry = updates.start(target);
-    await vi.waitFor(() => expect(spawnUpdater).toHaveBeenCalledOnce());
+    await Promise.race([spawned, retry]);
+    expect(spawnUpdater).toHaveBeenCalledOnce();
     const call = spawnUpdater.mock.calls[0];
     if (!call) throw new Error("Updater was not spawned");
     const request = JSON.parse(await readFile(call[1], "utf8"));
