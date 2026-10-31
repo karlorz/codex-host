@@ -45,6 +45,20 @@ describe("workflow and form contracts", () => {
     expect(workflow).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
+  it("retains native Windows lock queries in a dedicated step", async () => {
+    const workflow = await read(".github/workflows/ci.yml");
+    expect(workflow).toContain(
+      "--exclude 'packages/mapping-store/test/windows-lock-native.test.ts'",
+    );
+    const step = workflow.slice(
+      workflow.indexOf("- name: Test Windows native lock ownership"),
+      workflow.indexOf("# Asset pairs"),
+    );
+    expect(step).toContain("if: runner.os == 'Windows'");
+    expect(step).toContain("packages/mapping-store/test/windows-lock-native.test.ts");
+    expect(step).not.toMatch(/retry|timeout/u);
+  });
+
   it("runs write-capable maintenance only with trusted code and no dependency installation", async () => {
     const workflow = await read(".github/workflows/repository-maintenance.yml");
     expect(workflow).toContain("pull_request_target:");

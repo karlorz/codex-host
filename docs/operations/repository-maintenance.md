@@ -132,6 +132,10 @@ does not claim that npm publication occurred in the original run.
 
 标签推送使用标签提交里的工作流定义，新校验不会追溯改写旧标签的发布逻辑。这不是不可绕过的权限控制；未设置分支、标签或发布环境保护。
 
+Windows native Mapping Store lock queries run in a dedicated step after the
+cross-platform suite. This retains their actual PowerShell/CIM behavior and
+production query deadlines without competing with the full suite's worker load.
+
 ## 验证
 
 ```bash

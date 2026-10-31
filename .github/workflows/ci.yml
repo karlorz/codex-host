@@ -92,6 +92,15 @@ jobs:
           --exclude 'packages/shared-contracts/test/**'
           --exclude 'packages/renderer-extension/test/**'
           --exclude 'tools/gate-claude-code/run.test.mjs'
+          --exclude 'packages/mapping-store/test/windows-lock-native.test.ts'
+
+      # Native PowerShell startup deadlines are part of the behavior under test.
+      # Run these queries without the full suite competing for the Windows runner.
+      - name: Test Windows native lock ownership
+        if: runner.os == 'Windows'
+        run: >
+          npx vitest run --config tests/vitest.config.js
+          packages/mapping-store/test/windows-lock-native.test.ts
 
       # Asset pairs and export contracts differ even when About versions match.
       - name: Test Windows native voice profiles
