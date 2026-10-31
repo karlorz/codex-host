@@ -42,6 +42,11 @@ function setup(
       new Map([...connections].map(([hostId, connection]) => [hostId, signal(connection)])),
     );
   }
+  const conversations = new Map<string, Record<string, unknown>>();
+  familyBindings.set(
+    { kind: "signal-family" },
+    new Map([["thread-state", { value: { get: () => conversations.get("thread") } }]]),
+  );
   const store = { familyBindings, parent: undefined };
   const handle = {
     chain: {},
@@ -107,7 +112,7 @@ function setup(
       new MessagePort(),
       message,
     );
-  return { renderer, target, rpc, connections, sent, post, MessagePort };
+  return { renderer, target, rpc, connections, conversations, sent, post, MessagePort };
 }
 
 function policyOf(route: ReturnType<Routing["forHost"]>) {
@@ -327,6 +332,84 @@ it("keeps the native manager path when Desktop exposes one in the Renderer", asy
   try {
     expect(routing.forComposer()?.manager).toHaveProperty("requestClient");
     expect((fixture.MessagePort.prototype as { postMessage: unknown }).postMessage).toBe(original);
+  } finally {
+    routing.dispose();
+  }
+});
+
+function composerSubmission(queueModeOverride?: string) {
+  return [
+    "push",
+    [
+      "pipeline",
+      -201,
+      ["sendMessage"],
+      [
+        {
+          conversationId: "thread",
+          message: { id: "message", text: "reply Pong", context: {} },
+          acceptLocally: true,
+          ...(queueModeOverride ? { queueModeOverride } : {}),
+        },
+        ["export", -1320],
+      ],
+    ],
+  ];
+}
+
+it("selects the native queue intent before a main-process Composer can paint a steer", async () => {
+  const f = setup();
+  const routing = await install(f);
+  try {
+    f.conversations.set("thread", {
+      conversationId: "thread",
+      hostId: "local",
+      modelProvider: "codexhost",
+      threadRuntimeStatus: { type: "active" },
+    });
+    f.post(composerSubmission());
+    expect(f.sent[0]).toEqual(composerSubmission("queue"));
+    // Enter retains queue presentation even when a caller supplies the global Steer intent.
+    f.post(composerSubmission("send-now"));
+    expect(f.sent[1]).toEqual(composerSubmission("queue"));
+    // A queue mode still lets Desktop start a normal Turn when no Turn is active.
+    f.conversations.set("thread", {
+      conversationId: "thread",
+      hostId: "local",
+      modelProvider: "codexhost",
+      threadRuntimeStatus: { type: "idle" },
+    });
+    f.post(composerSubmission());
+    expect(f.sent[2]).toEqual(composerSubmission("queue"));
+  } finally {
+    routing.dispose();
+  }
+});
+
+it("keeps official Steer, unknown Threads, and explicit queue-row actions native", async () => {
+  const f = setup();
+  const routing = await install(f);
+  try {
+    const native = composerSubmission("send-now");
+    f.post(native);
+    f.conversations.set("thread", {
+      conversationId: "thread",
+      hostId: "local",
+      modelProvider: "openai",
+    });
+    f.post(native);
+    expect(f.sent).toEqual([native, native]);
+    f.conversations.set("thread", {
+      conversationId: "thread",
+      hostId: "local",
+      modelProvider: "codexhost",
+    });
+    const action = ["push", ["pipeline", -201, ["sendQueuedMessageNow"], ["thread", "message"]]];
+    f.post(action);
+    expect(f.sent[2]).toEqual(action);
+    routing.dispose();
+    f.post(native);
+    expect(f.sent[3]).toEqual(native);
   } finally {
     routing.dispose();
   }

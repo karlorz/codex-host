@@ -13,6 +13,7 @@ import {
   ExternalSteerNotTakenError,
   ExternalTurnSteering,
   externalSteeringDelivery,
+  sessionCanNativeSteer,
 } from "../src/external-turn-steering.js";
 
 type Cancel = (command: TurnCancelCommand) => Promise<HarnessResult<TurnCancelAccepted>>;
@@ -24,10 +25,14 @@ function fixture() {
     .mockResolvedValue({ ok: true, value: { cancellationRequested: true } });
   const thread = {
     id: "thread",
+    harnessId: "pi",
     running: true,
     activeTurnId: hostTurnIdSchema.parse("old") as ReturnType<typeof hostTurnIdSchema.parse> | null,
     persistenceError: null as Error | null,
-    session: { capabilities: {} as { steer?: boolean }, execute },
+    session: {
+      capabilities: { ...new FakeHarnessSession(harnessIdSchema.parse("pi")).capabilities },
+      execute,
+    },
   };
   const started = {
     turnId: hostTurnIdSchema.parse("new"),
@@ -247,6 +252,28 @@ describe("Host stop-then-start coordination", () => {
 });
 
 describe("Host native steering", () => {
+  it("accepts Desktop input_text items as steer text", async () => {
+    const f = fixture();
+    f.thread.session.capabilities.steer = true;
+    await expect(
+      f.coordinator.run(
+        f.thread,
+        {
+          ...f.params,
+          input: [{ type: "input_text", text: "bug again?" }],
+        },
+        f.start,
+        f.insert,
+      ),
+    ).resolves.toMatchObject({ delivery: "activeTurn" });
+    expect(f.insert).toHaveBeenCalledExactlyOnceWith({
+      turnId: "old",
+      text: "bug again?",
+      clientUserMessageId: "message",
+    });
+    expect(f.start).not.toHaveBeenCalled();
+  });
+
   it("takes input into the active Turn without cancelling, once per message identity", async () => {
     const f = fixture();
     f.thread.session.capabilities.steer = true;
@@ -416,5 +443,13 @@ describe("Host native steering", () => {
     };
     expect(externalSteeringDelivery(withCommands, "/compact now")).toBe("newTurn");
     expect(externalSteeringDelivery(withCommands, "compact now")).toBe("activeTurn");
+  });
+
+  it("keeps Grok native steer available while inspect can still request a queue chip", async () => {
+    const f = fixture();
+    f.thread.harnessId = "grok";
+    f.thread.session.capabilities.steer = true;
+    expect(externalSteeringDelivery(f.thread, "go")).toBe("activeTurn");
+    await expect(sessionCanNativeSteer(f.thread)).resolves.toBe(true);
   });
 });

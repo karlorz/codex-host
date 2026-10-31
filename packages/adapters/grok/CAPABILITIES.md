@@ -38,6 +38,7 @@
 | B14 | 请求级计量 | 原生有则必做 | P2 | 受限 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-adapter.test.ts | 当前发布原生费用快照，不发布 usage.request / usage.history |
 | B15 | 接收委派 | 必做（验证项） | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts | 执行策略与环境有测试；真实完整委派未验收 |
 | B16 | 向下委派 | 原生有则必做 | P2 | 待验证 | — | 本次未进行真实向下委派 |  |
+| B17 | Same-turn interjection | Required when native | P1 | Supported | src/grok-interject.ts, src/acp-transport.ts, src/grok-adapter.ts | test/grok-interject.test.ts, test/grok-adapter.test.ts, test/grok-acp-interject.test.ts | `x.ai/interject` on an active user Turn; queue delivery waits for a tool/model boundary; explicit same-turn refusal never cancels |
 | C1 | 展示元数据 | 必做 | P1 | 支持 | manifest.json、src/permission-modes.ts | test/account-presentation.test.ts、test/grok-permission-modes.test.ts |  |
 | C2 | 手动安装指引 | 必做 | P1 | 支持 | manifest.json | test/installation.test.ts |  |
 | C3 | 版本检查与更新 | 必做 | P1 | 支持 | src/installation.ts | test/installation.test.ts |  |

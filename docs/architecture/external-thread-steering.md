@@ -5,7 +5,7 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 - **原生同轮插入**：Session 此刻声明 `capabilities.steer` 时，Host 发送公共命令 `turn.steer`，由 Adapter 调用 Harness 自己的插入原语，在原生安全边界把输入送入**当前 Turn**，不取消、不另起 Turn。
 - **停止后重发（退路）**：其余情况下，Host **取消当前 Turn，等待它终结，再自动执行本次新输入**。任何不确定能并入当前 Turn 的情况都走这条路径，保证不比没有原生插入时差。
 
-用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前只有 Claude Code 会声明 `capabilities.steer`，并且只在确定插入会并入当前 Turn 时声明；其条件与原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
+用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前 Claude Code 与 Grok 会声明 `capabilities.steer`，并且只在确定插入会并入当前 Turn 时声明；Claude Code 的条件与原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)，Grok 见 [`../harnesses/grok/grok-steer.md`](../harnesses/grok/grok-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
 
 ## 原生同轮插入
 
@@ -76,6 +76,8 @@ Host 和 Renderer 接入必须配套发布；仅升级 Host、让旧 Renderer �
 - 原生同轮插入的乐观消息结算依据 Codex Desktop **26.915.31945 / build 9922** 的只读 Bundle 核查：`clientId` 等于 `clientUserMessageId` 的 `userMessage` 会结算待定 `steeringUserMessage`。
 
 ## 跟进消息队列
+
+For loaded `modelProvider: "codexhost"` Threads, Enter selects Desktop queue presentation before preparing a steer. Renderer-owned Managers use the coordinator’s `options.getMessageQueueMode` callback (a sibling of `submissionHost`). On Desktop 26.1027, the Manager lives in the main process: the Renderer Host RPC policy supplies the native per-submission `queueModeOverride: "queue"` to Composer `sendMessage` calls. This path reads loaded conversation ownership, preserves official Codex’s follow-up setting and explicit queue-row actions, and still starts idle Host Turns normally. See [Grok same-Turn interjection](../harnesses/grok/grok-steer.md) for the delivery boundary and Composer acceptance steps.
 
 Codex Desktop **26.903.61454 / build 8378** 起，在功能开关及 app-server 版本满足条件时使用服务端队列。运行中追加消息会先调用 `thread/queue/list`，再调用 `thread/queue/add`。Desktop **26.1016** 及之后的 Manager 带有 `getStreamRole` 时，`renderer-external-queue.ts` 不再把外部 Thread 从 `serverQueue.isEnabled` 里排除，因此跟进消息走 Host 的 `thread/queue/*`。Host 按官方列表信封返回 `{ data, nextCursor }`。队列里的文本项写成 Desktop `type: "text"`（`input_text` 入队时也转成该类型），并带有 `text_elements` 数组（缺省 `[]`），供 Desktop **26.1021.31345 / build 21828** 读取 `text_elements.length`。空的 `turn/start` 会消费 Host 队列中匹配或队首的跟进文本；队列为空时仍返回 `-32602`。官方 Codex Thread 仍使用原生 app-server 队列。
 

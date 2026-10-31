@@ -24,6 +24,23 @@ interface SteeringManager {
   getConversation?: RendererMethod;
 }
 
+function conversationIdFrom(request: unknown): string | null {
+  if (typeof request === "string" && request) return request;
+  if (!isRecord(request)) return null;
+  if (typeof request.conversationId === "string" && request.conversationId)
+    return request.conversationId;
+  if (typeof request.threadId === "string" && request.threadId) return request.threadId;
+  return null;
+}
+
+function isHostExternalConversation(conversation: unknown, threadId: string): boolean {
+  return (
+    isRecord(conversation) &&
+    conversation.id === threadId &&
+    conversation.modelProvider === "codexhost"
+  );
+}
+
 function isManager(value: unknown): value is SteeringManager {
   return (
     isRecord(value) &&
@@ -68,6 +85,34 @@ export function restoreQueuedTurnStartText(manager: unknown, params: unknown): u
   const text = queuedFollowUpText(match);
   if (!text) return params;
   return { ...params, input: [{ type: "text", text, text_elements: [] }] };
+}
+
+function installExternalQueueUi(manager: SteeringManager): (() => void) | null {
+  const coordinator = manager.getTurnCoordinator();
+  const options = isRecord(coordinator) ? coordinator.options : null;
+  if (!isRecord(options) || typeof options.getMessageQueueMode !== "function") return null;
+  const descriptor = Object.getOwnPropertyDescriptor(options, "getMessageQueueMode");
+  if (!descriptor?.writable) return null;
+  const original = options.getMessageQueueMode as RendererMethod;
+  // Desktop's submission reads this sibling of submissionHost before preparing
+  // a steer or painting history. The settings reader has no Thread argument.
+  const getMessageQueueMode: RendererMethod = (...args) => {
+    const threadId = conversationIdFrom(args[0]);
+    if (
+      threadId &&
+      typeof manager.getConversation === "function" &&
+      isHostExternalConversation(manager.getConversation(threadId), threadId)
+    ) {
+      return Promise.resolve("queue");
+    }
+    return original.apply(options, args);
+  };
+  options.getMessageQueueMode = getMessageQueueMode;
+  return () => {
+    if (options.getMessageQueueMode === getMessageQueueMode) {
+      Object.defineProperty(options, "getMessageQueueMode", descriptor);
+    }
+  };
 }
 
 function submissionHost(manager: SteeringManager): {
@@ -191,6 +236,7 @@ export function installRendererExternalSteering(
 ): (() => void) | null {
   if (!isManager(target)) return null;
   const manager = target;
+  const restoreQueueUi = installExternalQueueUi(manager);
   const originalSteer = manager.steerTurn;
   const originalSend = manager.sendRequest;
   const routes = new Map<string, { threadId: string; expectedTurnId: string }>();
@@ -206,7 +252,9 @@ export function installRendererExternalSteering(
     if ((method === "turn/start" || method === "turn/steer") && prepareTurnInput) {
       params = prepareTurnInput(params);
     }
-    if (method === "turn/start") params = restoreQueuedTurnStartText(manager, params);
+    if (method === "turn/start" || method === "turn/steer") {
+      params = restoreQueuedTurnStartText(manager, params);
+    }
     const messageId = isRecord(params) ? params.clientUserMessageId : null;
     const route =
       typeof messageId === "string" && isRecord(params)
@@ -471,6 +519,7 @@ export function installRendererExternalSteering(
   });
   return () => {
     disposed = true;
+    restoreQueueUi?.();
     restoreMethod("steerTurn");
     if (getStreamRole) restoreMethod("getStreamRole");
     // In-flight starts must fail closed, not accidentally become ordinary start RPCs.

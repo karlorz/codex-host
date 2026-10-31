@@ -23,6 +23,10 @@ interface RendererHostRpcDependencies {
   hostIds: typeof rendererHostRpcHostIds;
   /** Host identities named by the given Composer (or every mounted Composer). */
   composerHostIds(composer?: RendererHostRoot): { editorCount: number; hostIds: string[] };
+  installQueuePolicy(
+    root: RendererHostRpcRoot,
+    target: DraftPrewarmPolicyTarget,
+  ): { dispose(): void } | null;
   /** `MessagePort.prototype`: Renderer capnweb calls to the main process leave through it. */
   portPrototype: { postMessage(this: unknown, message: unknown, ...rest: unknown[]): unknown };
 }
@@ -40,7 +44,10 @@ export function installRendererHostRpcRouting(
   dependencies: RendererHostRpcDependencies,
 ): RendererHostRouting | null {
   const existing = target.__codexhostHostRoutingV1 as RendererHostRouting | undefined;
-  if (existing) return existing;
+  if (existing) {
+    dependencies.installQueuePolicy(root, target);
+    return existing;
+  }
   let disposed = false;
   let discovery: RendererHostRpcDiscovery | null = null;
   const routes = new Map<string, { route: RendererHostRoute; rpc: RendererHostRpc }>();
@@ -53,6 +60,7 @@ export function installRendererHostRpcRouting(
     return discovery;
   };
   if (!read()) return null;
+  const queuePolicy = dependencies.installQueuePolicy(root, target);
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -309,6 +317,7 @@ export function installRendererHostRpcRouting(
       externalDrafts.clear();
       selectedModels.clear();
       if (port.postMessage === postMessage) port.postMessage = originalPostMessage;
+      queuePolicy?.dispose();
       if (target.__codexhostHostRoutingV1 === routing) {
         delete target.__codexhostHostRoutingV1;
         publish(null);

@@ -63,6 +63,11 @@ export class ExternalThreadQueue {
     return (this.#queues.get(threadId)?.length ?? 0) > 0;
   }
 
+  peek(threadId: string): QueuedSubmission | undefined {
+    const item = this.#queues.get(threadId)?.[0];
+    return item ? publicSubmission(item) : undefined;
+  }
+
   list(threadId: string, params: JsonObject): JsonObject {
     const items = this.#queues.get(threadId) ?? [];
     const start = params.cursor == null ? 0 : Number(params.cursor);

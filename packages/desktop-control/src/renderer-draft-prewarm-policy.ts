@@ -13,8 +13,10 @@ import {
   findRendererAppScopeStore,
   findRendererHostRpcFamily,
   rendererHostRpcHostIds,
+  rendererHostRpcUsesExternalQueue,
   resolveRendererHostRpc,
 } from "./renderer-host-rpc-discovery.js";
+import { installRendererExternalQueuePolicy } from "./renderer-external-queue-policy.js";
 import { installRendererHostRpcRouting } from "./renderer-host-rpc-routing.js";
 
 export { requestManagerFromHookState } from "./renderer-host-discovery.js";
@@ -61,13 +63,24 @@ function directRendererInstaller(): string {
           : (composer ?? document);
         return discover(source);
       },
+      installQueuePolicy: (root, target) => (${installRendererExternalQueuePolicy.toString()})(root, target, {
+        findStore: ${findRendererAppScopeStore.toString()},
+        usesExternalQueue: ${rendererHostRpcUsesExternalQueue.toString()},
+        portPrototype: MessagePort.prototype,
+      }),
       portPrototype: MessagePort.prototype,
     });
     // Desktop 26.1027 moved AppServerManagers to the main process. Older builds
     // expose native managers in Renderer hook state; the main-process mode only
     // applies when none is visible and its per-Host RPC store is identified.
     const routing = (() => {
-      if (window.__codexhostHostRoutingV1) return window.__codexhostHostRoutingV1;
+      if (window.__codexhostHostRoutingV1) {
+        const existing = window.__codexhostHostRoutingV1;
+        if (['local', ...(existing.knownHostIds?.() ?? [])].some(
+          hostId => existing.forHost(hostId)?.manager.kind === 'main-process-rpc'
+        )) installRpc();
+        return existing;
+      }
       const native = discover(document);
       if (native.managers.length || native.registries.length) return installNative();
       const rpc = installRpc();

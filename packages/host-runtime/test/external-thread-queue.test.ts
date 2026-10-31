@@ -23,3 +23,19 @@ it("retains source identity across editing, reordering and failed starts without
   await queue.add("thread", input, "message-3");
   expect(queue.take("thread").sourceHostId).toBeUndefined();
 });
+
+it("peeks the queue head without removing it", async () => {
+  const queue = new ExternalThreadQueue({
+    notifyChanged: vi.fn(async () => {}),
+    createId: () => "head",
+  });
+  await queue.add("thread", [{ type: "text", text: "later" }], "message");
+  expect(queue.peek("thread")).toEqual({
+    id: "head",
+    input: [{ type: "text", text: "later" }],
+    clientUserMessageId: "message",
+  });
+  expect(queue.has("thread")).toBe(true);
+  expect(queue.take("thread").submission.id).toBe("head");
+  expect(queue.peek("thread")).toBeUndefined();
+});

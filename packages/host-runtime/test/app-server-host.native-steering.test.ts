@@ -107,6 +107,131 @@ describe("Native steering", () => {
     }
   });
 
+  it("injects a queued follow-up at the next command-execution gap without cancelling", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
+      const commandId = session.startCommandExecution("sleep 25");
+      await fixture.collector.waitFor(
+        (message) =>
+          method(message, "item/started") &&
+          (message.params as { item?: { type?: string } }).item?.type === "commandExecution",
+      );
+      writeRequest(fixture.desktopInput, {
+        id: 40,
+        method: "thread/queue/add",
+        params: {
+          threadId,
+          clientUserMessageId: "queued-steer",
+          input: [{ type: "text", text: "skip remaining sleeps" }],
+        },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 40)),
+      ).resolves.not.toHaveProperty("error");
+      writeRequest(fixture.desktopInput, {
+        id: 41,
+        method: "thread/queue/list",
+        params: { threadId },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 41)),
+      ).resolves.toMatchObject({
+        result: { data: [expect.objectContaining({ clientUserMessageId: "queued-steer" })] },
+      });
+      expect(session.steers).toEqual([]);
+      expect(
+        fixture.collector.messages.some((message) => steeredUserMessage(message, turnId) !== null),
+      ).toBe(false);
+      session.completeItem(commandId, { status: "succeeded" });
+      const item = await fixture.collector.waitFor(
+        (message) => steeredUserMessage(message, turnId) !== null,
+      );
+      expect(steeredUserMessage(item, turnId)).toMatchObject({
+        clientId: "queued-steer",
+        content: [{ type: "text", text: "skip remaining sleeps" }],
+      });
+      expect(session.steers).toEqual([expect.objectContaining({ type: "turn.steer", turnId })]);
+      writeRequest(fixture.desktopInput, {
+        id: 42,
+        method: "thread/queue/list",
+        params: { threadId },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 42)),
+      ).resolves.toMatchObject({ result: { data: [], nextCursor: null } });
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
+  it.each(["update", "delete", "multiple"] as const)(
+    "honors pending queue %s before the next tool boundary",
+    async (operation) => {
+      const fixture = createFixture();
+      fixture.adapter.supportsSteer = true;
+      try {
+        const threadId = await startPiThread(fixture);
+        const turnId = await startPiTurn(fixture, threadId);
+        const session = fixture.adapter.sessions[0];
+        if (!session) throw new Error("Fake Session was not opened");
+        const commandId = session.startCommandExecution("sleep 20; echo A");
+        const request = async (id: number, method: string, params: JsonObject) => {
+          writeRequest(fixture.desktopInput, { id, method, params: { threadId, ...params } });
+          const response = await fixture.collector.waitFor((message) => requestId(message, id));
+          expect(response).not.toHaveProperty("error");
+          return response.result as JsonObject;
+        };
+        const added = await request(40, "thread/queue/add", {
+          clientUserMessageId: "pending-1",
+          input: [{ type: "text", text: "original" }],
+        });
+        const queuedSubmissionId = (added.queuedSubmission as JsonObject).id;
+        if (typeof queuedSubmissionId !== "string") throw new Error("Missing queued identity");
+        if (operation === "multiple") {
+          await request(41, "thread/queue/add", {
+            clientUserMessageId: "pending-2",
+            input: [{ type: "text", text: "second" }],
+          });
+        } else {
+          await request(41, `thread/queue/${operation}`, {
+            queuedSubmissionId,
+            ...(operation === "update" ? { input: [{ type: "text", text: "edited" }] } : {}),
+          });
+        }
+        expect(session.steers).toEqual([]);
+        session.completeItem(commandId, { status: "succeeded" });
+        await fixture.collector.waitFor(
+          (message) =>
+            method(message, "item/completed") &&
+            (message.params as JsonObject).turnId === turnId &&
+            ((message.params as JsonObject).item as JsonObject).id === commandId,
+        );
+        if (operation !== "delete") {
+          await fixture.collector.waitFor((message) => {
+            const item = steeredUserMessage(message, turnId);
+            return item?.clientId === (operation === "multiple" ? "pending-2" : "pending-1");
+          });
+        }
+        expect(session.steers.map((steer) => steer.input[0]?.text)).toEqual(
+          operation === "delete"
+            ? []
+            : operation === "update"
+              ? ["edited"]
+              : ["original", "second"],
+        );
+        expect(await request(42, "thread/queue/list", {})).toMatchObject({ data: [] });
+      } finally {
+        await stopFixture(fixture);
+      }
+    },
+  );
+
   it("settles the optimistic message when native acceptance completes the Turn", async () => {
     const fixture = createFixture();
     fixture.adapter.supportsSteer = true;

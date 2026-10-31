@@ -9,7 +9,7 @@ import {
   type HostTurnId,
   type ThreadSteerDelivery,
 } from "@codexhost/shared-contracts";
-import type { JsonObject } from "@codexhost/protocol-core";
+import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
 import type {
   HarnessResult,
   HarnessSession,
@@ -24,6 +24,7 @@ import type {
 
 import { rewriteDelegationMentionText } from "./delegation-mention-rewrite.js";
 import { isExternalCommandCandidate } from "./external-command-routing.js";
+import { queuedSubmissionInput, queuedSubmissionText } from "./external-thread-follow-up-queue.js";
 import type { TurnProjectionGate } from "./external-thread-runtime.js";
 
 interface SteeringThread {
@@ -73,6 +74,16 @@ export function externalSteeringDelivery(
   return thread.session.capabilities.steer === true ? "activeTurn" : "newTurn";
 }
 
+export async function sessionCanNativeSteer(thread: {
+  session: Pick<HarnessSession, "capabilities" | "readCapabilities">;
+}): Promise<boolean> {
+  if (thread.session.readCapabilities) {
+    const capabilities = await thread.session.readCapabilities();
+    return capabilities.steer === true;
+  }
+  return thread.session.capabilities.steer === true;
+}
+
 export class ExternalSteerError extends Error {
   constructor(
     readonly code: number,
@@ -101,23 +112,24 @@ function parseInput(params: JsonObject): SteeringInput {
   if (typeof params.expectedTurnId !== "string" || !params.expectedTurnId.trim()) {
     throw new ExternalSteerError(-32602, "External steering requires expectedTurnId");
   }
-  if (
-    !Array.isArray(params.input) ||
-    params.input.length === 0 ||
-    params.input.some(
-      (item) =>
-        !item ||
-        typeof item !== "object" ||
-        Array.isArray(item) ||
-        item.type !== "text" ||
-        typeof item.text !== "string",
-    )
-  ) {
+  const input = Array.isArray(params.input)
+    ? queuedSubmissionInput(params.input as JsonValue[])
+    : [];
+  const textItems = input.filter(
+    (item): item is JsonObject =>
+      item !== null &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      typeof item.text === "string" &&
+      (item.type === undefined || item.type === "text" || item.type === "input_text"),
+  );
+  if (input.length === 0 || textItems.length !== input.length) {
     throw new ExternalSteerError(-32602, "External steering requires text input");
   }
-  const text = params.input.map((item) => (item as JsonObject).text).join("\n");
-  if (!text.trim())
+  const text = queuedSubmissionText(textItems);
+  if (!text.trim()) {
     throw new ExternalSteerError(-32602, "External steering input must not be empty");
+  }
   const clientUserMessageId = params.clientUserMessageId;
   if (
     clientUserMessageId != null &&

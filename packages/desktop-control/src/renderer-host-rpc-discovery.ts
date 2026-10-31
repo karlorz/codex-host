@@ -146,3 +146,48 @@ export function rendererHostRpcHostIds(discovery: RendererHostRpcDiscovery): str
     (hostId): hostId is string => typeof hostId === "string",
   );
 }
+
+/** Read loaded per-Host conversation metadata, never the selected Agent or Model carrier. */
+export function rendererHostRpcUsesExternalQueue(
+  store: RendererHostRpcStore,
+  conversationId: string,
+): boolean {
+  const providers = new Map<string, Set<string>>();
+  for (const members of store.familyBindings.values()) {
+    for (const member of members.values()) {
+      const signal = member.value;
+      if (
+        signal === null ||
+        typeof signal !== "object" ||
+        !("get" in signal) ||
+        typeof signal.get !== "function"
+      )
+        continue;
+      let value: unknown;
+      try {
+        value = signal.get();
+      } catch {
+        continue;
+      }
+      if (
+        value === null ||
+        typeof value !== "object" ||
+        !("conversationId" in value) ||
+        value.conversationId !== conversationId ||
+        !("hostId" in value) ||
+        typeof value.hostId !== "string" ||
+        !("modelProvider" in value) ||
+        typeof value.modelProvider !== "string"
+      )
+        continue;
+      const hostProviders = providers.get(value.hostId) ?? new Set<string>();
+      hostProviders.add(value.modelProvider);
+      providers.set(value.hostId, hostProviders);
+    }
+  }
+  // A coordinator RPC does not carry its Host ID. Ambiguous cross-Host identities
+  // must retain Desktop's policy rather than borrow another Host's ownership.
+  if (providers.size !== 1) return false;
+  const values = providers.values().next().value;
+  return values?.size === 1 && values.has("codexhost");
+}

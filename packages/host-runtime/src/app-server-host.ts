@@ -222,6 +222,7 @@ import {
   ExternalTurnSteering,
   externalSteeringDelivery,
   insertNativeSteer,
+  sessionCanNativeSteer,
 } from "./external-turn-steering.js";
 import {
   ExternalCommandError,
@@ -679,6 +680,7 @@ export class AppServerHost {
   readonly #externalVoiceResults = new ExternalVoiceResults((threadId, text) =>
     this.#externalVoice.reportProgress(threadId, text),
   );
+  readonly #injectingQueuedFollowUp = new Set<string>();
   readonly #externalQueue = new ExternalThreadQueue({
     notifyChanged: (threadId) =>
       this.#writer.json({ method: "thread/queue/changed", params: { threadId } }),
@@ -5129,6 +5131,45 @@ export class AppServerHost {
     }
   }
 
+  /** Pending rows remain editable until a tool/model boundary hands them to native steering. */
+  async #injectQueuedFollowUp(thread: ExternalThread, turnId: HostTurnId): Promise<void> {
+    if (this.#injectingQueuedFollowUp.has(thread.id)) return;
+    this.#injectingQueuedFollowUp.add(thread.id);
+    try {
+      while (
+        thread.running &&
+        thread.activeTurnId === turnId &&
+        this.#externalQueue.has(thread.id) &&
+        !this.#externalSteering.hasPending(thread.id)
+      ) {
+        if (!(await sessionCanNativeSteer(thread))) return;
+        // Capability reads can yield while the Turn ends or the user edits/deletes a row.
+        if (!thread.running || thread.activeTurnId !== turnId) return;
+        const peeked = this.#externalQueue.peek(thread.id);
+        if (!peeked) return;
+        const text = queuedSubmissionText(peeked.input);
+        if (!text.trim() || (thread.session.commands && isExternalCommandCandidate(text))) return;
+        const taken = this.#externalQueue.take(thread.id, peeked.id);
+        try {
+          await this.#insertExternalInput(thread, {
+            turnId,
+            text,
+            clientUserMessageId: taken.submission.clientUserMessageId,
+          });
+          await this.#externalQueue.notifyChanged(thread.id);
+        } catch (error) {
+          this.#externalQueue.restore(thread.id, taken);
+          await this.#externalQueue.notifyChanged(thread.id);
+          throw error;
+        }
+      }
+    } catch (error) {
+      this.#diagnose(error);
+    } finally {
+      this.#injectingQueuedFollowUp.delete(thread.id);
+    }
+  }
+
   /** Desktop leaves queued follow-ups to the app-server once a Turn completes normally. */
   async #drainExternalQueue(thread: ExternalThread): Promise<void> {
     if (
@@ -5186,29 +5227,47 @@ export class AppServerHost {
   }
 
   /** Native same-Turn input; `insertNativeSteer` owns the delivery and its fallback signal. */
+  async #projectQueuedSteer(
+    thread: ExternalThread,
+    turnId: HostTurnId,
+    text: string,
+    clientUserMessageId?: string,
+  ): Promise<void> {
+    const item = {
+      type: "userMessage" as const,
+      itemId: hostItemIdSchema.parse(randomUUID()),
+      input: [{ type: "text" as const, text }],
+    };
+    const projection = this.#projectedTurn(thread, turnId);
+    if (clientUserMessageId) {
+      projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
+    }
+    await this.#projectHarnessOutput(thread, {
+      kind: "event",
+      event: { type: "item.started", turnId, item },
+    });
+    await this.#projectHarnessOutput(thread, {
+      kind: "event",
+      event: {
+        type: "item.completed",
+        turnId,
+        snapshot: { item, outcome: { status: "succeeded" } },
+      },
+    });
+  }
+
   async #insertExternalInput(
     thread: ExternalThread,
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
     await insertNativeSteer(thread, input, {
-      project: async (turnId, item, clientUserMessageId) => {
-        const projection = this.#projectedTurn(thread, turnId);
-        if (clientUserMessageId) {
-          projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
-        }
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: { type: "item.started", turnId, item },
-        });
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: {
-            type: "item.completed",
-            turnId,
-            snapshot: { item, outcome: { status: "succeeded" } },
-          },
-        });
-      },
+      project: (turnId, item, clientUserMessageId) =>
+        this.#projectQueuedSteer(
+          thread,
+          turnId,
+          item.input.map((part) => part.text).join("\n"),
+          clientUserMessageId,
+        ),
       diagnose: (error) => this.#diagnose(error),
     });
     return {
@@ -5790,6 +5849,15 @@ export class AppServerHost {
       event,
       event.type === "turn.completed" ? result.completedTurn : undefined,
     );
+    if (
+      event.type === "item.completed" &&
+      !ephemeralTurn &&
+      (event.snapshot.item.type === "commandExecution" ||
+        event.snapshot.item.type === "toolExecution" ||
+        event.snapshot.item.type === "agentMessage")
+    ) {
+      await this.#injectQueuedFollowUp(thread, event.turnId);
+    }
     if (event.type === "turn.completed") {
       await this.#setThreadStatus(
         thread,

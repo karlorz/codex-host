@@ -145,6 +145,7 @@ describe("Desktop RpcTarget method visibility", () => {
       dispose();
       expect(Object.hasOwn(manager, "sendRequest")).toBe(false);
       expect(Object.hasOwn(manager, "steerTurn")).toBe(false);
+      expect(Object.hasOwn(manager, "getTurnCoordinator")).toBe(false);
       expect(Object.getPrototypeOf(manager)).toBe(Manager.prototype);
       expect(manager.sendRequest).toBe(Manager.prototype.sendRequest);
       await expect(callRpc(manager, "sendRequest", "permissionProfile/list", {})).resolves.toEqual({

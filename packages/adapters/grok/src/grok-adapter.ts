@@ -94,6 +94,7 @@ import {
   type GrokPermissionRequest,
   type GrokTransportEvent,
 } from "./acp-transport.js";
+import { GrokSteerMissedTurnError } from "./grok-interject.js";
 import {
   grokMcpElicitCancel,
   grokMcpElicitResponseForAction,
@@ -213,6 +214,7 @@ export interface GrokAcpTransportLike {
     userContext: string | undefined,
     onEvent: (event: GrokTransportEvent) => void,
   ): Promise<GrokCompactResult>;
+  interject?(text: string, interjectionId?: string): Promise<{ status: "queued" }>;
   setModel(modelId: string, reasoningEffort?: string, contextWindowTokens?: number): Promise<void>;
   setPermissionMode(permissionModeId: HarnessPermissionModeId): Promise<void>;
   cancel(): Promise<void>;
@@ -377,6 +379,7 @@ function terminalOutcome(response: PromptResponse, cancelled: boolean): TurnOutc
 class GrokHarnessSession implements HarnessSession {
   readonly harnessId: HarnessId = grokHarnessId;
   readonly capabilities: HarnessSessionCapabilities;
+  readonly readCapabilities: () => Promise<HarnessSessionCapabilities>;
   readonly commands: HarnessCommandCapability;
   readonly goals?: GrokGoals;
   #backgroundQueue: Promise<void> = Promise.resolve();
@@ -441,11 +444,24 @@ class GrokHarnessSession implements HarnessSession {
     this.initialUsage = options.initialUsage ?? null;
     this.#usage = this.initialUsage;
     this.#initialCostUsd = this.initialUsage?.totalCostUsd ?? 0;
-    this.capabilities = capabilitiesForModels(modelState);
+    this.capabilities = ((session) => ({
+      ...capabilitiesForModels(modelState),
+      ...(transport.goalControl && transport.observeBackground
+        ? { autonomousTurns: { observe: true as const } }
+        : {}),
+      get steer(): boolean {
+        return session.#canSteerActiveTurn();
+      },
+    }))(this);
     this.commands = {
       list: async () => ({ ok: true, value: this.#liveCommandCatalog() }),
       execute: (command) => this.#executeHarnessCommand(command),
     };
+    this.readCapabilities = async () => ({
+      ...this.capabilities,
+      ...capabilitiesForModels(this.#modelState),
+      steer: this.#canSteerActiveTurn(),
+    });
     this.#state = stateForGrokModel(
       modelState,
       { nativeRef: nativeRef(opened.sessionId) },
@@ -513,7 +529,6 @@ class GrokHarnessSession implements HarnessSession {
         () => transport.getHistory(),
       );
       this.goals = goals;
-      this.capabilities = { ...this.capabilities, autonomousTurns: { observe: true } };
       transport.observeBackground({
         onEvent: (event) => {
           if (event.type === "goal.changed") {
@@ -636,7 +651,7 @@ class GrokHarnessSession implements HarnessSession {
     if (this.#phase !== "open")
       return { ok: false, error: invalidState("Grok Session is not open") };
     if ("commandId" in command) return this.#executeHarnessCommand(command);
-    if (command.type === "turn.steer") return unsupportedSteer("Grok");
+    if (command.type === "turn.steer") return this.#steer(command);
     if (command.type === "turn.cancel") return this.#cancel(command);
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);
@@ -713,6 +728,55 @@ class GrokHarnessSession implements HarnessSession {
           }),
       );
     return { ok: true, value: { turnId: command.turnId } };
+  }
+
+  #canSteerActiveTurn(): boolean {
+    const active = this.#active;
+    return (
+      this.#phase === "open" &&
+      active != null &&
+      !active.cancellationRequested &&
+      !active.catalogCommand &&
+      !active.command.turnId.startsWith("grok-autonomous-") &&
+      typeof this.#transport.interject === "function"
+    );
+  }
+
+  async #steer(command: TurnSteerCommand): Promise<HarnessResult<TurnSteerAccepted>> {
+    const active = this.#active;
+    if (!this.#canSteerActiveTurn() || !active || active.command.turnId !== command.turnId) {
+      if (typeof this.#transport.interject !== "function") return unsupportedSteer("Grok");
+      return { ok: false, error: invalidState("Grok steer target is not the active Turn") };
+    }
+    const text = command.input.map((input) => input.text).join("\n");
+    if (text.length === 0) {
+      return {
+        ok: false,
+        error: {
+          code: "invalidRequest",
+          message: "Grok steer text must not be empty",
+          retryable: false,
+        },
+      };
+    }
+    const interject = this.#transport.interject;
+    if (!interject) return unsupportedSteer("Grok");
+    try {
+      await interject.call(this.#transport, text, this.#randomUUID());
+    } catch (error) {
+      if (error instanceof GrokSteerMissedTurnError) {
+        return { ok: false, error: invalidState("Grok steer missed the active Turn") };
+      }
+      if (
+        error instanceof GrokTransportError &&
+        error.kind === "protocolError" &&
+        /method not found/iu.test(error.message)
+      ) {
+        return unsupportedSteer("Grok");
+      }
+      return { ok: false, error: normalizeError(error, "nativeFailure") };
+    }
+    return { ok: true, value: { accepted: true } };
   }
 
   #newActive(command: TurnStartCommand, catalogCommand = false): ActiveTurn {

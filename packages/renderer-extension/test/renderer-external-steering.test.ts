@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { installRendererExternalSteering } from "../src/renderer-external-steering.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
   const events: string[] = [];
   const requestOptions: Record<string, unknown> = { timeoutMs: 30_000 };
@@ -11,6 +15,7 @@ function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
     context?: { prompt?: string };
     pausedReason?: string;
   }> = [];
+  let conversation: { id: string; modelProvider: string; model?: string } | null = null;
   const originalTurn = {
     turnId: "old",
     status: "inProgress",
@@ -18,10 +23,38 @@ function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
     steeringItems: [],
   };
   const turns = [originalTurn];
+  const coordinator = {
+    loadMessages: async () => undefined,
+    readMessages: () => queued,
+    mutate: (_threadId: string, update: (messages: typeof queued) => typeof queued) => {
+      queued = update(queued);
+    },
+    options: {
+      getMessageQueueMode: vi
+        .fn<(...args: unknown[]) => Promise<string>>()
+        .mockResolvedValue("send-now"),
+      submissionHost: {
+        getActiveTurnId: () =>
+          turns.at(-1)?.status === "inProgress" ? turns.at(-1)?.turnId : null,
+        hasPendingTurnStart: () => false,
+      },
+    },
+  };
   const rpc = vi.fn(
     async (method: unknown, params: unknown, options?: unknown): Promise<unknown> => {
       void options;
-      if (method === "codexhost/thread/steering/inspect") return { delivery };
+      if (method === "codexhost/thread/steering/inspect") {
+        return { delivery };
+      }
+      if (method === "thread/queue/add") {
+        return {
+          queuedSubmission: {
+            id: "queued-1",
+            clientUserMessageId: isRecord(params) ? params.clientUserMessageId : undefined,
+            input: isRecord(params) ? params.input : undefined,
+          },
+        };
+      }
       if (method === "turn/steer") {
         events.push("cancel old");
         originalTurn.status = "interrupted";
@@ -43,24 +76,14 @@ function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
     getStreamRole: vi
       .fn<(threadId: string) => { role: string }>()
       .mockReturnValue({ role: "owner" }),
-    getConversation: (threadId: string): { id: string; modelProvider: string } | null => {
-      void threadId;
-      return null;
-    },
-    getTurnCoordinator: () => ({
-      loadMessages: async () => undefined,
-      readMessages: () => queued,
-      mutate: (_threadId: string, update: (messages: typeof queued) => typeof queued) => {
-        queued = update(queued);
-      },
-      options: {
-        submissionHost: {
-          getActiveTurnId: () =>
-            turns.at(-1)?.status === "inProgress" ? turns.at(-1)?.turnId : null,
-          hasPendingTurnStart: () => false,
-        },
-      },
-    }),
+    getConversation: (
+      threadId: string,
+    ): {
+      id: string;
+      modelProvider: string;
+      model?: string;
+    } | null => (conversation?.id === threadId ? conversation : null),
+    getTurnCoordinator: () => coordinator,
     startTurn: vi.fn(async (...args: unknown[]) => {
       const operation = args[1] as {
         request: { input: Array<{ text: string }>; clientUserMessageId: string };
@@ -110,6 +133,11 @@ function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
     originalStreamRole,
     dispose,
     requestOptions,
+    conversation: {
+      set: (value: typeof conversation) => {
+        conversation = value;
+      },
+    },
     queue: {
       read: () => queued,
       set: (messages: typeof queued) => {
@@ -122,7 +150,6 @@ function fixture(delivery: "newTurn" | "activeTurn" | "official" = "newTurn") {
 describe("external direction changes use normal Desktop start presentation", () => {
   it("creates a new input placeholder, replaces through steer RPC, and never creates an old steering Item", async () => {
     const f = fixture();
-    // Normal start operations carry their thread identity, as Desktop's start preparation does.
     await expect(f.manager.steerTurn(...f.args)).resolves.toEqual({ turnId: "replacement" });
     expect(f.originalSteer).not.toHaveBeenCalled();
     expect(f.events).toEqual([
@@ -147,6 +174,23 @@ describe("external direction changes use normal Desktop start presentation", () 
     );
     expect(f.args[8]).toHaveBeenCalledOnce();
     f.dispose();
+  });
+
+  it("forces Desktop Queue UI for Grok even when Follow-up is Steer", async () => {
+    const f = fixture("official");
+    f.conversation.set({
+      id: "thread",
+      modelProvider: "codexhost",
+      model: "codexhost/plugin-v1@7b226861726e6573734964223a2267726f6b227d",
+    });
+    const host = f.manager.getTurnCoordinator().options;
+    await expect(host.getMessageQueueMode({ conversationId: "thread" })).resolves.toBe("queue");
+    await expect(host.getMessageQueueMode("thread")).resolves.toBe("queue");
+    f.conversation.set({ id: "thread", modelProvider: "openai" });
+    await expect(host.getMessageQueueMode({ conversationId: "thread" })).resolves.toBe("send-now");
+    f.dispose();
+    f.conversation.set({ id: "thread", modelProvider: "codexhost" });
+    await expect(host.getMessageQueueMode({ conversationId: "thread" })).resolves.toBe("send-now");
   });
 
   it("keeps Desktop's own steer for an external Thread that steers natively", async () => {
@@ -513,6 +557,33 @@ describe("steer delivery handshake", () => {
     await expect(f.manager.steerTurn(...f.args)).resolves.toEqual({ turnId: "official" });
     expect(f.originalSteer).toHaveBeenCalledWith(...f.args);
     expect(f.manager.startTurn).not.toHaveBeenCalled();
+    f.dispose();
+  });
+
+  it("restores queued text on the native queue-row Steer request", async () => {
+    const f = fixture("activeTurn");
+    f.queue.set([{ id: "message", text: "bug again?" }]);
+    f.args[1] = [];
+    f.originalSteer.mockImplementation(async () => {
+      await f.manager.sendRequest("turn/steer", {
+        threadId: "thread",
+        expectedTurnId: "old",
+        clientUserMessageId: "message",
+        input: [],
+      });
+      return { turnId: "old" };
+    });
+    await expect(f.manager.steerTurn(...f.args)).resolves.toEqual({ turnId: "old" });
+    expect(f.rpc).toHaveBeenCalledWith(
+      "turn/steer",
+      expect.objectContaining({
+        input: [{ type: "text", text: "bug again?", text_elements: [] }],
+        codexhostSteerDelivery: "activeTurn",
+      }),
+      undefined,
+    );
+    expect(f.originalSteer).toHaveBeenCalledOnce();
+    expect(f.rpc.mock.calls.some(([method]) => method === "thread/queue/add")).toBe(false);
     f.dispose();
   });
 });

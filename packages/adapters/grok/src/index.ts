@@ -59,6 +59,12 @@ export type {
   GrokMcpElicitResponse,
 } from "./grok-elicitation.js";
 export { GROK_ASK_USER_QUESTION_METHOD, parseGrokQuestionRequest } from "./grok-questions.js";
+export {
+  GROK_INTERJECT_FALLBACK_METHOD,
+  GROK_INTERJECT_METHOD,
+  GrokSteerMissedTurnError,
+  parseGrokInterjectResult,
+} from "./grok-interject.js";
 export type { GrokQuestionRequest, GrokQuestionResponse } from "./grok-questions.js";
 export {
   GROK_REWIND_EXECUTE_METHOD,

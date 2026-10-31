@@ -75,6 +75,12 @@ import {
   type GrokQuestionRequest,
   type GrokQuestionResponse,
 } from "./grok-questions.js";
+import {
+  GROK_INTERJECT_FALLBACK_METHOD,
+  GROK_INTERJECT_METHOD,
+  GrokSteerMissedTurnError,
+  parseGrokInterjectResult,
+} from "./grok-interject.js";
 
 export type GrokTransportFaultKind =
   "notInstalled" | "authenticationRequired" | "unavailable" | "protocolError" | "processExited";
@@ -1106,6 +1112,51 @@ export class GrokAcpTransport {
       if (this.#activeCompact === active) this.#activeCompact = null;
     }
   }
+  async interject(text: string, interjectionId?: string): Promise<{ status: "queued" }> {
+    const connection = this.#connection;
+    const sessionId = this.#sessionId;
+    if (!connection || !sessionId || this.#closed || this.#closing) {
+      throw new GrokTransportError("unavailable", "Grok ACP Session is unavailable");
+    }
+    if (!this.#activePrompt) {
+      const deadline = Date.now() + 2_000;
+      while (!this.#activePrompt && Date.now() < deadline) await delay(25);
+    }
+    if (!this.#activePrompt) throw new GrokSteerMissedTurnError();
+    const params = {
+      sessionId,
+      text,
+      ...(interjectionId ? { interjectionId } : {}),
+    };
+    let raw: unknown;
+    try {
+      raw = await connection.request<unknown, unknown>(GROK_INTERJECT_METHOD, params);
+    } catch (error) {
+      if (!isGrokMethodNotFound(error)) {
+        throw new GrokTransportError("unavailable", "Grok Native Interject failed", {
+          cause: error,
+        });
+      }
+      try {
+        raw = await connection.request<unknown, unknown>(GROK_INTERJECT_FALLBACK_METHOD, params);
+      } catch (fallback) {
+        if (isGrokMethodNotFound(fallback)) {
+          throw new GrokTransportError(
+            "protocolError",
+            `Grok ACP Method Not Found: ${GROK_INTERJECT_METHOD}`,
+            { cause: fallback },
+          );
+        }
+        throw new GrokTransportError("unavailable", "Grok Native Interject failed", {
+          cause: fallback,
+        });
+      }
+    }
+    const parsed = parseGrokInterjectResult(raw);
+    if (!parsed) throw new GrokSteerMissedTurnError();
+    return parsed;
+  }
+
   async setModel(
     modelId: string,
     reasoningEffort?: string,

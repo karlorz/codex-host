@@ -32,6 +32,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GrokCompactResult } from "../src/grok-manual-compaction.js";
 import {
   GrokAdapter,
+  GrokSteerMissedTurnError,
   GrokTransportError,
   GROK_SESSION_FORK_METHOD,
   grokNativeSessionDirectory,
@@ -81,6 +82,8 @@ class FakeGrokTransport implements GrokAcpTransportLike {
   initializeResponse: InitializeResponse = initialize;
   readonly openCalls: GrokOpenInput[] = [];
   readonly compactCalls: Array<string | undefined> = [];
+  readonly interjectCalls: Array<{ text: string; interjectionId?: string }> = [];
+  interjectUnsupported = false;
   readonly getUsage = vi.fn<() => Promise<unknown>>(async () => undefined);
   readonly cancel = vi.fn(async () => undefined);
   readonly close = vi.fn(async () => undefined);
@@ -219,6 +222,15 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     this.#compactResolve?.(result);
     this.#compactResolve = null;
     this.#compactOnEvent = null;
+  }
+
+  async interject(text: string, interjectionId?: string): Promise<{ status: "queued" }> {
+    if (!this.#resolve) throw new GrokSteerMissedTurnError();
+    if (this.interjectUnsupported) {
+      throw new GrokTransportError("protocolError", "Grok ACP Method Not Found: x.ai/interject");
+    }
+    this.interjectCalls.push({ text, ...(interjectionId ? { interjectionId } : {}) });
+    return { status: "queued" };
   }
 
   compact(
@@ -408,6 +420,108 @@ describe("Grok native goal commands", () => {
     }
     expect(await session.readSnapshot()).toMatchObject({ ok: true, value: { turns: [] } });
     await adapter.close();
+  });
+});
+
+describe("Grok Adapter steering", () => {
+  it.each([false, true])(
+    "declares live native steer with goals=%s and inserts without cancelling",
+    async (goals) => {
+      const transport = new FakeGrokTransport();
+      if (goals) Object.assign(transport, { goalControl: vi.fn(), observeBackground: vi.fn() });
+      const { adapter, session } = await openedSession(transport);
+      const iterator = session.outputs[Symbol.asyncIterator]();
+      try {
+        expect(session.capabilities.steer).toBe(false);
+        await session.execute({
+          type: "turn.start",
+          turnId: hostTurnIdSchema.parse("steer-1"),
+          input: [{ type: "text", text: "run" }],
+        });
+        expect(await nextEvent(iterator)).toMatchObject({
+          type: "turn.started",
+          turnId: "steer-1",
+        });
+        expect(session.capabilities.steer).toBe(true);
+        if (!session.readCapabilities) throw new Error("Grok capability reader is unavailable");
+        await expect(session.readCapabilities()).resolves.toMatchObject({ steer: true });
+        await expect(
+          session.execute({
+            type: "turn.steer",
+            turnId: hostTurnIdSchema.parse("steer-1"),
+            input: [{ type: "text", text: "skip the rest" }],
+          }),
+        ).resolves.toEqual({ ok: true, value: { accepted: true } });
+        expect(transport.interjectCalls).toEqual([
+          expect.objectContaining({ text: "skip the rest" }),
+        ]);
+        expect(transport.interjectCalls[0]?.interjectionId).toMatch(/^grok-id-/);
+        expect(transport.cancel).not.toHaveBeenCalled();
+        transport.event({ type: "agent.text", text: "STEER_ACK" });
+        transport.finish();
+        for (;;) {
+          const event = await nextEvent(iterator);
+          if (event.type === "turn.completed") {
+            expect(event).toMatchObject({
+              turnId: "steer-1",
+              outcome: { status: "succeeded" },
+            });
+            break;
+          }
+        }
+      } finally {
+        await adapter.close();
+      }
+    },
+  );
+
+  it("refuses steer when idle, empty, mismatched, cancelled, or native interject is missing", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    try {
+      await expect(
+        session.execute({
+          type: "turn.steer",
+          turnId: hostTurnIdSchema.parse("idle"),
+          input: [{ type: "text", text: "too early" }],
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+      await session.execute({
+        type: "turn.start",
+        turnId: hostTurnIdSchema.parse("steer-2"),
+        input: [{ type: "text", text: "run" }],
+      });
+      await nextEvent(iterator);
+      await expect(
+        session.execute({
+          type: "turn.steer",
+          turnId: hostTurnIdSchema.parse("steer-2"),
+          input: [{ type: "text", text: "" }],
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "invalidRequest" } });
+      await expect(
+        session.execute({
+          type: "turn.steer",
+          turnId: hostTurnIdSchema.parse("other"),
+          input: [{ type: "text", text: "wrong turn" }],
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+      transport.interjectUnsupported = true;
+      await expect(
+        session.execute({
+          type: "turn.steer",
+          turnId: hostTurnIdSchema.parse("steer-2"),
+          input: [{ type: "text", text: "native missing" }],
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "unsupported" } });
+      expect(transport.interjectCalls).toEqual([]);
+      expect(transport.cancel).not.toHaveBeenCalled();
+      transport.finish();
+      await nextEvent(iterator);
+    } finally {
+      await adapter.close();
+    }
   });
 });
 
