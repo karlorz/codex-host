@@ -128,6 +128,9 @@ export function mapGrokReplay(
   const mediaRoots = grokMediaResolveRoots(cwd, sessionDirectory);
   const subagents = new Map<string, HostSubagentDelegationItem>();
   const subagentAliases = new Map<string, string>();
+  // Grok persists the goal summarizer's output appended to the worker's last message.
+  const goalSummarizers = new Set<string>();
+  const goalSummaries: string[] = [];
 
   const rememberSubagentAlias = (callId: string, nativeId?: string): void => {
     subagentAliases.set(callId, callId);
@@ -232,10 +235,28 @@ export function mapGrokReplay(
 
   const completeAgent = (): void => {
     if (!agent || agent.text.length === 0) return;
+    const summary = goalSummaries.find(
+      (value) => agent !== null && agent.text.endsWith(value) && agent.text.length > value.length,
+    );
+    const head = summary ? agent.text.slice(0, -summary.length) : agent.text;
+    const split = summary !== undefined && head.trim().length > 0;
     items.push({
-      item: { ...agent, text: rewriteLocalMediaMarkdown(agent.text, mediaRoots) },
+      item: {
+        ...agent,
+        text: rewriteLocalMediaMarkdown(split ? head : agent.text, mediaRoots),
+      },
       outcome: { status: "succeeded" },
     });
+    if (split) {
+      items.push({
+        item: {
+          ...agent,
+          itemId: grokTextItemId(sessionId, turnIndex, "agentMessage", ++agentIndex),
+          text: rewriteLocalMediaMarkdown(summary, mediaRoots),
+        },
+        outcome: { status: "succeeded" },
+      });
+    }
     agent = null;
   };
   const completeReasoning = (): void => {
@@ -361,6 +382,8 @@ export function mapGrokReplay(
     currentPromptIndex = null;
     input = "";
     items = [];
+    goalSummarizers.clear();
+    goalSummaries.length = 0;
   };
 
   const groups = classifyGrokHistory(replay);
@@ -390,6 +413,8 @@ export function mapGrokReplay(
       generatedImages.clear();
       subagents.clear();
       subagentAliases.clear();
+      goalSummarizers.clear();
+      goalSummaries.length = 0;
       continue;
     }
     if (event.type === "user.text") {
@@ -565,6 +590,7 @@ export function mapGrokReplay(
         }
       }
     } else if (event.type === "subagent.spawned") {
+      if (event.description === "goal summarizer") goalSummarizers.add(event.nativeSubagentId);
       let bound = false;
       for (const [callId, current] of subagents) {
         const agent = current.subagents[0];
@@ -623,6 +649,9 @@ export function mapGrokReplay(
         });
       }
     } else if (event.type === "subagent.finished") {
+      if (goalSummarizers.has(event.nativeSubagentId) && event.resultSummary) {
+        goalSummaries.push(event.resultSummary);
+      }
       settleWatchedSubagents(
         "get_command_or_subagent_output",
         { task_ids: [event.nativeSubagentId] },

@@ -527,6 +527,55 @@ describe("Grok history local media Markdown", () => {
   });
 });
 
+describe("Grok goal summarizer history", () => {
+  const summary = "A standalone verification file was generated.\n\n- Run cat on it.";
+  const replayWith = (text: string, finishedSummary = summary) =>
+    mapGrokReplay(
+      [
+        { type: "user.text", text: "goal", metadata: { eventId: "user-1", promptIndex: 0 } },
+        {
+          type: "subagent.spawned",
+          nativeSubagentId: "summarizer",
+          parentPromptId: "prompt-1",
+          description: "goal summarizer",
+        },
+        {
+          type: "subagent.finished",
+          nativeSubagentId: "summarizer",
+          status: "completed",
+          resultSummary: finishedSummary,
+        },
+        { type: "agent.text", text },
+        { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
+      ],
+      grokHarnessId,
+      "session-1",
+      "/workspace",
+    );
+  const texts = (snapshot: ReturnType<typeof replayWith>): string[] =>
+    (snapshot.turns[0]?.items ?? []).flatMap(({ item }) =>
+      item.type === "agentMessage" ? [item.text] : [],
+    );
+
+  it("splits the persisted summarizer suffix into its own final message", () => {
+    const head = "Wrote the file.\n\nStopping here.";
+    const snapshot = replayWith(head + summary);
+    expect(texts(snapshot)).toEqual([head, summary]);
+    const ids = (snapshot.turns[0]?.items ?? []).flatMap(({ item }) =>
+      item.type === "agentMessage" ? [item.itemId] : [],
+    );
+    expect(new Set(ids).size).toBe(2);
+    expect(replayWith(head + summary)).toEqual(snapshot);
+  });
+
+  it("keeps the text unchanged when the suffix differs or equals the whole message", () => {
+    expect(texts(replayWith("Wrote the file. Something else."))).toEqual([
+      "Wrote the file. Something else.",
+    ]);
+    expect(texts(replayWith(summary))).toEqual([summary]);
+  });
+});
+
 describe("Grok history generated images", () => {
   it("restores ImageGen files as generatedImage items", async () => {
     const sessionDirectory = await mkdtemp(path.join(os.tmpdir(), "codexhost-grok-image-"));

@@ -44,7 +44,7 @@ ACP prompt replies can arrive before the persistence actor appends `turn_complet
 
 Native planner, skeptic and summarizer sessions are projected through the shared Subagent bridge. The Adapter retains child/session/attempt identity and binds each helper through `parent_prompt_id`, matching its owning worker's terminal key. Standalone helper events are buffered until that key is confirmed, then published before the owning Turn closes. They do not create a separate worker or fabricated parent Turn.
 
-Replay puts pre-input planners and post-terminal summaries in their actual owning Turn. A helper spawned after the parent terminal becomes visible on reopen. Missing ownership produces no guessed attachment. Native model IDs and meaningful roles are retained; `general-purpose` is not a role. Child links open final read-only transcripts, including an honestly empty cancelled child. Continuous child transcript streaming is not claimed. See [Grok Subagents](subagent-status-and-model.md).
+Replay puts pre-input planners and post-terminal summaries in their actual owning Turn. A helper spawned after the parent terminal becomes visible on reopen. Grok persists the goal summarizer output appended to the worker last message; when that message ends with the exact summarizer output and keeps a non-empty prefix, replay splits it into two Agent Messages so the summary is the final answer. Missing ownership produces no guessed attachment. Native model IDs and meaningful roles are retained; `general-purpose` is not a role. Child links open final read-only transcripts, including an honestly empty cancelled child. Continuous child transcript streaming is not claimed. See [Grok Subagents](subagent-status-and-model.md).
 
 ## Editing an earlier message
 
