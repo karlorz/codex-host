@@ -1,6 +1,6 @@
 # CPA live-voice Desktop hook
 
-CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, **26.1021.31345**, and **26.1023.51421** use the native client-owned-call flow described below. Native Chat Instant Connect has separate **26.1021.31345** and **26.1023.51421** profiles.
+CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, **26.1021.31345**, **26.1023.51421**, and **26.1027.30824** use the native client-owned-call flow described below. Native Chat Instant Connect has separate **26.1021.31345** and **26.1023.51421** profiles.
 
 For upstream merges, follow the [Live Voice preservation checklist](fork-versioning.md#preserve-live-voice-when-syncing-upstream), including regression checks and separate Desktop-version qualification.
 
@@ -51,6 +51,80 @@ The hook only changes Desktop call ownership. Point Codex at the realtime host i
 experimental_realtime_ws_base_url = "https://<realtime-host>/v1"
 experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 ```
+
+## Desktop 26.1027.30824 Work qualification
+
+The macOS **26.1027.30824** build **22943** Work profile has native-bundle,
+regression-test, installed-hook and attended gateway-start qualification. Native
+Chat retains its separate **26.1023.51421** pin; this Work profile does not
+qualify Chat Instant Connect or Windows.
+
+| Contract | macOS 26.1027.30824 asset and exports |
+| --- | --- |
+| Work call creation | `app-initial-60f141238751.js`: `Edr` initializes `wdr.getInstance().fetch`; `realtime-controller-e2cae5460002.js` uses that client for `POST /wham/realtime/calls` |
+| Native response errors | Initial `Adr` preserves the native HTTP error shape for gateway responses |
+| Native bridge and services | `app-shared-7815d5a1a42a.js`: `LRt` message bridge and `Vct` service registry |
+| Capability projection | Initial `Ner` initializer, `Mer` capability family and `Lfr` inference-gate family; first-party inference gate `3683713372` |
+| Work overlay | `avatar-overlay-native-page-d9d400e751cd.js`: exported `AvatarOverlayNativePage` owns the realtime starter subscription |
+
+This build can expose only the shared module preload while omitting initial-module
+resource timing. A matching shared preload plus exact Desktop version and platform
+metadata selects the pinned initial module for import. Missing metadata, an initial
+module without its shared module, contradictory platform/version metadata, and
+mixed audited profiles remain rejected. Empty asset inventories retain the existing
+exact-version/platform fallback. Imports and native API shapes must still qualify
+before a transport hook becomes active.
+
+Qualification recorded on 31 October 2026 has these distinct boundaries:
+
+| Check | Established result | Limit |
+| --- | --- | --- |
+| Installed hooks | Primary gateway transport, launch and Work capability active; overlay transport and starter active | Readiness alone does not establish a connected call |
+| Receive-only transport probe | Gateway call creation **HTTP 201**, immediate hangup **HTTP 204** | No microphone request or native voice Thread |
+| Attended native Work call after a manual Desktop restart | Gateway route observed; spoken input and audible replies worked | Does not qualify every microphone, interruption or lifecycle path |
+| Fresh call and explicit Stop | A later Work call connected; Stop returned primary and overlay to `inactive` and re-enabled overlay Start | Does not establish spontaneous-close recovery or independently verify macOS microphone release |
+
+The installed local bundles have backups, verified hashes and a Zod CSP bootstrap
+before schema construction. Source delivery and installed-payload evidence are
+tracked in [#16](https://github.com/karlorz/codex-host/issues/16). The qualified
+local repair is not included in published `v0.16.1-0`; installed-payload evidence
+and release delivery are separate checks. Selected pool account,
+quota failover and the relationship between the configured gateway endpoint and
+the management dashboard remain unverified.
+
+The ASAR SHA-256 is
+`36bf3d2b35e95e11852074b9ca9459b89efbecd6b8311345d060cf66de8f0ba6`.
+Sanitized local evidence is under ignored `.codexhost/update-impact/26.1027.30824/`.
+
+### Work session closure and timeline recovery
+
+A backend session-close record, local media state and Desktop's voice presentation
+are separate observations. The 26.1027.30824 lifecycle incident has an ended backend
+session followed by persisted assistant answers that are absent from the supplied
+Desktop screenshot while voice controls remain visible. Microphone muting alone
+does not explain that mismatch. Explicit Stop followed by Start in the same chat
+is an attended recovery for stale context and replies; a durable repair remains
+unqualified in [#4](https://github.com/karlorz/codex-host/issues/4).
+
+The installed native `handleRealtimeClosed` skips local cleanup for
+`transport_closed`. The incident's actual reason and notification delivery are
+unverified, so that static branch does not establish its cause. The native
+timeline's dependence on a matching session-closed entry likewise does not prove
+which update failed. CodexHost's overlay filter allows all `thread/realtime/*`
+notifications and retains subsequent turn/item delivery for known voice Threads.
+
+Diagnosis requires the actual terminal method and reason, an ephemeral same-Thread
+comparison, the observation stage (window, native client or controller), and native
+session state after delivery. A window/native-client subscription does not prove
+the native controller handled the event. Record only bounded lifecycle metadata;
+exclude identifiers, credentials, account details, SDP, transcript text and call
+payloads. Preserve the active call while observing; reloads, hook refreshes and
+account changes would alter the experiment. A deliberately interrupted call is a
+separate failure-handling test from a spontaneous closure.
+
+Keep Work routing delivery in #16, lifecycle acceptance in #4 and native Chat
+START/prewarm qualification in [#17](https://github.com/karlorz/codex-host/issues/17).
+Successful explicit Stop does not close spontaneous-disconnect acceptance.
 
 ## Desktop 26.1023.51421 qualification
 
@@ -933,7 +1007,7 @@ deployed baseline:
   candidate: `sdk/cliproxy/auth/conductor_selection.go:1852` drops
   `candidate.Disabled`, and `availableAuthsForSelector` narrows the set the plugin
   receives. `cpa-live-voice` intersects that set with `live_auth_ids`
-  (`selector.go` `PickAuth`), so the disabled Alice Plus credential cannot be
+  (`selector.go` `PickAuth`), so a disabled credential cannot be
   selected — no plugin change is required for exclusion.
 
 Consequently a retry that skips the exhausted account and re-selects a remaining
@@ -974,7 +1048,7 @@ The hook does not copy OpenAI frontend JavaScript into git. Tests cover the asse
 
 ## Version gate
 
-Work voice has audited profiles through **26.1023.51421**, including the
+Work voice has audited profiles through **26.1027.30824**, including the
 retained 26.1007 gate path and the supported client-owned-call profiles listed
 above. Native Chat has its own versioned profiles and current pin
 **26.1023.51421**. Exact platform, version, asset-pair and export guards remain

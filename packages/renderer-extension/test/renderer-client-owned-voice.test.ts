@@ -66,6 +66,9 @@ function sharedExports(f: ReturnType<typeof fixture>) {
     Zot: fetch,
     Htr: fetch,
     yir: fetch,
+    wdr: fetch,
+    LRt: bridge,
+    Adr: f.responseError,
     QIt: bridge,
     bIt: bridge,
     Qot: { realtimeVoiceRuntime: vi.fn() },
@@ -459,6 +462,7 @@ describe("client-owned voice gateway", () => {
     expect(f.client.fetch).toBe(f.original);
   });
   it.each([
+    ["26.1027.30824", "app-initial-60f141238751.js", "app-shared-7815d5a1a42a.js"],
     ["26.1023.51421", "app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"],
     ["26.1021.31345", "app-initial-feb30b196d11.js", "app-shared-2cae01273bae.js"],
     ["26.1016.62342", "app-initial-dddef47d6ef6.js", "app-shared-fc3316d48427.js"],
@@ -500,6 +504,57 @@ describe("client-owned voice gateway", () => {
       expect(f.client.fetch).toBe(f.original);
     },
   );
+
+  it("routes 26.1027 Work through the initialized fetch owner and its native error handler", async () => {
+    vi.useFakeTimers();
+    const f = fixture({ status: 429, body: "usage_limit_reached", headers: { location: "" } });
+    const unrelated = vi.fn(() => {
+      throw new Error("Unrelated native export");
+    });
+    const initial: Record<string, unknown> = {
+      Edr: vi.fn(() => {
+        initial.wdr = { getInstance: () => f.client };
+      }),
+      Adr: f.responseError,
+      Oit: unrelated,
+    };
+    const shared = { LRt: { getInstance: () => f.bridge }, Oit: unrelated, Mit: unrelated };
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: "26.1027.30824",
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => "app://-/assets/app-shared-7815d5a1a42a.js" },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async (url) => (url.includes("app-initial") ? initial : shared),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(initial.Edr).toHaveBeenCalledOnce();
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await expect(f.client.fetch(url, options(speechBody()))).rejects.toMatchObject({
+        message: "usage_limit_reached",
+        status: 429,
+      });
+      expect(f.responseError).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+      expect(unrelated).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.client.fetch).toBe(f.original);
+  });
 
   it("initializes the 26.1023 fetch owner without invoking reused legacy exports", async () => {
     vi.useFakeTimers();

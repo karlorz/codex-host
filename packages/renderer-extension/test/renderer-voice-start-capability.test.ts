@@ -209,9 +209,7 @@ describe("overlay starter registration", () => {
     };
     const importModule = vi.fn(async () => ({
       Oit() {},
-      ist: services,
-      Qot: services,
-      Sst: services,
+      [assets.services]: services,
     }));
     return { register, unregister, native, services, names, target, importModule };
   }

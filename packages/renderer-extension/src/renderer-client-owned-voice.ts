@@ -14,10 +14,10 @@ import {
 } from "./renderer-cpa-live-voice-preference.js";
 import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
 
-export const CLIENT_OWNED_VOICE_VERSION = "26.1023.51421";
-export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-bc8256c3cccb.js";
-export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-e9f258fd3588.js";
-export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-af6c3662f64f.js";
+export const CLIENT_OWNED_VOICE_VERSION = "26.1027.30824";
+export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-60f141238751.js";
+export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-7815d5a1a42a.js";
+export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-d9d400e751cd.js";
 export const CLIENT_OWNED_VOICE_ASSETS = [
   {
     platform: "darwin",
@@ -25,6 +25,23 @@ export const CLIENT_OWNED_VOICE_ASSETS = [
     initial: CLIENT_OWNED_VOICE_INITIAL_ASSET,
     shared: CLIENT_OWNED_VOICE_SHARED_ASSET,
     overlay: CLIENT_OWNED_VOICE_OVERLAY_ASSET,
+    init: "Edr",
+    fetch: "wdr",
+    fetchFrom: "initial",
+    bridge: "LRt",
+    services: "Vct",
+    responseError: "Adr",
+    responseErrorFrom: "initial",
+    capabilityInit: "Ner",
+    capabilityFamily: "Mer",
+    inferenceGateFamily: "Lfr",
+  },
+  {
+    platform: "darwin",
+    version: "26.1023.51421",
+    initial: "app-initial-bc8256c3cccb.js",
+    shared: "app-shared-e9f258fd3588.js",
+    overlay: "avatar-overlay-native-page-af6c3662f64f.js",
     init: "xir",
     fetch: "yir",
     fetchFrom: "initial",
@@ -387,7 +404,7 @@ interface VoiceHook {
 }
 
 /** Desktop 26.1016+ always creates calls in the Renderer. Its native WebFetch
- * singleton and message bridge are audited exports of the loaded shared module.
+ * singleton and message bridge are audited exports of the versioned native modules.
  */
 export function installClientOwnedVoiceHook(
   options: {
@@ -450,9 +467,13 @@ export function installClientOwnedVoiceHook(
         if (!object(bridgeClass) && typeof bridgeClass !== "function") throw new Error();
         const client = Reflect.get(fetchClass, "getInstance").call(fetchClass);
         const bridge = Reflect.get(bridgeClass, "getInstance").call(bridgeClass);
+        const errorModule =
+          "responseErrorFrom" in assets && assets.responseErrorFrom === "initial"
+            ? fetchModule
+            : sharedModule;
         const responseError =
-          typeof errorName === "string" && typeof sharedModule[errorName] === "function"
-            ? (sharedModule[errorName] as (response: Response, url: string) => Promise<unknown>)
+          typeof errorName === "string" && typeof errorModule[errorName] === "function"
+            ? (errorModule[errorName] as (response: Response, url: string) => Promise<unknown>)
             : async (response: Response) => {
                 throw Object.assign(new Error(await response.text()), { status: response.status });
               };

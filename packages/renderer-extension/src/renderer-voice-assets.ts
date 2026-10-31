@@ -11,7 +11,9 @@ export function supportsVoiceVersion(profiles: readonly VoiceAssets[], version?:
   return version === undefined || profiles.some((profile) => profile.version === version);
 }
 
-/** Select one complete audited pair; version metadata cannot excuse mixed assets. */
+/** Select an audited pair, or import its pinned initial module when Desktop
+ * exposes only the shared preload. Conflicting assets remain authoritative.
+ */
 export function selectVoiceAssets<T extends VoiceAssets>(
   profiles: readonly T[],
   names: readonly string[],
@@ -26,11 +28,10 @@ export function selectVoiceAssets<T extends VoiceAssets>(
     (platform === undefined || profile.platform === platform);
   if (present.length > 0) {
     const profile = present.length === 1 ? present[0] : undefined;
-    return profile &&
-      matchesMetadata(profile) &&
-      [profile.initial, profile.shared].every((asset) =>
-        auditedAppInitialAssetPresent(names, asset),
-      )
+    if (!profile || !matchesMetadata(profile)) return undefined;
+    const initialPresent = auditedAppInitialAssetPresent(names, profile.initial);
+    const sharedPresent = auditedAppInitialAssetPresent(names, profile.shared);
+    return sharedPresent && (initialPresent || (version !== undefined && platform !== undefined))
       ? profile
       : undefined;
   }

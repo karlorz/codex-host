@@ -28,6 +28,11 @@ describe("audited voice asset ownership", () => {
 
   it.each([
     [
+      "26.1027.30824",
+      ["app-initial-60f141238751.js", "app-shared-7815d5a1a42a.js"],
+      "avatar-overlay-native-page-d9d400e751cd.js",
+    ],
+    [
       "26.1023.51421",
       ["app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"],
       "avatar-overlay-native-page-af6c3662f64f.js",
@@ -61,6 +66,29 @@ describe("audited voice asset ownership", () => {
     [undefined, [latest[0]]],
   ])("rejects incomplete, mixed, ambiguous or mismatched bindings (%s, %j)", (version, assets) => {
     expect(selectVoiceAssets(CLIENT_OWNED_VOICE_ASSETS, urls(assets), version)).toBeUndefined();
+  });
+
+  it("accepts a shared preload only with matching version and platform pins", () => {
+    const names = urls(["app-shared-7815d5a1a42a.js"]);
+    expect(
+      selectVoiceAssets(CLIENT_OWNED_VOICE_ASSETS, names, "26.1027.30824", "darwin"),
+    ).toMatchObject({ initial: "app-initial-60f141238751.js" });
+    for (const [version, platform] of [
+      ["26.1027.30824", undefined],
+      [undefined, "darwin"],
+      ["26.1027.30824", "win32"],
+      ["26.1023.51421", "darwin"],
+    ])
+      expect(
+        selectVoiceAssets(CLIENT_OWNED_VOICE_ASSETS, names, version, platform),
+      ).toBeUndefined();
+    for (const names of [
+      ["app-initial-60f141238751.js"],
+      ["app-shared-7815d5a1a42a.js", "app-initial-bc8256c3cccb.js"],
+    ])
+      expect(
+        selectVoiceAssets(CLIENT_OWNED_VOICE_ASSETS, urls(names), "26.1027.30824", "darwin"),
+      ).toBeUndefined();
   });
 
   it("selects the version pin when resource names are empty", () => {

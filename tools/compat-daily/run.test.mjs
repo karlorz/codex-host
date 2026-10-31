@@ -371,19 +371,22 @@ it("prints structured JSON and fails for fetch, parse and pin-loading errors", (
   }
 });
 
-it("recognizes the audited 26.1023 Work and native Chat pins", async () => {
+it("keeps the qualified 26.1027 Work pin independent from native Chat", async () => {
   const pins = await loadPinsFromRepo();
-  const report = evaluate(pins, { version: "26.1023.51421", build: "22530" });
-  assert.equal(pins.workVersion, "26.1023.51421");
+  const report = evaluate(pins, { version: "26.1027.30824", build: "22943" });
+  assert.equal(pins.workVersion, "26.1027.30824");
   assert.equal(pins.chatVersion, "26.1023.51421");
-  assert.equal(pins.overlayAsset, "avatar-overlay-native-page-af6c3662f64f.js");
+  assert.equal(pins.overlayAsset, "avatar-overlay-native-page-d9d400e751cd.js");
   assert.equal(pins.chatStart, "start-voice-a0564cefdc95.js");
-  assert.deepEqual(report.findings, []);
+  assert.deepEqual(
+    report.findings.map((finding) => finding.surface),
+    ["chat-voice"],
+  );
   assert.deepEqual(
     recoveredPinIssues(report, [
       {
         number: 14,
-        title: "compat-daily/work-voice: pin 26.1021.31345 behind desktop 26.1023.51421",
+        title: "compat-daily/work-voice: pin 26.1023.51421 behind desktop 26.1027.30824",
       },
       {
         number: 15,
@@ -391,7 +394,7 @@ it("recognizes the audited 26.1023 Work and native Chat pins", async () => {
       },
     ]),
     [
-      { number: 14, surface: "work-voice", version: "26.1023.51421" },
+      { number: 14, surface: "work-voice", version: "26.1027.30824" },
       { number: 15, surface: "chat-voice", version: "26.1023.51421" },
     ],
   );

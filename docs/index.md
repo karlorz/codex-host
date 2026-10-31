@@ -127,7 +127,7 @@
 | [`product/codex-native-account-switching-design.md`](product/codex-native-account-switching-design.md) | 移除 Codex 多账号切换后的只读边界；修改 Codex 认证或账号路由时阅读。 |
 | [`architecture/renderer-settings-styling.md`](architecture/renderer-settings-styling.md) | 设置页 Tailwind CSS 使用边界、构建方式与编写规则；新增或改版设置页界面时阅读。 |
 | [`operations/codex-desktop-upgrade-diagnosis-playbook.md`](operations/codex-desktop-upgrade-diagnosis-playbook.md) | Desktop 更新后 Renderer、Bridge、Agent、Model、语言设置异常及输入性能的诊断流程，含 26.1027 主进程 Manager 路由；兼容性与交互性能回归时阅读。 |
-| [`operations/cpa-live-voice-desktop-hook.md`](operations/cpa-live-voice-desktop-hook.md) | Shared Desktop/console Voice settings, audited native Chat lifecycle and external Harness voice: new-chat selection, shared task routing, configured gateway, lifecycle limits, focused smoke tests, attended voice verification, and daily Sparkle pin drift (`.github/workflows/compat-daily.yml`). |
+| [`operations/cpa-live-voice-desktop-hook.md`](operations/cpa-live-voice-desktop-hook.md) | Shared Desktop/console Voice settings, Work gateway-start and session-close acceptance, audited native Chat lifecycle, external Harness routing, focused smoke tests, and daily Sparkle pin drift (`.github/workflows/compat-daily.yml`). |
 
 ## 平台、进程与远程运行
 
