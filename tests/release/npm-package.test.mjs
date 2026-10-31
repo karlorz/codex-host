@@ -895,7 +895,11 @@ describe("npm package release", () => {
       path.resolve(import.meta.dirname, "../../scripts/release/prepare-npm.mjs"),
       "utf8",
     );
-    expect(source).toContain('NPM_PACKAGE_NAME = "@karlorz/codexhost-cli"');
+    const identity = await readFile(
+      path.resolve(import.meta.dirname, "../../scripts/release/npm-package-identity.mjs"),
+      "utf8",
+    );
+    expect(identity).toContain('NPM_PACKAGE_NAME = "@karlorz/codexhost-cli"');
     expect(Object.values(NPM_PLATFORM_PACKAGE_NAMES)).toEqual([
       "@karlorz/codexhost-cli-darwin-arm64",
       "@karlorz/codexhost-cli-darwin-x64",

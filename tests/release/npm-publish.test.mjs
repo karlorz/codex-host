@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -6,10 +8,33 @@ import { describe, expect, it } from "vitest";
 
 import {
   createNpmPublishPlan,
+  createNpmResumePlan,
   parseNpmPublishArguments,
 } from "../../scripts/release/publish-npm.mjs";
 
 describe("npm registry publishing", () => {
+  it("loads the publisher without dependencies or workspace builds", async () => {
+    const root = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "codexhost-source-publisher-")),
+    );
+    try {
+      for (const name of ["publish-npm.mjs", "npm-package-identity.mjs", "targets.mjs"]) {
+        await copyFile(
+          path.resolve(import.meta.dirname, "../../scripts/release", name),
+          path.join(root, name),
+        );
+      }
+      const result = spawnSync(process.execPath, [path.join(root, "publish-npm.mjs"), "--help"], {
+        encoding: "utf8",
+        cwd: root,
+      });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("--resume");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("parses an explicit safe publishing request", () => {
     expect(
       parseNpmPublishArguments([
@@ -29,7 +54,73 @@ describe("npm registry publishing", () => {
       registry: undefined,
       tag: "test",
       version: "0.1.0-test.1",
+      resume: false,
     });
+  });
+
+  it("requires an explicit resume flag", () => {
+    expect(
+      parseNpmPublishArguments(["--artifacts", "/artifacts", "--version", "0.16.1-0", "--resume"])
+        .resume,
+    ).toBe(true);
+  });
+
+  it("skips only identical published artifacts and preserves missing-package order", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codexhost-npm-resume-"));
+    try {
+      const tarball = path.join(root, "test.tgz");
+      await writeFile(tarball, "original artifact");
+      const plan = ["darwin-arm64", "linux-x64", "linux-arm64"].map((platform) => ({
+        packageName: `@karlorz/codexhost-cli-${platform}`,
+        version: "0.16.1-0",
+        tarball,
+      }));
+      const fetchRegistry = async (url) => {
+        const name = decodeURIComponent(url.pathname.slice(1));
+        return new Response(
+          JSON.stringify({
+            name,
+            versions: name.endsWith("darwin-arm64")
+              ? {
+                  "0.16.1-0": {
+                    name,
+                    version: "0.16.1-0",
+                    dist: {
+                      integrity: `sha512-${createHash("sha512").update("original artifact").digest("base64")}`,
+                    },
+                  },
+                }
+              : {},
+            "dist-tags": { latest: "0.16.1-0" },
+          }),
+        );
+      };
+      expect(await createNpmResumePlan(plan, { tag: "latest" }, fetchRegistry)).toEqual(
+        plan.slice(1),
+      );
+      expect(
+        await createNpmResumePlan(
+          plan,
+          { tag: "latest" },
+          async () => new Response("", { status: 404 }),
+        ),
+      ).toEqual(plan);
+      await expect(
+        createNpmResumePlan(plan, { tag: "latest" }, async () => new Response("", { status: 503 })),
+      ).rejects.toThrow("registry lookup failed");
+      await expect(
+        createNpmResumePlan(plan, { tag: "latest" }, async () => new Response("{}")),
+      ).rejects.toThrow("invalid registry metadata");
+      await expect(createNpmResumePlan(plan, { tag: "next" }, fetchRegistry)).rejects.toThrow(
+        "unexpected next tag",
+      );
+      await writeFile(tarball, "changed artifact");
+      await expect(createNpmResumePlan(plan, { tag: "latest" }, fetchRegistry)).rejects.toThrow(
+        "differs from release artifact",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("publishes all platform packages before the meta package", async () => {

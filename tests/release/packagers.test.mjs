@@ -81,7 +81,8 @@ describe("platform packagers", () => {
     expect(workflow).toContain("rustTarget: aarch64-unknown-linux-gnu");
     expect(workflow).toContain("Build npm package");
     expect(workflow).toContain("release:npm:meta");
-    expect(workflow).toContain("release:npm:publish");
+    expect(workflow).toContain("node .release-automation/scripts/release/publish-npm.mjs");
+    expect(workflow).toContain("--resume");
     expect(workflow).toContain('--tag "$NPM_TAG"');
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");

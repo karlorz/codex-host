@@ -12,6 +12,9 @@ import {
   resolveNpmPackageVersion,
 } from "./prepare-npm.mjs";
 
+import { npmMetaTarballFileName } from "./npm-package-identity.mjs";
+export { npmMetaTarballFileName } from "./npm-package-identity.mjs";
+
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 export function expectedNpmMetaPackagePaths() {
@@ -127,10 +130,6 @@ export async function prepareNpmMetaPackage({ version, root = repositoryRoot }) 
   );
   await validateNpmMetaPackage({ packageRoot });
   return { outputRoot, packageRoot, version: packageVersion };
-}
-
-export function npmMetaTarballFileName(version) {
-  return `codexhost-cli-${version}.tgz`;
 }
 
 export async function packNpmMetaPackage({ outputRoot, packageRoot, version }) {

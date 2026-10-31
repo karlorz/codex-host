@@ -9,3 +9,4 @@ export {
   waitForReleaseCi,
   validateReleaseVersion,
 } from "./src/release.mjs";
+export { validateRecoveryRun, verifyRecoveryEvidence } from "./src/release-recovery.mjs";

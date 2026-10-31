@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -7,9 +8,9 @@ import {
   NPM_PACKAGE_NAME,
   npmPlatformPackageName,
   npmTarballFileName,
+  npmMetaTarballFileName,
   requireForkNpmIdentity,
-} from "./prepare-npm.mjs";
-import { npmMetaTarballFileName } from "./prepare-npm-meta.mjs";
+} from "./npm-package-identity.mjs";
 import { supportedReleaseTargets, releaseTarget } from "./targets.mjs";
 
 const semverPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
@@ -21,6 +22,7 @@ export function parseNpmPublishArguments(arguments_) {
   let registry;
   let dryRun = false;
   let provenance = false;
+  let resume = false;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     const readValue = (option) => {
@@ -38,13 +40,64 @@ export function parseNpmPublishArguments(arguments_) {
     else if (argument.startsWith("--registry=")) registry = argument.slice(11);
     else if (argument === "--dry-run") dryRun = true;
     else if (argument === "--provenance") provenance = true;
+    else if (argument === "--resume") resume = true;
     else if (argument === "--help" || argument === "-h") return { help: true };
     else throw new Error(`unknown npm publish option: ${argument}`);
   }
   if (!artifactsRoot) throw new Error("--artifacts is required");
   if (!version || !semverPattern.test(version)) throw new Error("--version must be valid semver");
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/u.test(tag)) throw new Error("--tag is invalid");
-  return { artifactsRoot, dryRun, provenance, registry, tag, version };
+  return { artifactsRoot, dryRun, provenance, registry, tag, version, resume };
+}
+
+/** Validate the entire release before allowing any missing package to be published. */
+export async function createNpmResumePlan(plan, options, fetchRegistry = fetch) {
+  const pending = [];
+  for (const entry of plan) {
+    requireForkNpmIdentity(entry.packageName);
+    const url = new URL(
+      encodeURIComponent(entry.packageName),
+      options.registry ?? "https://registry.npmjs.org/",
+    );
+    url.searchParams.set("release-check", String(Date.now()));
+    const response = await fetchRegistry(url, { signal: AbortSignal.timeout(30_000) });
+    if (response.status === 404) {
+      pending.push(entry);
+      continue;
+    }
+    if (!response.ok)
+      throw new Error(`registry lookup failed for ${entry.packageName}: ${response.status}`);
+    const metadata = await response.json();
+    if (
+      metadata.name !== entry.packageName ||
+      !metadata.versions ||
+      typeof metadata.versions !== "object"
+    ) {
+      throw new Error(`invalid registry metadata for ${entry.packageName}`);
+    }
+    const published = metadata.versions?.[entry.version];
+    if (!published) {
+      pending.push(entry);
+      continue;
+    }
+    const integrity = `sha512-${createHash("sha512")
+      .update(await readFile(entry.tarball))
+      .digest("base64")}`;
+    if (
+      published.name !== entry.packageName ||
+      published.version !== entry.version ||
+      published.dist?.integrity !== integrity
+    ) {
+      throw new Error(
+        `published package differs from release artifact: ${entry.packageName}@${entry.version}`,
+      );
+    }
+    if (metadata["dist-tags"]?.[options.tag] !== entry.version) {
+      throw new Error(`published package has unexpected ${options.tag} tag: ${entry.packageName}`);
+    }
+    console.log(`verified existing ${entry.packageName}@${entry.version}`);
+  }
+  return pending;
 }
 
 async function findTarballs(root, current = root) {
@@ -117,12 +170,12 @@ export async function runNpmPublishCli(arguments_) {
   const parsed = parseNpmPublishArguments(arguments_);
   if (parsed.help) {
     console.log(
-      "usage: npm run release:npm:publish -- --artifacts <dir> --version <semver> [--tag <tag>] [--dry-run] [--provenance] [--registry <url>]",
+      "usage: npm run release:npm:publish -- --artifacts <dir> --version <semver> [--tag <tag>] [--dry-run] [--provenance] [--resume] [--registry <url>]",
     );
     return;
   }
   const plan = await createNpmPublishPlan(parsed);
-  publishNpmPlan(plan, parsed);
+  publishNpmPlan(parsed.resume ? await createNpmResumePlan(plan, parsed) : plan, parsed);
 }
 
 const invoked = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;

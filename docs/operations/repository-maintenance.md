@@ -109,6 +109,27 @@ CODEXHOST_TEST_SCOPE=platform npm run test:typescript -- \
 
 npm 发布受阻时，可从默认分支手动运行 `Release packages`，指定原 annotated tag 并启用 `skip_npm`。该模式跳过 npm 发布，仍从标签的固定提交构建安装包，保留全部版本、Tag 和确切提交 CI 校验，通过后只发布 GitHub Release。无需移动或重建标签；默认发布仍要求 npm 发布成功。
 
+### Resume a partial npm release
+
+Dispatch `Release packages` from `main` with the original `tag` and
+`recovery_run_id` set to its completed tag-push release run. Recovery validates
+the original run's commit, six successful platform builds and retained artifacts.
+It also compares the original notes and release evidence with the annotated tag
+and exact-commit CI. Expired artifacts or changed evidence stop recovery.
+
+Recovery skips rebuilding and reuses those original npm tarballs and installers.
+The publisher is loaded from the pinned trusted automation commit. Before any
+publication, it checks the complete package plan against npm: an existing version
+is skipped only when its SHA-512 integrity matches the original tarball and its
+requested dist-tag already points to that version. A mismatch or registry error
+stops publication. Only missing versions are published, with the meta package last.
+The GitHub Release follows after npm succeeds and retains the original approved
+notes. Keep the original prerelease/channel selection when dispatching recovery;
+do not move the tag, rebuild accepted package contents or disable provenance.
+Provenance for newly published packages identifies the recovery publication run;
+`artifactRunId` in its release evidence records the original build run. Recovery
+does not claim that npm publication occurred in the original run.
+
 标签推送使用标签提交里的工作流定义，新校验不会追溯改写旧标签的发布逻辑。这不是不可绕过的权限控制；未设置分支、标签或发布环境保护。
 
 ## 验证

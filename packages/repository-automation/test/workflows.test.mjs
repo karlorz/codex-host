@@ -65,7 +65,7 @@ describe("workflow and form contracts", () => {
   it("allows explicit installer-only recovery without bypassing release prerequisites", async () => {
     const workflow = await read(".github/workflows/release-packages.yml");
     expect(workflow).toContain("skip_npm:");
-    expect(workflow).toContain("if: github.event_name != 'workflow_dispatch' || !inputs.skip_npm");
+    expect(workflow).toContain("github.event_name != 'workflow_dispatch' || !inputs.skip_npm");
     const publishRelease = workflow.slice(workflow.indexOf("  publish-release:"));
     expect(publishRelease).toContain("needs.prepare.result == 'success'");
     expect(publishRelease).toContain("needs.package.result == 'success'");
@@ -74,6 +74,30 @@ describe("workflow and form contracts", () => {
       "github.event_name == 'workflow_dispatch' && inputs.skip_npm && needs.publish-npm.result == 'skipped'",
     );
     expect(publishRelease).toContain("await verifyRelease(");
+  });
+
+  it("reuses validated original artifacts for partial release recovery", async () => {
+    const workflow = await read(".github/workflows/release-packages.yml");
+    expect(workflow).toContain("recovery_run_id:");
+    expect(workflow).toContain("await validateRecoveryRun(");
+    expect(workflow).toContain("verifyRecoveryEvidence(original, current,");
+    expect(workflow).toContain("if: needs.prepare.outputs.recovery_run_id == ''");
+    expect(
+      workflow.match(/run-id: \$\{\{ needs.prepare.outputs.artifact_run_id \}\}/gu),
+    ).toHaveLength(2);
+    expect(
+      workflow.match(
+        /needs.prepare.outputs.recovery_run_id != '' && needs.package.result == 'skipped'/gu,
+      ),
+    ).toHaveLength(2);
+    expect(workflow).toContain("node .release-automation/scripts/release/publish-npm.mjs");
+    expect(workflow).toContain("--resume");
+    const npmJob = workflow.slice(
+      workflow.indexOf("  publish-npm:"),
+      workflow.indexOf("  publish-release:"),
+    );
+    expect(npmJob).not.toContain("npm ci");
+    expect(npmJob).not.toContain("npm run build");
   });
 
   it("pins external Actions and release build/publish checkouts to immutable SHAs", async () => {
