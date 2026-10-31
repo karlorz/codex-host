@@ -11,83 +11,69 @@ import {
 } from "./app-server-host-fixture.js";
 
 describe("external follow-up queue", () => {
-  it("starts a queued follow-up from thread/queue/start and from an empty turn/start", async () => {
-    const fixture = createFixture();
-    try {
-      const threadId = await startPiThread(fixture);
-      writeRequest(fixture.desktopInput, {
-        id: 2,
-        method: "thread/queue/add",
-        params: {
-          threadId,
-          clientUserMessageId: "follow-up",
-          input: [{ type: "text", text: "queued from overlay" }],
-        },
-      });
-      const added = await fixture.collector.waitFor((message) => requestId(message, 2));
-      expect(added.error).toBeUndefined();
-      expect(added.result).toMatchObject({
-        queuedSubmission: {
-          clientUserMessageId: "follow-up",
-          input: [{ type: "text", text: "queued from overlay", text_elements: [] }],
-        },
-      });
-      writeRequest(fixture.desktopInput, {
-        id: 21,
-        method: "thread/queue/list",
-        params: { threadId, limit: 100 },
-      });
-      const listed = await fixture.collector.waitFor((message) => requestId(message, 21));
-      expect(listed.error).toBeUndefined();
-      expect(listed.result).toMatchObject({
-        data: [
-          {
+  it.each(["thread/queue/start", "turn/start"] as const)(
+    "starts a queued follow-up from %s on an idle Thread",
+    async (startMethod) => {
+      const fixture = createFixture();
+      try {
+        const threadId = await startPiThread(fixture);
+        writeRequest(fixture.desktopInput, {
+          id: 2,
+          method: "thread/queue/add",
+          params: {
+            threadId,
+            clientUserMessageId: "follow-up",
+            input: [{ type: "text", text: "queued from overlay" }],
+          },
+        });
+        const added = await fixture.collector.waitFor((message) => requestId(message, 2));
+        expect(added.error).toBeUndefined();
+        expect(added.result).toMatchObject({
+          queuedSubmission: {
             clientUserMessageId: "follow-up",
             input: [{ type: "text", text: "queued from overlay", text_elements: [] }],
           },
-        ],
-        nextCursor: null,
-      });
+        });
+        writeRequest(fixture.desktopInput, {
+          id: 21,
+          method: "thread/queue/list",
+          params: { threadId, limit: 100 },
+        });
+        const listed = await fixture.collector.waitFor((message) => requestId(message, 21));
+        expect(listed.error).toBeUndefined();
+        expect(listed.result).toMatchObject({
+          data: [
+            {
+              clientUserMessageId: "follow-up",
+              input: [{ type: "text", text: "queued from overlay", text_elements: [] }],
+            },
+          ],
+          nextCursor: null,
+        });
 
-      writeRequest(fixture.desktopInput, {
-        id: 3,
-        method: "thread/queue/start",
-        params: {
-          threadId,
-          queuedSubmissionId: (added.result as { queuedSubmission: { id: string } })
-            .queuedSubmission.id,
-        },
-      });
-      const started = await fixture.collector.waitFor((message) => requestId(message, 3));
-      expect(started.error).toBeUndefined();
-      const turnId = (started.result as { turn: { id: string } }).turn.id;
-      expect(turnId).toBeTruthy();
-      await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
-      fixture.adapter.sessions[0]?.succeedTurn();
-      await fixture.collector.waitFor((message) => turnEvent(message, "turn/completed", turnId));
-
-      writeRequest(fixture.desktopInput, {
-        id: 4,
-        method: "thread/queue/add",
-        params: {
-          threadId,
-          clientUserMessageId: "empty-start",
-          input: [{ type: "text", text: "resume after interrupt" }],
-        },
-      });
-      await fixture.collector.waitFor((message) => requestId(message, 4));
-      writeRequest(fixture.desktopInput, {
-        id: 5,
-        method: "turn/start",
-        params: { threadId, clientUserMessageId: "empty-start", input: [] },
-      });
-      const resumed = await fixture.collector.waitFor((message) => requestId(message, 5));
-      expect(resumed.error).toBeUndefined();
-      expect(resumed.result).toMatchObject({ turn: { status: "inProgress" } });
-    } finally {
-      await stopFixture(fixture);
-    }
-  });
+        writeRequest(fixture.desktopInput, {
+          id: 3,
+          method: startMethod,
+          params:
+            startMethod === "thread/queue/start"
+              ? {
+                  threadId,
+                  queuedSubmissionId: (added.result as { queuedSubmission: { id: string } })
+                    .queuedSubmission.id,
+                }
+              : { threadId, clientUserMessageId: "follow-up", input: [] },
+        });
+        const started = await fixture.collector.waitFor((message) => requestId(message, 3));
+        expect(started.error).toBeUndefined();
+        const turnId = (started.result as { turn: { id: string } }).turn.id;
+        expect(turnId).toBeTruthy();
+        expect(started.result).toMatchObject({ turn: { status: "inProgress" } });
+        await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
+      } finally {
+        await stopFixture(fixture);
+      }
+    },
+  );
 
   it("resumes an interrupted Thread and starts the queued follow-up from Desktop's empty turn/start", async () => {
     const fixture = createFixture();

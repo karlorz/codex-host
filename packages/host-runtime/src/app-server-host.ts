@@ -216,6 +216,7 @@ import {
   type ExternalThreadResolution,
 } from "./external-thread-runtime.js";
 import { ExternalSessionReleaseError } from "./external-thread-lifecycle.js";
+import { ExternalQueueError, ExternalThreadQueue } from "./external-thread-queue.js";
 import {
   ExternalSteerError,
   ExternalTurnSteering,
@@ -317,11 +318,7 @@ import {
 import { listSectionThreads, moveThreadSection } from "./external-thread-sections.js";
 import { externalThreadListEntries } from "./external-thread-list.js";
 import { externalThreadEmptyOfficialResult } from "./external-thread-official-defaults.js";
-import {
-  ExternalThreadFollowUpQueue,
-  queuedSubmissionText,
-  type ExternalQueuedSubmission,
-} from "./external-thread-follow-up-queue.js";
+import { queuedSubmissionInput, queuedSubmissionText } from "./external-thread-follow-up-queue.js";
 import { ModelPriceCatalog } from "./model-prices.js";
 import { ObservedSessionUsage } from "./observed-session-usage.js";
 import type { UsageStatistics, UsageStatisticsSource } from "./usage-statistics.js";
@@ -676,12 +673,15 @@ export class AppServerHost {
   readonly #executionHosts = new WeakMap<ExternalThread, string>();
   readonly #externalPrewarms = new ExternalThreadPrewarms();
   readonly #externalSteering = new ExternalTurnSteering();
-  readonly #followUps = new ExternalThreadFollowUpQueue();
   readonly #nativeVoiceGateway: NativeVoiceGateway;
   readonly #externalVoice: ExternalVoice;
   readonly #externalVoiceResults = new ExternalVoiceResults((threadId, text) =>
     this.#externalVoice.reportProgress(threadId, text),
   );
+  readonly #externalQueue = new ExternalThreadQueue({
+    notifyChanged: (threadId) =>
+      this.#writer.json({ method: "thread/queue/changed", params: { threadId } }),
+  });
   readonly #liveCommandCache = new LiveCommandCatalogCache();
   readonly #modelPrices: ModelPriceCatalog;
   readonly #observedSessionUsage: ObservedSessionUsage;
@@ -2144,27 +2144,6 @@ export class AppServerHost {
         this.#pendingOfficialTurnStarts.set(request.id, threadId);
       }
     }
-    if (request.method.startsWith("thread/queue/")) {
-      const params = routingParams(request);
-      const threadId = params.threadId;
-      const resolution =
-        typeof threadId === "string"
-          ? await this.#resolveExternalThread(threadId)
-          : ({ kind: "official" } as const);
-      if (await this.#writeResolutionError(request, resolution)) return;
-      if (resolution.kind === "external") {
-        if (request.method === "thread/queue/start") {
-          this.#dispatchDesktopReply(
-            request,
-            () => this.#startExternalQueuedTurn(request, resolution.thread),
-            resolution.thread.id,
-          );
-          return;
-        }
-        await this.#handleExternalQueueMutation(request, resolution.thread);
-        return;
-      }
-    }
     if (request.method === "turn/steer") {
       const params = routingParams(request);
       const resolution =
@@ -2276,6 +2255,22 @@ export class AppServerHost {
         } else {
           await this.#deleteExternalThread(request, location);
         }
+        return;
+      }
+    }
+    if (
+      request.method.startsWith("thread/queue/") &&
+      isRecord(request.params) &&
+      typeof request.params.threadId === "string"
+    ) {
+      const location = await this.#locateExternalThread(request.params.threadId);
+      if (await this.#writeResolutionError(request, location)) return;
+      if (location.kind === "external") {
+        this.#dispatchDesktopReply(
+          request,
+          () => this.#handleExternalQueueRequest(request, location.record.hostThreadId),
+          location.record.hostThreadId,
+        );
         return;
       }
     }
@@ -4240,6 +4235,8 @@ export class AppServerHost {
     }
     const params = requestObject(request);
     const route = decodeCreateRoute(request);
+    // Renderer-side prewarms mark the request; main-process prewarms can mark only the Model.
+    const prewarm = params[EXTERNAL_THREAD_PREWARM_PARAM] === true || route?.prewarm === true;
     const requestedModel = route && route.harnessId !== "codex" ? route.model : undefined;
     const requestedThinkingOptionId =
       route && route.harnessId !== "codex" ? route.thinkingOptionId : undefined;
@@ -4295,7 +4292,7 @@ export class AppServerHost {
     const session = sessionResult.value;
     await this.#externalRuntime.idleRelease.runOperation(record.hostThreadId, async () => {
       try {
-        if (session.initialState.nativeRef && params[EXTERNAL_THREAD_PREWARM_PARAM] !== true) {
+        if (session.initialState.nativeRef && !prewarm) {
           record = await this.#repository.commitNative(
             record.hostThreadId,
             session.initialState.nativeRef,
@@ -4309,7 +4306,7 @@ export class AppServerHost {
         const externalThread = this.#registerExternalThread({
           record,
           session,
-          unsubmittedPrewarm: params[EXTERNAL_THREAD_PREWARM_PARAM] === true,
+          unsubmittedPrewarm: prewarm,
           sessionId: record.hostThreadId,
           thread,
           turns: [],
@@ -4317,7 +4314,7 @@ export class AppServerHost {
           ...(requestedThinkingOptionId ? { requestedThinkingOptionId } : {}),
           ...(requestedPermissionModeId ? { requestedPermissionModeId } : {}),
         });
-        if (params[EXTERNAL_THREAD_PREWARM_PARAM] === true) {
+        if (prewarm) {
           this.#externalPrewarms.register(externalThread);
         }
         this.#routeObservationTracker.bindCreatedThread(request.id, externalThread.id);
@@ -4604,6 +4601,7 @@ export class AppServerHost {
     }
     if (location.thread) await this.#resolveThreadInteractions(location.thread);
     this.#routeObservationTracker.forgetThread(location.record.hostThreadId);
+    this.#externalQueue.forget(location.record.hostThreadId);
     await this.#writer.json(rpcEnvelope(request, { result: {} }));
     await this.#writer.json({
       method: "thread/deleted",
@@ -4922,135 +4920,6 @@ export class AppServerHost {
     );
   }
 
-  async #notifyFollowUpQueueChanged(threadId: string): Promise<void> {
-    await this.#writer.json({
-      method: "thread/queue/changed",
-      params: { threadId },
-    });
-  }
-
-  async #handleExternalQueueMutation(
-    request: JsonRpcRequest,
-    thread: ExternalThread,
-  ): Promise<void> {
-    const params = requestObject(request);
-    try {
-      if (request.method === "thread/queue/list") {
-        await this.#writer.json(rpcEnvelope(request, { result: this.#followUps.list(thread.id) }));
-        return;
-      }
-      if (request.method === "thread/queue/add") {
-        if (!Array.isArray(params.input))
-          throw new Error("thread/queue/add input must be an array");
-        const text = queuedSubmissionText(params.input);
-        if (!text) throw new Error("thread/queue/add must contain text input");
-        const queuedSubmission = this.#followUps.add(
-          thread.id,
-          params.input,
-          typeof params.clientUserMessageId === "string" ? params.clientUserMessageId : undefined,
-        );
-        await this.#writer.json(rpcEnvelope(request, { result: { queuedSubmission } }));
-        await this.#notifyFollowUpQueueChanged(thread.id);
-        return;
-      }
-      if (request.method === "thread/queue/update") {
-        if (typeof params.queuedSubmissionId !== "string" || !Array.isArray(params.input)) {
-          throw new Error("thread/queue/update requires queuedSubmissionId and input");
-        }
-        const queuedSubmission = this.#followUps.update(
-          thread.id,
-          params.queuedSubmissionId,
-          params.input,
-        );
-        if (!queuedSubmission) throw new Error("Queued follow-up was not found");
-        await this.#writer.json(rpcEnvelope(request, { result: { queuedSubmission } }));
-        await this.#notifyFollowUpQueueChanged(thread.id);
-        return;
-      }
-      if (request.method === "thread/queue/delete") {
-        if (typeof params.queuedSubmissionId !== "string") {
-          throw new Error("thread/queue/delete requires queuedSubmissionId");
-        }
-        const deleted = this.#followUps.delete(thread.id, params.queuedSubmissionId);
-        await this.#writer.json(rpcEnvelope(request, { result: { deleted } }));
-        if (deleted) await this.#notifyFollowUpQueueChanged(thread.id);
-        return;
-      }
-      if (request.method === "thread/queue/reorder") {
-        if (
-          !Array.isArray(params.queuedSubmissionIds) ||
-          params.queuedSubmissionIds.some((id) => typeof id !== "string")
-        ) {
-          throw new Error("thread/queue/reorder requires queuedSubmissionIds");
-        }
-        if (!this.#followUps.reorder(thread.id, params.queuedSubmissionIds as string[])) {
-          throw new Error("Queued follow-up order could not be applied");
-        }
-        await this.#writer.json(rpcEnvelope(request, { result: {} }));
-        await this.#notifyFollowUpQueueChanged(thread.id);
-        return;
-      }
-      await this.#writer.json(
-        rpcError(request, -32076, `External Thread does not support ${request.method}`),
-      );
-    } catch (error) {
-      await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
-    }
-  }
-
-  async #startExternalFromFollowUp(
-    request: JsonRpcRequest,
-    thread: ExternalThread,
-    queued: ExternalQueuedSubmission,
-    sourceHostId?: unknown,
-  ): Promise<void> {
-    const text = queuedSubmissionText(queued.input);
-    if (!text) {
-      this.#followUps.restore(thread.id, queued);
-      await this.#writer.json(rpcError(request, -32602, "Queued follow-up was not found"));
-      return;
-    }
-    await this.#notifyFollowUpQueueChanged(thread.id);
-    try {
-      const started = await this.#beginExternalInputTurn(
-        thread,
-        text,
-        undefined,
-        queued.clientUserMessageId,
-        sourceHostId,
-      );
-      try {
-        await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
-      } finally {
-        started.gate.resolve();
-      }
-    } catch (error) {
-      this.#followUps.restore(thread.id, queued);
-      await this.#notifyFollowUpQueueChanged(thread.id);
-      await this.#writer.json(
-        rpcError(
-          request,
-          error instanceof ExternalSteerError || error instanceof ExternalCommandError
-            ? error.code
-            : -32073,
-          errorMessage(error),
-        ),
-      );
-    }
-  }
-
-  async #startExternalQueuedTurn(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
-    const params = requestObject(request);
-    const queuedSubmissionId =
-      typeof params.queuedSubmissionId === "string" ? params.queuedSubmissionId : undefined;
-    const queued = this.#followUps.take(thread.id, queuedSubmissionId);
-    if (!queued) {
-      await this.#writer.json(rpcError(request, -32602, "Queued follow-up was not found"));
-      return;
-    }
-    await this.#startExternalFromFollowUp(request, thread, queued);
-  }
-
   async #startExternalTurn(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
     if (this.#externalThreadBusy(thread) || this.#pendingExternalCommandRequests.has(thread.id)) {
       await this.#writer.json(
@@ -5080,19 +4949,18 @@ export class AppServerHost {
     try {
       text = requestText(params);
     } catch (error) {
-      const queued =
-        this.#followUps.take(thread.id, clientUserMessageId) ?? this.#followUps.take(thread.id);
-      if (!queued) {
+      try {
+        const started = await this.#startQueuedSubmission(thread, clientUserMessageId ?? null);
+        try {
+          await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
+        } finally {
+          started.gate.resolve();
+        }
+        return;
+      } catch {
         await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
         return;
       }
-      await this.#startExternalFromFollowUp(
-        request,
-        thread,
-        queued,
-        params[THREAD_REFERENCE_SOURCE_HOST_PARAM],
-      );
-      return;
     }
     try {
       const started = await this.#beginExternalInputTurn(
@@ -5117,6 +4985,151 @@ export class AppServerHost {
           errorMessage(error),
         ),
       );
+    }
+  }
+
+  async #handleExternalQueueRequest(request: JsonRpcRequest, threadId: string): Promise<void> {
+    const queue = this.#externalQueue;
+    try {
+      const params = requestObject(request);
+      const input = (): JsonValue[] => {
+        requestText(params);
+        return params.input as JsonValue[];
+      };
+      const submissionId = (): string => {
+        if (typeof params.queuedSubmissionId !== "string")
+          throw new ExternalQueueError(-32602, "queuedSubmissionId must be a string");
+        return params.queuedSubmissionId;
+      };
+      let result: JsonObject;
+      switch (request.method) {
+        case "thread/queue/list":
+          result = queue.list(threadId, params);
+          break;
+        case "thread/queue/add": {
+          if (typeof params.clientUserMessageId !== "string" || !params.clientUserMessageId)
+            throw new ExternalQueueError(-32602, "clientUserMessageId must be a string");
+          const sourceHostId = params[THREAD_REFERENCE_SOURCE_HOST_PARAM];
+          const submission = await queue.add(
+            threadId,
+            queuedSubmissionInput(input()),
+            params.clientUserMessageId,
+            typeof sourceHostId === "string" ? sourceHostId : undefined,
+          );
+          result = { queuedSubmission: submission as unknown as JsonObject };
+          break;
+        }
+        case "thread/queue/update": {
+          const submission = await queue.update(
+            threadId,
+            submissionId(),
+            queuedSubmissionInput(input()),
+          );
+          result = { queuedSubmission: submission as unknown as JsonObject };
+          break;
+        }
+        case "thread/queue/delete":
+          result = { deleted: await queue.delete(threadId, submissionId()) };
+          break;
+        case "thread/queue/reorder": {
+          const ids = params.queuedSubmissionIds;
+          if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string"))
+            throw new ExternalQueueError(-32602, "queuedSubmissionIds must be strings");
+          await queue.reorder(threadId, ids as string[]);
+          result = {};
+          break;
+        }
+        case "thread/queue/start": {
+          const resolution = await this.#resolveExternalThread(threadId);
+          if (await this.#writeResolutionError(request, resolution)) return;
+          if (resolution.kind !== "external")
+            throw new ExternalQueueError(-32073, "External Thread is no longer available");
+          const started = await this.#startQueuedSubmission(
+            resolution.thread,
+            params.queuedSubmissionId == null ? null : submissionId(),
+          );
+          try {
+            await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
+          } finally {
+            started.gate.resolve();
+          }
+          return;
+        }
+        default:
+          throw new ExternalQueueError(
+            -32076,
+            `External Thread does not support ${request.method}`,
+          );
+      }
+      await this.#writer.json(rpcEnvelope(request, { result }));
+      if (request.method === "thread/queue/add") {
+        const thread = this.#externalRuntime.get(threadId);
+        const lastTurn = thread?.turns.at(-1);
+        // The completion handler may have checked an empty queue before this add arrived.
+        // Use only a terminal Turn published here, not restored history or a failed start.
+        if (
+          thread &&
+          thread.projectedTerminalTurnId === lastTurn?.id &&
+          lastTurn?.status === "completed" &&
+          isRecord(thread.thread.status) &&
+          thread.thread.status.type === "idle"
+        ) {
+          void this.#drainExternalQueue(thread);
+        }
+      }
+    } catch (error) {
+      await this.#writer.json(
+        rpcError(
+          request,
+          error instanceof ExternalQueueError ||
+            error instanceof ExternalSteerError ||
+            error instanceof ExternalCommandError
+            ? error.code
+            : -32602,
+          errorMessage(error),
+        ),
+      );
+    }
+  }
+
+  /** Starts a queued follow-up as a Turn; it returns to its place when the start fails. */
+  async #startQueuedSubmission(
+    thread: ExternalThread,
+    submissionId?: string | null,
+  ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
+    if (this.#externalThreadBusy(thread) || this.#pendingExternalCommandRequests.has(thread.id))
+      throw new ExternalSteerError(-32072, "External Thread already has an active Turn");
+    const taken = this.#externalQueue.take(thread.id, submissionId);
+    try {
+      const started = await this.#beginExternalInputTurn(
+        thread,
+        requestText({ input: taken.submission.input }),
+        undefined,
+        taken.submission.clientUserMessageId,
+        taken.sourceHostId,
+        true,
+      );
+      await this.#externalQueue.notifyChanged(thread.id);
+      return started;
+    } catch (error) {
+      this.#externalQueue.restore(thread.id, taken);
+      await this.#externalQueue.notifyChanged(thread.id);
+      throw error;
+    }
+  }
+
+  /** Desktop leaves queued follow-ups to the app-server once a Turn completes normally. */
+  async #drainExternalQueue(thread: ExternalThread): Promise<void> {
+    if (
+      !this.#externalQueue.has(thread.id) ||
+      this.#externalThreadBusy(thread) ||
+      this.#pendingExternalCommandRequests.has(thread.id)
+    )
+      return;
+    try {
+      (await this.#startQueuedSubmission(thread)).gate.resolve();
+    } catch (error) {
+      this.#diagnose(error);
     }
   }
 
@@ -5200,12 +5213,13 @@ export class AppServerHost {
     assertActive?: () => void,
     clientUserMessageId?: string,
     sourceHostId?: unknown,
+    projectInput = false,
   ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
     const text = restoreHarnessCommandMentions(inputText);
     const commands = thread.session.commands;
     if (!commands || !isExternalCommandCandidate(text)) {
       assertActive?.();
-      return this.#beginExternalTurn(thread, text, clientUserMessageId, sourceHostId);
+      return this.#beginExternalTurn(thread, text, clientUserMessageId, sourceHostId, projectInput);
     }
     this.#pendingExternalCommandRequests.add(thread.id);
     try {
@@ -5218,7 +5232,13 @@ export class AppServerHost {
       assertActive?.();
       if (!command) {
         this.#pendingExternalCommandRequests.delete(thread.id);
-        return await this.#beginExternalTurn(thread, text, clientUserMessageId, sourceHostId);
+        return await this.#beginExternalTurn(
+          thread,
+          text,
+          clientUserMessageId,
+          sourceHostId,
+          projectInput,
+        );
       }
       return await this.#beginExternalCommand(
         thread,
@@ -5258,11 +5278,16 @@ export class AppServerHost {
     };
   }
 
+  /**
+   * Desktop renders the input of its own `turn/start` locally. Other starts (Host-only clients
+   * and queued follow-ups) need the user message projected with the Turn.
+   */
   async #beginExternalTurn(
     thread: ExternalThread,
     text: string,
     clientUserMessageId?: string,
     sourceHostId?: unknown,
+    projectInput = false,
   ): Promise<{
     turnId: HostTurnId;
     turn: JsonObject;
@@ -5286,7 +5311,7 @@ export class AppServerHost {
         turnId,
         cwd: thread.cwd,
         startedAtMs,
-        ...(this.#options.externalOnly
+        ...(this.#options.externalOnly || projectInput
           ? {
               initialInput: [{ type: "text" as const, text }],
               ...(clientUserMessageId ? { clientUserMessageId } : {}),
@@ -5761,6 +5786,14 @@ export class AppServerHost {
           : { type: "idle" },
       );
       this.#externalSteering.terminal(thread.id, event.turnId, event.outcome);
+      // Interrupted and failed Turns pause the queue until Desktop starts it again.
+      if (
+        !ephemeralTurn &&
+        result.completedTurn?.status === "completed" &&
+        this.#externalQueue.has(thread.id)
+      ) {
+        void this.#drainExternalQueue(thread);
+      }
     }
   }
 
