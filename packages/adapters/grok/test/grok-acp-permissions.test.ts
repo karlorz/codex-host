@@ -17,6 +17,8 @@ async function fixture(scenario: string) {
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 const scenario = process.env.GROK_PERMISSION_SCENARIO;
+// Keep the hanging-close process alive after stdin EOF so teardown exercises signaling.
+if(scenario==='close-hang') setInterval(() => {}, 1000);
 const send = (value) => process.stdout.write(JSON.stringify({jsonrpc:'2.0',...value})+'\\n');
 const log = (message) => process.stderr.write('2026-10-23T02:24:56.741602Z  INFO '+message+'\\n');
 let changed = false;
@@ -169,8 +171,7 @@ describe.skipIf(process.platform === "win32")("Grok ACP permission wire", () => 
         ).rejects.toThrow("active operation");
         const closing = f.transport.close();
         expect(f.transport.close()).toBe(closing);
-        await closing;
-        await selection;
+        await Promise.all([closing, selection]);
       } finally {
         await f.close();
       }
