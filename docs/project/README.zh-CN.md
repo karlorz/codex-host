@@ -168,6 +168,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 此矩阵描述本 fork 的外部 Harness 在 Codex Desktop 中的接入，包括原生界面与共享 codexhost 提问卡片。支持范围取决于插件原生协议、所需补丁及已验证的 Desktop 行为；限制见下方说明。
 
+Grok 目标完成与重启后历史已在 Codex Desktop 26.1027.30824 验证：原始请求、最终回复、耗时及已完成的子代理历史均保留。完整目标控制与历史消息修订仍为部分验证。
+
 <details>
 <summary>查看完整功能矩阵</summary>
 
@@ -188,6 +190,7 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 | 修订上一条消息 | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 原生目标生命周期 | ? | ? | ? | ? | ◐ | ✅ | ? | — | — | ? | ? | ? | ? | ? |
 | Shared goal panel | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |
+| Shared goal completion / restart history | — | — | — | — | ✅ | — | — | — | — | — | — | — | — | — |
 | Host-managed goals | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | 模型创建目标 | ? | ? | ? | ? | — | ? | ? | ? | ? | ? | ? | ? | ? | ? |
 | 实时语音 | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |
@@ -200,8 +203,9 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 图例：✅ 已接入 · ◐ 部分接入、降级或仅保存意向 · — 当前插件未投影该能力 · ? 未验证。
 
-- **Native goals and Grok editing**: Grok implements the shared native-goal bridge and independent background worker observation; ◐ retains pending installed Desktop lifecycle acceptance. DSH's ✅ describes its existing native command lifecycle, not shared-panel parity. ZCode has typed native controls/background ownership, but its shared-panel accounting remains unqualified. Unsupported shared goal RPCs fail explicitly; no Host-managed scheduler or official goal-tool injection is enabled. Other ? cells remain unverified. Grok editing uses conversation-only native rewind. See [Native goal bridge](../architecture/harness-goals.md).
-- **Grok goal boundaries**: Desktop `/goal` and `/grok-goal` create native goals; ordinary natural-language requests cannot create one on the qualified native build. Real background responses retain native history/checkpoints. Goal helpers have final read-only child transcripts; their links wait for confirmed parent identity, and post-terminal helpers appear on reopen. Child transcript streaming is unclaimed. Goal/helper changes retain pending installed Desktop acceptance; the goal cells remain ◐.
+- **Native goals and Grok editing**: Grok's native lifecycle and shared panel remain ◐ because the full installed pause/resume/Stop, budget and paused-restore matrix is not yet qualified. Completion and restart history are verified separately below. Editing uses conversation-only native rewind, with automated and isolated native coverage; the installed older-message edit/rewind matrix remains pending. DSH's ✅ describes its existing native command lifecycle, not shared-panel parity. ZCode has typed native controls/background ownership, but its shared-panel accounting remains unqualified. Unsupported shared goal RPCs fail explicitly; no Host-managed scheduler or official goal-tool injection is enabled. Other ? cells remain unverified. See [Native goal bridge](../architecture/harness-goals.md).
+- **Grok completion and history**: ✅ covers Desktop `/goal` completion, the separate final answer and achievement footer, and restoration of the original user request, native work duration and completed-goal display after restart. Installed Desktop 26.1027.30824 presentation was manually accepted; Host reads also verified stable worker/checkpoint identity and five completed, readable helper histories. Completion clears the active goal panel; reopening retains completion without reactivating or rerunning the goal. See [Grok goals and history](../harnesses/grok/goals-and-history.md).
+- **Grok goal boundaries**: Desktop `/goal` and `/grok-goal` create native goals; ordinary natural-language requests cannot create one on the qualified native build. Real background responses retain native history/checkpoints. Goal helpers expose final read-only child transcripts; their links wait for confirmed parent identity, and post-terminal helpers appear on reopen. Continuous child transcript streaming is unclaimed. Opened idle helper chats use native history timestamps; unhydrated helper list rows retain stored recency. Planner approvals before worker admission cannot be shown as parent interactions; native planning may pause. The Adapter does not elevate permissions.
 - **实时语音**使用本 fork 按 Desktop 版本审计的 hook 与已配置的 gateway。Host 的 `thread/realtime/*` 和新会话继承所选 Harness 的路径是通用的。Claude Code 有已记录的有人值守 Desktop 通话；Grok 标为 ◐，因为验证覆盖真实 gateway 通话和公共插件的隔离 Host 试验，尚不等于已安装 Desktop 按钮验收。其他 Harness 未验证（?）。详见 [CPA live-voice Desktop hook](../operations/cpa-live-voice-desktop-hook.md)。
 - **多选提问**：Adapter 发出 `multiple: true` 时使用共享 codexhost 复选框卡片，选中值以数组回传；允许 Other 的单选组也使用 Composer 上方的共享卡片，保留普通聊天输入框；其他单选/文本组仍使用原生 Desktop 卡片。Grok 保留原生多选标记及全部选中标签。共享 Host/浏览器路径有回归测试，安装版 Desktop 人工测试已同时回传 Alpha 与 Beta。其他 Adapter 的原生多选全链路未验证时仍标为 ◐。OMP 使用独立单选/文本交互；Pi 固定单选，Antigravity 拒绝多选。详见 [Grok 原生提问](../harnesses/grok/questions.md)、[Antigravity 提问交互复盘](../harnesses/antigravity/antigravity-question-interaction-postmortem.md) 与 [OMP 交互](../harnesses/omp/omp-interactions.md)。
 - **提问倒计时与活动重置**目前仅由 Grok 插件在共享提问卡片上提供。纯文本问题组保留原生 Desktop 卡片，不显示该倒计时或转发该活动。倒计时需 grokgod 补丁 `0027`；确认式重置还需 `0028` 与原生 `timeout_reset_on_activity = true`。两行因界面与构建限制标为 ◐，其他插件目前未提供（—）。这些行描述外部 Harness 接入，不代表原生 Codex 模型提问工具的能力。详见 [Grok 原生提问](../harnesses/grok/questions.md)。

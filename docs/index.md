@@ -16,7 +16,7 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`architecture/harness-plugin-runtime.md`](architecture/harness-plugin-runtime.md) | 当前 Cordis 生命周期、动态目录、插件本地化与额度契约、预装发行及安全边界；修改插件系统时首先阅读。 |
-| [`architecture/harness-goals.md`](architecture/harness-goals.md) | Shared external native-goal controls, accounting, ownership and producer qualification. |
+| [`architecture/harness-goals.md`](architecture/harness-goals.md) | Shared external native-goal controls, completion/history restoration, accounting, ownership and producer qualification. |
 | [`architecture/harness-plugin-architecture.md`](architecture/harness-plugin-architecture.md) | 插件化目标架构与未完成迁移方案；规划后续解耦时阅读，接口示例不代表当前 API。 |
 | [`architecture/harness-command-integration.md`](architecture/harness-command-integration.md) | Harness 原生命令的 Adapter、Host、Renderer 边界；新增命令能力时阅读。 |
 | [`architecture/harness-executable-discovery.md`](architecture/harness-executable-discovery.md) | Harness CLI 的跨平台发现、连接页安装指引和 DSH 特殊连接范围；修改安装指引、发现或启动逻辑时阅读。 |
@@ -100,7 +100,7 @@
 | [`harnesses/grok/mcp-elicitation.md`](harnesses/grok/mcp-elicitation.md) | Grok MCP consent forms project to Desktop approval, including offered Always allow; bounded empty forms only. |
 | [`harnesses/grok/computer-use-release.md`](harnesses/grok/computer-use-release.md) | Grok native turn-end Computer Use cleanup, Mac Sky bridge, failure behavior, and runtime limits. |
 | [`harnesses/grok/computer-use-settings.md`](harnesses/grok/computer-use-settings.md) | Grok `cua_repl` Computer Use and in-app browser (IAB) switches, surface matrix, IAB vs Computer Use vs Chrome extension, fail-closed binding. |
-| [`harnesses/grok/goals-and-history.md`](harnesses/grok/goals-and-history.md) | Native `/goal` controls, completion/clear ordering, background-response history, helper links, checkpoint rewind and qualification limits. |
+| [`harnesses/grok/goals-and-history.md`](harnesses/grok/goals-and-history.md) | Native `/goal` controls, verified completion/restart history, helper transcripts, checkpoint rewind and remaining control/edit limits. |
 | [`harnesses/grok/permission-modes.md`](harnesses/grok/permission-modes.md) | Grok 会话内权限切换、原生生效确认、失败处理与验证范围。 |
 
 ### Copilot
