@@ -95,6 +95,36 @@ afterEach(async () => {
 });
 
 describe("External native child identity", () => {
+  it("uses native history time for an opened idle child rather than its mapping creation time", async () => {
+    const { repository, parent } = await fixture();
+    try {
+      const record = await repository.materializeSubagent(parent, {
+        subagentId: "historic-child",
+        nativeSubagentId: "historic-child",
+        description: "Historic helper",
+        background: true,
+        status: "completed",
+      });
+      if (!record) throw new Error("Missing child");
+      const turns = [
+        { startedAt: 100, completedAt: 200 },
+        { startedAt: 300, completedAt: 400 },
+      ];
+      expect(externalThreadValue({ record, turns, sessionId: parentId })).toMatchObject({
+        createdAt: 100,
+        updatedAt: 400,
+        recencyAt: 400,
+      });
+      for (const input of [{ turns: [] }, { turns, running: true }]) {
+        expect(externalThreadValue({ record, sessionId: parentId, ...input })).toMatchObject({
+          createdAt: Math.floor(Date.parse(record.createdAt) / 1000),
+          updatedAt: Math.floor(Date.parse(record.updatedAt) / 1000),
+        });
+      }
+    } finally {
+      await repository.close();
+    }
+  });
   it("persists child configuration independently, upgrades legacy mappings, and never borrows parent settings", async () => {
     const { directory, input, repository, store, parent } = await fixture();
     const configuredParent = await repository.setTransportModelId(parentId, "parent-model");

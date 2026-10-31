@@ -7,6 +7,8 @@ import {
   type HarnessGoalSet,
 } from "@codexhost/shared-contracts";
 import type { HarnessGoalCapability, HarnessResult } from "@codexhost/harness-adapter";
+import type { GrokTransportEvent } from "./acp-transport.js";
+import { lastCompletedGrokGoal } from "./grok-goal-history.js";
 
 const status: Record<string, HarnessGoal["status"]> = {
   active: "active",
@@ -71,6 +73,7 @@ export class GrokGoals implements HarnessGoalCapability {
     readonly control: (prompt: string, signal: AbortSignal) => Promise<unknown>,
     readonly changed: (goal: HarnessGoal | null) => void,
     readonly timeoutMs = 30_000,
+    readonly history?: () => Promise<readonly GrokTransportEvent[]>,
   ) {}
   get busy() {
     return this.#mutating;
@@ -118,6 +121,14 @@ export class GrokGoals implements HarnessGoalCapability {
       return { ok: true, value: goal };
     } catch {
       return failure("Grok native goal accounting is unavailable");
+    }
+  }
+  async readLastCompleted(): Promise<HarnessResult<HarnessGoal | null>> {
+    if (this.#closed) return failure("Grok goal Session is closed");
+    try {
+      return { ok: true, value: this.history ? lastCompletedGrokGoal(await this.history()) : null };
+    } catch {
+      return failure("Grok native goal completion history is unavailable");
     }
   }
   #projectStored(stored: Awaited<ReturnType<typeof readGrokGoal>>): HarnessGoal | null {

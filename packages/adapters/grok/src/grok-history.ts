@@ -26,6 +26,7 @@ import {
 } from "./grok-history-groups.js";
 import { placeGrokGoalHelpers } from "./grok-goal-helpers.js";
 import { grokTextItemId } from "./grok-text-item-id.js";
+import { grokEventTimestamp } from "./grok-goal-history.js";
 import { projectGrokFileChanges } from "./grok-file-change.js";
 import {
   grokGeneratedImageItem,
@@ -111,6 +112,9 @@ export function mapGrokReplay(
   let turns: HostTurnSnapshot[] = [];
   let input = "";
   let hiddenInput = false;
+  let openingGoal: { id: string; objective: string; pending: boolean } | undefined;
+  let displayInput: string | undefined;
+  let startedAtMs: number | undefined;
   let items: HostItemSnapshot[] = [];
   let turnIndex = 0;
   let messageIndex = 0;
@@ -345,7 +349,11 @@ export function mapGrokReplay(
       outcome: { status: "succeeded" },
     });
   };
-  const completeTurn = (outcome: HistoricalTurnOutcome, terminalKey?: string): void => {
+  const completeTurn = (
+    outcome: HistoricalTurnOutcome,
+    terminalKey?: string,
+    completedAtMs?: number,
+  ): void => {
     if (input.length === 0) return;
     const reconstructedKey = terminalKey ?? nativeTurnKey;
     if (!reconstructedKey) throw new Error("Grok Native history Turn has no stable identity");
@@ -370,9 +378,16 @@ export function mapGrokReplay(
         checkpointId: grokCheckpointId(currentPromptIndex),
         formatVersion: 1,
       }),
-      input: hiddenInput ? [] : [{ type: "text", text: input }],
+      input: displayInput
+        ? [{ type: "text", text: displayInput }]
+        : hiddenInput
+          ? []
+          : [{ type: "text", text: input }],
       items,
       outcome,
+      ...(startedAtMs !== undefined && completedAtMs !== undefined && completedAtMs >= startedAtMs
+        ? { startedAtMs, completedAtMs }
+        : {}),
     });
     turnIndex += 1;
     messageIndex = 0;
@@ -381,6 +396,8 @@ export function mapGrokReplay(
     nativeTurnKey = null;
     currentPromptIndex = null;
     input = "";
+    displayInput = undefined;
+    startedAtMs = undefined;
     items = [];
     goalSummarizers.clear();
     goalSummaries.length = 0;
@@ -393,6 +410,18 @@ export function mapGrokReplay(
   const reused = groups.find((g) => g.disposition === "reused");
   if (reused) throw new GrokNativeIdentityReuseError(reused.terminal.nativeTurnKey);
   for (const event of placeGrokGoalHelpers(replay, groups)) {
+    if (event.type === "goal.changed") {
+      const update = event.update;
+      if (update === null || update.status === "cleared") openingGoal = undefined;
+      else if (
+        update.last_event === "goal_created" &&
+        typeof update.goal_id === "string" &&
+        typeof update.objective === "string" &&
+        update.objective.length > 0 &&
+        update.goal_id !== openingGoal?.id
+      )
+        openingGoal = { id: update.goal_id, objective: update.objective, pending: true };
+    }
     if (event.type === "rewind.marker") {
       turns = turns.filter((turn) => {
         const index = turn.checkpoint ? parseGrokPromptIndex(turn.checkpoint.checkpointId) : null;
@@ -406,6 +435,9 @@ export function mapGrokReplay(
       nativePromptIndex = event.targetPromptIndex;
       currentPromptIndex = null;
       input = "";
+      openingGoal = undefined;
+      displayInput = undefined;
+      startedAtMs = undefined;
       items = [];
       agent = null;
       reasoning = null;
@@ -437,12 +469,21 @@ export function mapGrokReplay(
       nativePromptIndex = currentPromptIndex + 1;
       input = event.text;
       hiddenInput = grokHiddenInput(event);
+      startedAtMs = grokEventTimestamp(event);
+      if (hiddenInput && durableSynthetic.has(event) && openingGoal?.pending) {
+        displayInput = `/goal ${openingGoal.objective}`;
+        openingGoal.pending = false;
+      }
       nativeTurnKey = userEventIdentity(event);
       continue;
     }
     if (input.length === 0) continue;
     if (event.type === "turn.completed") {
-      completeTurn(terminalOutcome(event.stopReason), event.nativeTurnKey);
+      completeTurn(
+        terminalOutcome(event.stopReason),
+        event.nativeTurnKey,
+        grokEventTimestamp(event),
+      );
     } else if (event.type === "compaction.started") {
       completeReasoning();
       completeAgent();

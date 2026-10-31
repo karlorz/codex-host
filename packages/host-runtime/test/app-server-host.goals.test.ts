@@ -46,6 +46,84 @@ function attach(session: HarnessSession) {
   return capability;
 }
 describe("external native goal routing", () => {
+  it.each(["native read", "native event"])(
+    "discards stale completion restoration after a concurrent %s",
+    async (change) => {
+      const f = createFixture();
+      const loaded = Promise.withResolvers<undefined>();
+      const release = Promise.withResolvers<undefined>();
+      try {
+        const threadId = await startPiThread(f);
+        const session = f.adapter.sessions[0];
+        if (!session) throw new Error("Missing Session");
+        const goals = attach(session);
+        goals.read = vi.fn<HarnessGoalCapability["read"]>(async () => ({ ok: true, value: null }));
+        goals.readLastCompleted = vi.fn<NonNullable<HarnessGoalCapability["readLastCompleted"]>>(
+          async () => {
+            loaded.resolve(undefined);
+            await release.promise;
+            return { ok: true, value: { ...goal, status: "complete" as const } };
+          },
+        );
+        writeRequest(f.desktopInput, { id: 30, method: "thread/goal/get", params: { threadId } });
+        await loaded.promise;
+        if (change === "native read")
+          goals.read = vi.fn<HarnessGoalCapability["read"]>(async () => ({
+            ok: true,
+            value: goal,
+          }));
+        else {
+          session.emitEvent({ type: "goal.changed", goal });
+          await f.collector.waitFor((m) => m.method === "thread/goal/updated");
+        }
+        release.resolve(undefined);
+        expect(await f.collector.waitFor((m) => requestId(m, 30))).toMatchObject({
+          result: { goal: change === "native read" ? { ...goal, threadId } : null },
+        });
+        writeRequest(f.desktopInput, { id: 31, method: "thread/goal/clear", params: { threadId } });
+        await f.collector.waitFor((m) => requestId(m, 31));
+        expect(f.collector.messages.filter((m) => m.method === "thread/goal/cleared")).toEqual([]);
+        expect(f.collector.messages.filter((m) => m.method === "thread/goal/updated")).toHaveLength(
+          change === "native event" ? 1 : 0,
+        );
+      } finally {
+        release.resolve(undefined);
+        await closeFixture(f);
+      }
+    },
+  );
+  it("restores native completion display while the current goal remains cleared", async () => {
+    const f = createFixture();
+    try {
+      const threadId = await startPiThread(f);
+      const session = f.adapter.sessions[0];
+      if (!session) throw new Error("Missing Session");
+      const goals = attach(session);
+      const completed = { ...goal, status: "complete" as const };
+      goals.read = vi.fn<HarnessGoalCapability["read"]>(async () => ({ ok: true, value: null }));
+      goals.readLastCompleted = vi.fn<NonNullable<HarnessGoalCapability["readLastCompleted"]>>(
+        async () => ({ ok: true, value: completed }),
+      );
+      writeRequest(f.desktopInput, { id: 20, method: "thread/goal/get", params: { threadId } });
+      expect(await f.collector.waitFor((m) => requestId(m, 20))).toMatchObject({
+        result: { goal: null },
+      });
+      expect(await f.collector.waitFor((m) => m.method === "thread/goal/updated")).toMatchObject({
+        params: { threadId, goal: { ...completed, threadId } },
+      });
+      await f.collector.waitFor((m) => m.method === "thread/goal/cleared");
+      expect(goals.set).not.toHaveBeenCalled();
+      expect(goals.clear).not.toHaveBeenCalled();
+      expect(f.collector.messages.filter((m) => m.method === "turn/started")).toEqual([]);
+      goals.read = vi.fn<HarnessGoalCapability["read"]>(async () => ({ ok: true, value: goal }));
+      vi.mocked(goals.readLastCompleted)?.mockClear();
+      writeRequest(f.desktopInput, { id: 21, method: "thread/goal/get", params: { threadId } });
+      await f.collector.waitFor((m) => requestId(m, 21));
+      expect(goals.readLastCompleted).not.toHaveBeenCalled();
+    } finally {
+      await closeFixture(f);
+    }
+  });
   it("rejects unsupported external operations without official fall-through", async () => {
     const f = createFixture();
     const official = new JsonLineCollector(f.official.stdin);

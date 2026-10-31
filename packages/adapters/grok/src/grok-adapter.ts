@@ -509,6 +509,8 @@ class GrokHarnessSession implements HarnessSession {
           return goalControl(prompt);
         },
         (goal) => this.#event({ type: "goal.changed", goal }),
+        30_000,
+        () => transport.getHistory(),
       );
       this.goals = goals;
       this.capabilities = { ...this.capabilities, autonomousTurns: { observe: true } };

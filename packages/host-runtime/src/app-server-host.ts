@@ -671,6 +671,7 @@ export class AppServerHost {
   readonly #installationTasks = new HarnessInstallationTasks();
   #externalRuntime: ExternalThreadRuntime;
   readonly #executionHosts = new WeakMap<ExternalThread, string>();
+  readonly #goalRevisions = new WeakMap<ExternalThread, number>();
   readonly #externalPrewarms = new ExternalThreadPrewarms();
   readonly #externalSteering = new ExternalTurnSteering();
   readonly #nativeVoiceGateway: NativeVoiceGateway;
@@ -2061,7 +2062,10 @@ export class AppServerHost {
       if (await this.#writeResolutionError(request, resolution)) return;
       if (resolution.kind === "external") {
         const thread = resolution.thread;
-        const response = await executeExternalGoal(
+        if (request.method !== "thread/goal/get")
+          this.#goalRevisions.set(thread, (this.#goalRevisions.get(thread) ?? 0) + 1);
+        const revision = this.#goalRevisions.get(thread) ?? 0;
+        const { notifications, ...response } = await executeExternalGoal(
           thread.session,
           thread.id,
           request.method,
@@ -2070,7 +2074,14 @@ export class AppServerHost {
         if (this.#externalRuntime.get(thread.id) !== thread) {
           await this.#writer.json(rpcError(request, -32076, "External goal Session was replaced"));
         } else {
-          await this.#writer.json(rpcEnvelope(request, response));
+          // Enqueue the restore pair together so newer native updates cannot split it.
+          await Promise.all([
+            this.#writer.json(rpcEnvelope(request, response)),
+            ...((this.#goalRevisions.get(thread) ?? 0) === revision
+              ? (notifications ?? [])
+              : []
+            ).map((notification) => this.#writer.json(notification)),
+          ]);
         }
         return;
       }
@@ -5462,6 +5473,7 @@ export class AppServerHost {
     let event = output.event;
     if (event.type === "goal.changed") {
       if (this.#externalRuntime.get(thread.id) !== thread) return;
+      this.#goalRevisions.set(thread, (this.#goalRevisions.get(thread) ?? 0) + 1);
       await this.#writer.json(projectCodexGoalChanged(thread.id, event.goal));
       return;
     }

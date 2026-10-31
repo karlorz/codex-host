@@ -1,5 +1,9 @@
 import type { HarnessSession } from "@codexhost/harness-adapter";
-import { projectCodexGoal, type JsonObject } from "@codexhost/protocol-core";
+import {
+  projectCodexGoal,
+  projectCodexGoalChanged,
+  type JsonObject,
+} from "@codexhost/protocol-core";
 import { goalOriginSchema, harnessGoalSetSchema } from "@codexhost/shared-contracts";
 
 export const EXTERNAL_GOAL_METHODS = new Set([
@@ -12,7 +16,11 @@ export async function executeExternalGoal(
   threadId: string,
   method: string,
   params: Record<string, unknown>,
-): Promise<{ result: JsonObject } | { error: { code: number; message: string } }> {
+): Promise<
+  ({ result: JsonObject } | { error: { code: number; message: string } }) & {
+    notifications?: JsonObject[];
+  }
+> {
   const goals = session.goals;
   if (!goals)
     return { error: { code: -32076, message: `External Thread does not support ${method}` } };
@@ -22,12 +30,25 @@ export async function executeExternalGoal(
   const origin = parsedOrigin.data;
   try {
     if (method === "thread/goal/get") {
-      const read = await goals.read();
+      let read = await goals.read();
       if (!read.ok) return failure(read.error);
+      const completed = read.value === null ? await goals.readLastCompleted?.() : undefined;
+      if (completed?.ok && completed.value?.status === "complete") {
+        read = await goals.read();
+        if (!read.ok) return failure(read.error);
+      }
       return {
         result: {
           goal: read.value === null ? null : projectCodexGoal(threadId, read.value),
         },
+        ...(read.value === null && completed?.ok && completed.value?.status === "complete"
+          ? {
+              notifications: [
+                projectCodexGoalChanged(threadId, completed.value),
+                projectCodexGoalChanged(threadId, null),
+              ],
+            }
+          : {}),
       };
     }
     if (method === "thread/goal/clear") {

@@ -582,7 +582,9 @@ function parseNativeHistory(contents: string, sessionId: string): GrokTransportE
     if (!isRecord(record) || !isRecord(record.params)) continue;
     const params = record.params;
     if (params.sessionId !== sessionId || !isRecord(params.update)) continue;
-    const metadata = grokNotificationMetadata(params._meta, params.update._meta);
+    let metadata = grokNotificationMetadata(params._meta, params.update._meta);
+    if (typeof record.timestamp === "number" && Number.isFinite(record.timestamp))
+      metadata = { nativeTimestampMs: record.timestamp * 1000, ...metadata };
     const event = transportEvent(params.update as SessionUpdate, metadata);
     if (event) events.push(metadata ? { ...event, metadata } : event);
   }

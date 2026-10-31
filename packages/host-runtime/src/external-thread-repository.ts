@@ -569,8 +569,25 @@ export function externalThreadValue(input: {
   placement?: StoredSectionPlacementV1;
 }): JsonObject {
   const { record } = input;
-  const createdAt = Math.floor(Date.parse(record.createdAt) / 1_000);
-  const updatedAt = Math.floor(Date.parse(record.updatedAt) / 1_000);
+  let nativeStart: number | undefined;
+  let nativeEnd: number | undefined;
+  if (record.subagent && !input.running) {
+    for (const turn of input.turns) {
+      if (
+        typeof turn.startedAt !== "number" ||
+        typeof turn.completedAt !== "number" ||
+        !Number.isFinite(turn.startedAt) ||
+        !Number.isFinite(turn.completedAt) ||
+        turn.startedAt < 0 ||
+        turn.completedAt < turn.startedAt
+      )
+        continue;
+      nativeStart = Math.min(nativeStart ?? turn.startedAt, turn.startedAt);
+      nativeEnd = Math.max(nativeEnd ?? turn.completedAt, turn.completedAt);
+    }
+  }
+  const createdAt = nativeStart ?? Math.floor(Date.parse(record.createdAt) / 1_000);
+  const updatedAt = nativeEnd ?? Math.floor(Date.parse(record.updatedAt) / 1_000);
   const preview = input.turns
     .flatMap((turn) => (Array.isArray(turn.items) ? turn.items : []))
     .find(
