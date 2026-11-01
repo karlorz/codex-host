@@ -371,16 +371,16 @@ it("prints structured JSON and fails for fetch, parse and pin-loading errors", (
   }
 });
 
-it("keeps the qualified 26.1027 Work pin independent from native Chat", async () => {
+it("tracks the independently qualified 26.1027 Work and native Chat pins", async () => {
   const pins = await loadPinsFromRepo();
   const report = evaluate(pins, { version: "26.1027.30824", build: "22943" });
   assert.equal(pins.workVersion, "26.1027.30824");
-  assert.equal(pins.chatVersion, "26.1023.51421");
+  assert.equal(pins.chatVersion, "26.1027.30824");
   assert.equal(pins.overlayAsset, "avatar-overlay-native-page-d9d400e751cd.js");
-  assert.equal(pins.chatStart, "start-voice-a0564cefdc95.js");
+  assert.equal(pins.chatStart, "start-voice-4c77215aa289.js");
   assert.deepEqual(
     report.findings.map((finding) => finding.surface),
-    ["chat-voice"],
+    [],
   );
   assert.deepEqual(
     recoveredPinIssues(report, [
@@ -395,7 +395,7 @@ it("keeps the qualified 26.1027 Work pin independent from native Chat", async ()
     ]),
     [
       { number: 14, surface: "work-voice", version: "26.1027.30824" },
-      { number: 15, surface: "chat-voice", version: "26.1023.51421" },
+      { number: 15, surface: "chat-voice", version: "26.1027.30824" },
     ],
   );
 });

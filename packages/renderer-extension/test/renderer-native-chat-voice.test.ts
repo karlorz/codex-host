@@ -470,6 +470,79 @@ function installFixture() {
 
 afterEach(() => vi.useRealTimers());
 describe("native Chat voice lifecycle installation", () => {
+  it("starts 26.1027 Chat with its native scopes, runtime and public prewarm wrapper", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: "26.1027.30824",
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, "app-shared-7815d5a1a42a.js");
+    const primary: Record<string, unknown> = {};
+    const initializeBrowser = vi.fn(() => {
+      primary.Jp = f.initial.aT;
+    });
+    primary.Yp = initializeBrowser;
+    const initializeStart = vi.fn();
+    const prewarm = vi.fn();
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith("app-initial-60f141238751.js"))
+        return {
+          l5n: f.initial.MOr,
+          b6n: f.initial.CDr,
+          pOn: f.initial.B1n,
+          Xen: f.initial.SPn,
+          nfr: f.initial.Ycr,
+          hEn: f.initial.Nir,
+          jOn: f.initial.n0n,
+          wOn: f.initial.Y1n,
+        };
+      if (url.endsWith("app-shared-7815d5a1a42a.js"))
+        return {
+          klt: f.shared.Qst,
+          pWt: f.shared.FBt,
+          GFt: f.shared.PNt,
+          _ct: f.shared.Vot,
+        };
+      if (url.endsWith("app-primary-95a0e6d83f1e.js")) return primary;
+      if (url.endsWith("start-voice-4c77215aa289.js")) return { t: initializeStart, n: f.start };
+      if (url.endsWith("voice-prewarm-e49220ad61bd.js"))
+        return { VoiceInstantConnectCacheController: prewarm };
+      throw new Error("Unaudited module");
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(initializeBrowser).toHaveBeenCalledOnce();
+      expect(initializeStart).toHaveBeenCalledOnce();
+      expect(f.browserEnabled()).toBe(true);
+      expect(f.createRoot).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.importModule.mock.calls.map(([url]) => url)).toEqual(
+        [
+          "app-shared-7815d5a1a42a.js",
+          "app-initial-60f141238751.js",
+          "start-voice-4c77215aa289.js",
+          "voice-prewarm-e49220ad61bd.js",
+          "app-primary-95a0e6d83f1e.js",
+        ].map((asset) => `app://-/assets/${asset}`),
+      );
+      await hook.start();
+      expect(f.start).toHaveBeenCalledExactlyOnceWith(
+        f.scope,
+        f.props,
+        { event_source: "composer" },
+        expect.any(AbortSignal),
+      );
+      expect(f.initial.oT).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.browserEnabled()).toBe(false);
+    expect(f.listeners.size).toBe(0);
+  });
+
   it.each([
     {
       platform: "darwin",
@@ -872,7 +945,7 @@ describe("native Chat voice lifecycle installation", () => {
     hook.dispose();
   });
 
-  it.each(["26.1013.40934", "26.1016.51333", "26.1016.62343"])(
+  it.each(["26.1013.40934", "26.1016.51333", "26.1016.62343", "26.1027.30825"])(
     "rejects unqualified Desktop %s before importing or enabling native Chat",
     async (desktopVersion) => {
       const f = installFixture();
@@ -931,6 +1004,9 @@ describe("native Chat voice lifecycle installation", () => {
   );
 
   it.each([
+    ["26.1027.30824", ["app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"]],
+    ["26.1027.30824", ["app-initial-60f141238751.js", "app-shared-e9f258fd3588.js"]],
+    ["26.1027.30824", ["app-initial-bc8256c3cccb.js", "app-shared-7815d5a1a42a.js"]],
     ["26.1016.62342", ["app-initial-c95ddb62696e.js", "app-shared-2eda13eb7044.js"]],
     ["26.1016.62342", ["app-initial-dddef47d6ef6.js", "app-shared-2eda13eb7044.js"]],
     [
@@ -950,6 +1026,28 @@ describe("native Chat voice lifecycle installation", () => {
     expect(f.importModule).not.toHaveBeenCalled();
     expect(f.initial.oT).not.toHaveBeenCalled();
     expect(f.start).not.toHaveBeenCalled();
+    hook.dispose();
+  });
+
+  it("does not qualify Windows with the macOS 26.1027 Chat profile", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: "26.1027.30824",
+      desktopPlatform: "win32",
+    });
+    f.assets.splice(
+      0,
+      f.assets.length,
+      "app-initial-60f141238751.js",
+      "app-shared-7815d5a1a42a.js",
+    );
+    const hook = installNativeChatVoiceHook(f);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hook.status).toBe("unsupported");
+    expect(f.importModule).not.toHaveBeenCalled();
+    expect(f.scope.set).not.toHaveBeenCalled();
+    expect(f.createRoot).not.toHaveBeenCalled();
     hook.dispose();
   });
 
