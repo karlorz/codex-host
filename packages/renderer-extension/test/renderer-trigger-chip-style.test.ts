@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyRendererTriggerChipSqueezeRoot,
@@ -26,8 +26,24 @@ function fakeElement(): HTMLElement {
   } as unknown as HTMLElement;
 }
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("Renderer trigger chip squeeze layout", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  let frames: Map<number, FrameRequestCallback>;
+  const flushFrame = () => {
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach((callback) => callback(0));
+  };
+  beforeEach(() => {
+    frames = new Map();
+    let next = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++next, callback);
+      return next;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  });
 
   it("follows the composer width and restores the normal layout on expansion", () => {
     let onResize: ResizeObserverCallback | undefined;
@@ -57,9 +73,12 @@ describe("Renderer trigger chip squeeze layout", () => {
     expect(attributes.has("data-codexhost-compact-composer")).toBe(true);
     width = 480;
     onResize?.([{ contentRect: { width: 480 } } as ResizeObserverEntry], {} as ResizeObserver);
+    expect(attributes.has("data-codexhost-compact-composer")).toBe(true);
+    flushFrame();
     expect(attributes.has("data-codexhost-compact-composer")).toBe(false);
     width = 320;
     onResize?.([{ contentRect: { width: 320 } } as ResizeObserverEntry], {} as ResizeObserver);
+    flushFrame();
     expect(attributes.has("data-codexhost-compact-composer")).toBe(true);
     stop();
     expect(disconnect).toHaveBeenCalledOnce();
@@ -99,6 +118,7 @@ describe("Renderer trigger chip squeeze layout", () => {
         [{ target: composer, contentRect: { width: contentWidth } } as ResizeObserverEntry],
         {} as ResizeObserver,
       );
+      flushFrame();
       expect(attributes.has("data-codexhost-compact-composer")).toBe(compact);
       stop();
     },
@@ -137,4 +157,38 @@ describe("Renderer trigger chip squeeze layout", () => {
     ).not.toThrow();
     expect(() => applyRendererTriggerChipSqueezeTrigger({} as HTMLElement)).not.toThrow();
   });
+});
+
+it("cancels pending compact writes when the Composer is disposed", () => {
+  let resize: ResizeObserverCallback | undefined;
+  let frame: FrameRequestCallback | undefined;
+  const cancel = vi.fn();
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frame = callback;
+    return 7;
+  });
+  vi.stubGlobal("cancelAnimationFrame", cancel);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const toggle = vi.fn();
+  const composer = {
+    getBoundingClientRect: () => ({ width: 500 }),
+    toggleAttribute: toggle,
+    removeAttribute: vi.fn(),
+  } as unknown as Element;
+  const stop = observeRendererCompactComposer(composer);
+  resize?.([], {} as ResizeObserver);
+  resize?.([], {} as ResizeObserver);
+  expect(frame).toBeTypeOf("function");
+  stop();
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(7);
+  expect(toggle).toHaveBeenCalledTimes(1);
 });

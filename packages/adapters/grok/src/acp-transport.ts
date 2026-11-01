@@ -41,6 +41,14 @@ import {
   grokCompactionEventFromUpdate,
   isGrokExtensionSessionUpdateMethod,
 } from "./grok-compaction.js";
+import {
+  GROK_SCHEDULER_DELETE_METHOD,
+  GROK_TASK_KILL_METHOD,
+  GROK_TASK_LIST_METHOD,
+  grokBackgroundEventFromUpdate,
+  isGrokBackgroundNotificationMethod,
+  type GrokBackgroundTransportEvent,
+} from "./grok-background.js";
 import { grokSubagentEventFromUpdate } from "./grok-subagent.js";
 import {
   GROK_COMPACT_CONVERSATION_FALLBACK_METHOD,
@@ -83,7 +91,12 @@ import {
 } from "./grok-interject.js";
 
 export type GrokTransportFaultKind =
-  "notInstalled" | "authenticationRequired" | "unavailable" | "protocolError" | "processExited";
+  | "notInstalled"
+  | "authenticationRequired"
+  | "unavailable"
+  | "protocolError"
+  | "processExited"
+  | "unsupported";
 
 export class GrokTransportError extends Error {
   readonly diagnostic: string | undefined;
@@ -182,7 +195,8 @@ export type GrokTransportEvent =
       output?: string;
       metadata?: Record<string, unknown>;
     }
-  | { type: "interaction.resolved"; toolCallId: string; metadata?: Record<string, unknown> };
+  | { type: "interaction.resolved"; toolCallId: string; metadata?: Record<string, unknown> }
+  | GrokBackgroundTransportEvent;
 
 export interface GrokPermissionRequest {
   request: RequestPermissionRequest;
@@ -388,6 +402,8 @@ function transportEvent(
   }
   const compaction = grokCompactionEventFromUpdate(extension);
   if (compaction) return compaction;
+  const background = grokBackgroundEventFromUpdate(extension);
+  if (background) return { ...background, ...(metadata ? { metadata } : {}) };
   const subagent = grokSubagentEventFromUpdate(extension);
   if (subagent) return subagent;
   const resolvedToolCallId = grokElicitationResolvedToolCallId(extension);
@@ -1323,9 +1339,87 @@ export class GrokAcpTransport {
   }
 
   #handleExtensionNotification(method: string, params: Record<string, unknown>): void {
-    if (!isGrokExtensionSessionUpdateMethod(method)) return;
+    if (
+      !isGrokExtensionSessionUpdateMethod(method) &&
+      !isGrokBackgroundNotificationMethod(method)
+    ) {
+      return;
+    }
     if (typeof params.sessionId !== "string" || !isRecord(params.update)) return;
     this.#handleUpdate(params as SessionNotification);
+  }
+
+  async killTask(
+    taskId: string,
+    source: "clientUi" | "teardown" = "clientUi",
+  ): Promise<"killed" | "already_exited" | "not_found"> {
+    const result = await this.#extResult(GROK_TASK_KILL_METHOD, {
+      sessionId: this.sessionId,
+      taskId,
+      source,
+    });
+    if (
+      !isRecord(result) ||
+      result.taskId !== taskId ||
+      !["killed", "already_exited", "not_found"].includes(String(result.outcome))
+    )
+      throw new GrokTransportError("protocolError", "Malformed Grok task kill response");
+    return result.outcome as "killed" | "already_exited" | "not_found";
+  }
+
+  async listTasks(): Promise<unknown> {
+    return this.#extResult(GROK_TASK_LIST_METHOD, { sessionId: this.sessionId });
+  }
+
+  async getSubagent(id: string): Promise<unknown> {
+    return this.#extResult("x.ai/subagent/get", { subagentId: id, block: false });
+  }
+
+  async deleteScheduledTask(taskId: string): Promise<boolean> {
+    const result = await this.#extResult(GROK_SCHEDULER_DELETE_METHOD, {
+      sessionId: this.sessionId,
+      taskId,
+    });
+    if (!isRecord(result) || result.taskId !== taskId || typeof result.deleted !== "boolean")
+      throw new GrokTransportError("protocolError", "Malformed Grok scheduler delete response");
+    return result.deleted;
+  }
+
+  async #extResult(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (!this.#connection || !this.#sessionId || this.#closed || this.#closing) {
+      throw new GrokTransportError("unavailable", "Grok ACP Session is unavailable");
+    }
+    let raw: unknown;
+    try {
+      raw = await withTimeout(
+        this.#connection.request(method, params),
+        this.#options.commandTimeoutMs,
+        `Grok ${method}`,
+      );
+    } catch (error) {
+      if (!isRecord(error) || error.code !== -32601) throw error;
+      try {
+        raw = await withTimeout(
+          this.#connection.request(`_${method}`, params),
+          this.#options.commandTimeoutMs,
+          `Grok _${method}`,
+        );
+      } catch (fallback) {
+        if (isRecord(fallback) && fallback.code === -32601)
+          throw new GrokTransportError("unsupported", `Grok does not support ${method}`);
+        throw fallback;
+      }
+    }
+    if (isRecord(raw) && raw.error !== undefined && raw.error !== null) {
+      const message =
+        typeof raw.error === "string"
+          ? raw.error
+          : isRecord(raw.error) && typeof raw.error.message === "string"
+            ? raw.error.message
+            : `Grok ${method} failed`;
+      throw new GrokTransportError("unavailable", message);
+    }
+    return isRecord(raw) && "result" in raw ? raw.result : raw;
   }
 
   #handlePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {

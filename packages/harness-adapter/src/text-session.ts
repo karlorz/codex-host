@@ -1,3 +1,4 @@
+import type { HarnessBackgroundActivityCapability } from "./background-activity.js";
 import type { HarnessGoalCapability } from "./goals.js";
 import type { HarnessGoal } from "@codexhost/shared-contracts";
 import type { HarnessUsageStatisticsCapability } from "./usage-statistics.js";
@@ -635,6 +636,7 @@ export interface HarnessSession {
   readonly outputs: AsyncIterable<HarnessOutput>;
   readonly commands?: HarnessCommandCapability;
   readonly goals?: HarnessGoalCapability;
+  readonly backgroundActivity?: HarnessBackgroundActivityCapability;
   /** Real question-card activity. Only return a deadline acknowledged by the native timer. */
   questionActivity?(
     interactionId: HostInteractionId,

@@ -20,6 +20,7 @@ import {
   mergeLiveHarnessCommands,
   validateHostApprovalResponse,
   type HarnessAdapter,
+  type HarnessBackgroundActivityCapability,
   type HarnessCommandAccepted,
   type HarnessCommandCapability,
   type HarnessCommandInvocation,
@@ -35,11 +36,13 @@ import {
   type HostAgentMessageItem,
   type HostApprovalInteraction,
   type HostCommand,
+  type HostCommandExecutionItem,
   type HostContextCompactionItem,
   type HostEvent,
   type HostFileChangeItem,
   type HostItem,
   type HostItemOutcome,
+  type HostSubagentState,
   type HostItemSnapshot,
   type HostReasoningItem,
   type HostThreadSnapshot,
@@ -75,6 +78,7 @@ import {
   type HarnessId,
   type HarnessThinkingOptionId,
   type HostInteractionId,
+  type HostTurnId,
   type NativeCheckpointRef,
   type NativeSessionRef,
   type NativeTurnRef,
@@ -152,6 +156,16 @@ import {
   type GrokProjectedToolItem,
 } from "./grok-tool-output.js";
 import {
+  applyGrokScheduledEvent,
+  collectGrokScheduledLoops,
+  grokBackgroundCompletionOutcome,
+  grokBackgroundTaskId,
+  grokToolIsBackgrounded,
+  type GrokScheduledLoop,
+} from "./grok-background.js";
+import { createGrokActivity } from "./grok-activity.js";
+import { GrokBackgroundItems } from "./grok-background-items.js";
+import {
   modelStateFromInitialize,
   modelStateFromSessionResponse,
   stateForGrokModel,
@@ -228,12 +242,20 @@ export interface GrokAcpTransportLike {
     onElicitation(request: GrokMcpElicitFormRequest): Promise<GrokMcpElicitResponse>;
     onQuestion(request: GrokQuestionRequest): Promise<GrokQuestionResponse>;
   }): void;
+  killTask?(
+    taskId: string,
+    source?: "clientUi" | "teardown",
+  ): Promise<"killed" | "already_exited" | "not_found">;
+  listTasks?(): Promise<unknown>;
+  getSubagent?(id: string): Promise<unknown>;
+  deleteScheduledTask?(taskId: string): Promise<boolean>;
 }
 
 interface ActiveTool {
   item: GrokProjectedToolItem;
   status?: string;
   generatedImage?: GrokGeneratedImage;
+  rawInput?: unknown;
 }
 
 interface ActiveApproval {
@@ -411,6 +433,20 @@ class GrokHarnessSession implements HarnessSession {
   #goalHelpers: Array<
     Extract<GrokTransportEvent, { type: "subagent.spawned" | "subagent.finished" }>
   > = [];
+  readonly backgroundActivity: HarnessBackgroundActivityCapability;
+  #nativeTasksRunning = false;
+  readonly #backgroundItems: GrokBackgroundItems;
+  readonly #loops: Map<string, GrokScheduledLoop>;
+  readonly #observedLoopIds = new Set<string>();
+  readonly #activityChildren = new Map<string, HostSubagentState>();
+  readonly #earlyBackground = new Map<
+    string,
+    Extract<GrokTransportEvent, { type: "task.backgrounded" }>
+  >();
+  readonly #pendingBackground = new Map<
+    string,
+    { turnId: HostTurnId; item: HostCommandExecutionItem }
+  >();
 
   constructor(
     cwd: string,
@@ -427,6 +463,7 @@ class GrokHarnessSession implements HarnessSession {
       randomUUID: () => string;
       refreshCredits: () => Promise<unknown>;
       sessionDirectory: string;
+      readChild(id: string): Promise<HarnessResult<HostThreadSnapshot>>;
       toolOutputLimit: number;
     },
   ) {
@@ -441,14 +478,52 @@ class GrokHarnessSession implements HarnessSession {
     this.#closeTimeoutMs = options.closeTimeoutMs;
     this.#randomUUID = options.randomUUID;
     this.#toolOutputLimit = options.toolOutputLimit;
+    this.#backgroundItems = new GrokBackgroundItems({
+      outputLimit: options.toolOutputLimit,
+      emit: (event) => this.#event(event),
+    });
+    this.#loops = collectGrokScheduledLoops(options.history);
+    for (const event of options.history) this.#observeActivityChild(event);
+    this.backgroundActivity = createGrokActivity({
+      sessionId: opened.sessionId,
+      directory: options.sessionDirectory,
+      loops: this.#loops,
+      observedLoopIds: this.#observedLoopIds,
+      children: this.#activityChildren,
+      outputLimit: options.toolOutputLimit,
+      commandItemId: (taskId) => this.#backgroundItems.commandItemId(taskId),
+      observeTasks: (tasks) => {
+        this.#nativeTasksRunning = tasks.some((task) => !task.completed);
+        for (const task of tasks)
+          if (task.completed)
+            this.#backgroundItems.settle(
+              task.task_id,
+              grokBackgroundCompletionOutcome({
+                ...(task.exit_code !== undefined ? { exitCode: task.exit_code } : {}),
+                ...(task.signal ? { signal: task.signal } : {}),
+                ...(task.explicitly_killed ? { explicitlyKilled: true } : {}),
+              }),
+              task.output,
+              undefined,
+              task.exit_code,
+              task.truncated,
+            );
+      },
+      readChild: options.readChild,
+      isOpen: () => this.#phase === "open",
+      ...(transport.getSubagent ? { getChild: transport.getSubagent.bind(transport) } : {}),
+      ...(transport.listTasks ? { listTasks: transport.listTasks.bind(transport) } : {}),
+      ...(transport.killTask ? { killTask: transport.killTask.bind(transport) } : {}),
+      ...(transport.deleteScheduledTask
+        ? { deleteLoop: transport.deleteScheduledTask.bind(transport) }
+        : {}),
+    });
     this.initialUsage = options.initialUsage ?? null;
     this.#usage = this.initialUsage;
     this.#initialCostUsd = this.initialUsage?.totalCostUsd ?? 0;
     this.capabilities = ((session) => ({
       ...capabilitiesForModels(modelState),
-      ...(transport.goalControl && transport.observeBackground
-        ? { autonomousTurns: { observe: true as const } }
-        : {}),
+      ...(transport.observeBackground ? { autonomousTurns: { observe: true as const } } : {}),
       get steer(): boolean {
         return session.#canSteerActiveTurn();
       },
@@ -529,9 +604,13 @@ class GrokHarnessSession implements HarnessSession {
         () => transport.getHistory(),
       );
       this.goals = goals;
+    }
+    if (transport.observeBackground) {
+      const goals = this.goals;
       transport.observeBackground({
         onEvent: (event) => {
           if (event.type === "goal.changed") {
+            if (!goals) return;
             void goals
               .observe(event.update)
               .catch((error) =>
@@ -539,6 +618,7 @@ class GrokHarnessSession implements HarnessSession {
               );
             return;
           }
+          if (this.#applyBackgroundLifecycle(event)) return;
           this.#backgroundQueue = this.#backgroundQueue
             .then(() => this.#backgroundEvent(event))
             .catch((error) =>
@@ -562,7 +642,7 @@ class GrokHarnessSession implements HarnessSession {
           return this.#active ? this.#active.questions.ask(request) : { outcome: "cancelled" };
         },
       });
-      void this.goals.read();
+      void goals?.read();
     }
   }
 
@@ -818,7 +898,198 @@ class GrokHarnessSession implements HarnessSession {
   }
 
   hasBackgroundWork(): boolean {
-    return this.goals?.active === true;
+    return (
+      this.goals?.active === true ||
+      this.#backgroundItems.taskIds().length > 0 ||
+      this.#nativeTasksRunning ||
+      this.#loops.size > 0 ||
+      this.#pendingBackground.size > 0 ||
+      [...this.#activityChildren.values()].some(
+        (child) => child.status === "running" || child.status === "pending",
+      )
+    );
+  }
+
+  async stopBackgroundWork(): Promise<HarnessResult<void>> {
+    const listed = await this.backgroundActivity.list();
+    if (!listed.ok) return listed;
+    const ids = [
+      ...new Set([
+        ...this.#backgroundItems.taskIds(),
+        ...listed.value
+          .filter(
+            (entry) =>
+              (entry.kind === "task" || entry.kind === "monitor") && entry.status === "running",
+          )
+          .map((entry) => entry.id.slice("task:".length)),
+      ]),
+    ];
+    if (ids.length === 0) return { ok: true, value: undefined };
+    const kill = this.#transport.killTask?.bind(this.#transport);
+    if (!kill) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Grok cannot stop background tasks on this transport",
+          retryable: false,
+        },
+      };
+    }
+    try {
+      await Promise.all(ids.map((taskId) => kill(taskId, "teardown")));
+      return { ok: true, value: undefined };
+    } catch (error) {
+      return { ok: false, error: normalizeError(error, "nativeFailure") };
+    }
+  }
+
+  #observeActivityChild(event: GrokTransportEvent): void {
+    if (event.type === "subagent.spawned") {
+      this.#activityChildren.set(event.nativeSubagentId, {
+        subagentId: event.nativeSubagentId,
+        nativeSubagentId: event.nativeSubagentId,
+        description: event.description ?? "Grok Subagent",
+        background: true,
+        status: "running",
+        ...(event.role ? { role: event.role } : {}),
+        ...(event.model ? { model: event.model } : {}),
+      });
+    }
+    if (event.type === "subagent.finished") {
+      const child = this.#activityChildren.get(event.nativeSubagentId);
+      if (child)
+        this.#activityChildren.set(event.nativeSubagentId, {
+          ...child,
+          status: event.status,
+          ...(event.resultSummary ? { resultSummary: event.resultSummary } : {}),
+        });
+    }
+  }
+
+  #applyBackgroundLifecycle(event: GrokTransportEvent): boolean {
+    this.#observeActivityChild(event);
+    if (event.type === "task.backgrounded") {
+      this.#nativeTasksRunning = true;
+      this.#acceptBackgrounded(event);
+      return true;
+    }
+    if (event.type === "task.completed") {
+      const outcome = grokBackgroundCompletionOutcome(event);
+      this.#backgroundItems.settle(
+        event.taskId,
+        outcome,
+        event.output,
+        event.outputFile,
+        event.exitCode,
+        event.truncated,
+      );
+      void this.backgroundActivity.list();
+      return true;
+    }
+    if (event.type === "monitor.event") {
+      this.#backgroundItems.append(
+        event.taskId,
+        event.text.endsWith("\n") ? event.text : `${event.text}\n`,
+      );
+      return true;
+    }
+    if (
+      event.type === "scheduled.created" ||
+      event.type === "scheduled.fired" ||
+      event.type === "scheduled.deleted"
+    ) {
+      if (
+        event.type === "scheduled.fired" &&
+        event.subagentId &&
+        !this.#activityChildren.has(event.subagentId)
+      )
+        this.#activityChildren.set(event.subagentId, {
+          subagentId: event.subagentId,
+          nativeSubagentId: event.subagentId,
+          description: event.prompt,
+          background: true,
+          status: "running",
+        });
+      applyGrokScheduledEvent(this.#loops, event, this.#observedLoopIds);
+      return true;
+    }
+    return false;
+  }
+
+  #holdBackgroundCommand(
+    active: ActiveTurn,
+    callId: string,
+    item: HostCommandExecutionItem,
+    rawOutput?: unknown,
+  ): void {
+    active.tools.delete(callId);
+    this.#event({ type: "item.detached", turnId: active.command.turnId, itemId: item.itemId });
+    const taskId = grokBackgroundTaskId(rawOutput);
+    const held = { turnId: active.command.turnId, item };
+    if (taskId) {
+      this.#followBackground(callId, held, {
+        taskId,
+        kind: "run",
+        description: item.command,
+      });
+      return;
+    }
+    const early = this.#earlyBackground.get(callId);
+    if (early) {
+      this.#earlyBackground.delete(callId);
+      this.#followBackground(callId, held, early);
+    } else this.#pendingBackground.set(callId, held);
+  }
+
+  #acceptBackgrounded(event: Extract<GrokTransportEvent, { type: "task.backgrounded" }>): void {
+    const active = this.#active;
+    const tool = active?.tools.get(event.toolCallId);
+    if (tool?.item.type === "commandExecution" && active) {
+      active.tools.delete(event.toolCallId);
+      this.#event({
+        type: "item.detached",
+        turnId: active.command.turnId,
+        itemId: tool.item.itemId,
+      });
+      this.#followBackground(
+        event.toolCallId,
+        { turnId: active.command.turnId, item: tool.item },
+        event,
+      );
+      return;
+    }
+    const pending = this.#pendingBackground.get(event.toolCallId);
+    if (pending) this.#followBackground(event.toolCallId, pending, event);
+    else if (!this.#backgroundItems.hasCallId(event.toolCallId))
+      this.#earlyBackground.set(event.toolCallId, event);
+    else {
+      const running = this.#backgroundItems.running().find((r) => r.callId === event.toolCallId);
+      if (running) this.#followBackground(event.toolCallId, running, event);
+    }
+  }
+
+  #followBackground(
+    callId: string,
+    held: { turnId: HostTurnId; item: HostCommandExecutionItem },
+    event: {
+      taskId: string;
+      kind: "run" | "monitor";
+      description?: string;
+      command?: string;
+      outputFile?: string;
+    },
+  ): void {
+    this.#pendingBackground.delete(callId);
+    this.#backgroundItems.follow({
+      turnId: held.turnId,
+      callId,
+      taskId: event.taskId,
+      item: held.item,
+      kind: event.kind,
+      description: event.description ?? event.command ?? held.item.command,
+      ...(event.outputFile ? { outputFile: event.outputFile } : {}),
+    });
   }
 
   async #backgroundEvent(event: GrokTransportEvent): Promise<void> {
@@ -931,6 +1202,30 @@ class GrokHarnessSession implements HarnessSession {
   ): Promise<HarnessResult<HarnessCommandAccepted>> {
     if (this.#phase !== "open")
       return { ok: false, error: invalidState("Grok Session is not open") };
+    if (command.commandId === "grok.loop") {
+      if (
+        command.arguments &&
+        (Object.keys(command.arguments).some((key) => key !== "text") ||
+          (command.arguments.text !== undefined && typeof command.arguments.text !== "string"))
+      )
+        return {
+          ok: false,
+          error: {
+            code: "invalidRequest",
+            message: "Grok loop accepts a text argument",
+            retryable: false,
+          },
+        };
+      const text = String(command.arguments?.text ?? "").trim();
+      return this.#startTurn(
+        {
+          type: "turn.start",
+          turnId: command.turnId,
+          input: [{ type: "text", text: text ? `/loop ${text}` : "/loop" }],
+        },
+        true,
+      );
+    }
     if (command.commandId === "grok.goal" || command.commandId === "grok.desktop-goal") {
       const prompt = grokGoalPrompt(command.arguments);
       if (!prompt.ok) return prompt;
@@ -1534,6 +1829,7 @@ class GrokHarnessSession implements HarnessSession {
         : undefined,
     );
     if (contextUsage) this.#publishUsage(contextUsage, active.command.turnId);
+    if (this.#applyBackgroundLifecycle(event)) return;
     if (event.type === "agent.text") this.#appendAgent(active, event.text, event.messageId);
     else if (event.type === "agent.thought")
       this.#appendReasoning(active, event.text, event.messageId);
@@ -1743,8 +2039,15 @@ class GrokHarnessSession implements HarnessSession {
       item,
       ...(event.status ? { status: event.status } : {}),
       ...(generatedImage ? { generatedImage } : {}),
+      ...(event.rawInput !== undefined ? { rawInput: event.rawInput } : {}),
     });
     this.#event({ type: "item.started", turnId: active.command.turnId, item });
+    const background = this.#earlyBackground.get(event.callId);
+    if (background) {
+      this.#earlyBackground.delete(event.callId);
+      this.#acceptBackgrounded(background);
+      return;
+    }
     if (event.status === "completed" || event.status === "failed") {
       this.#completeTool(active, event.callId, event.status, event.content, event.rawOutput);
     }
@@ -1786,6 +2089,22 @@ class GrokHarnessSession implements HarnessSession {
         ...(role ? { role } : {}),
         ...(nativeSubagentId ? { nativeSubagentId } : {}),
       });
+      return;
+    }
+    if (
+      this.#backgroundItems.hasCallId(event.callId) ||
+      this.#pendingBackground.has(event.callId)
+    ) {
+      const projection = projectGrokToolOutput(
+        event.content,
+        event.rawOutput,
+        this.#toolOutputLimit,
+      );
+      const text =
+        projection.output?.content
+          .flatMap((entry) => (entry.type === "text" ? [entry.text] : []))
+          .join("") ?? "";
+      if (text) this.#backgroundItems.replaceSnapshot(event.callId, text);
       return;
     }
     const tool = active.tools.get(event.callId);
@@ -1836,11 +2155,19 @@ class GrokHarnessSession implements HarnessSession {
   ): void {
     const tool = active.tools.get(callId);
     if (!tool) return;
-    active.tools.delete(callId);
     const projection = projectGrokToolOutput(content, rawOutput, this.#toolOutputLimit);
     if (hasGrokToolProjection(projection)) {
       tool.item = applyGrokToolProjection(tool.item, projection);
     }
+    if (
+      tool.item.type === "commandExecution" &&
+      status !== "failed" &&
+      grokToolIsBackgrounded(rawOutput, tool.rawInput)
+    ) {
+      this.#holdBackgroundCommand(active, callId, tool.item, rawOutput);
+      return;
+    }
+    active.tools.delete(callId);
     const outcome: HostItemOutcome =
       status === "failed"
         ? {
@@ -1954,7 +2281,6 @@ class GrokHarnessSession implements HarnessSession {
 
   #bufferGoalHelper(event: GrokTransportEvent): boolean {
     if (event.type === "subagent.spawned" && event.parentPromptId) {
-      // The terminal supplies the native owning key. Do not guess from arrival order.
       if (!this.#snapshot.turns.some((t) => t.nativeTurnRef.nativeTurnKey === event.parentPromptId))
         this.#goalHelpers.push(event);
       return true;
@@ -2157,7 +2483,10 @@ class GrokHarnessSession implements HarnessSession {
       this.#completeItem(active, active.compactionItem, itemOutcome);
       active.compactionItem = null;
     }
-    for (const tool of active.tools.values()) this.#completeItem(active, tool.item, itemOutcome);
+    for (const [callId, tool] of active.tools) {
+      if (this.#pendingBackground.has(callId) || this.#backgroundItems.hasCallId(callId)) continue;
+      this.#completeItem(active, tool.item, itemOutcome);
+    }
     active.tools.clear();
     for (const item of persistedMessages) {
       if (item.itemId === pendingId) continue;
@@ -2214,6 +2543,9 @@ class GrokHarnessSession implements HarnessSession {
     if (this.#phase === "closed") return;
     this.#phase = "closing";
     this.goals?.close();
+    this.#backgroundItems.abandonAll("Grok Session closed");
+    this.#pendingBackground.clear();
+    this.#loops.clear();
     const active = this.#active;
     if (active) {
       active.cancellationRequested = true;
@@ -2241,6 +2573,9 @@ class GrokHarnessSession implements HarnessSession {
     if (this.#phase !== "open") return;
     const normalized = normalizeError(error, "processExited");
     this.goals?.close();
+    this.#backgroundItems.abandonAll(normalized.message);
+    this.#pendingBackground.clear();
+    this.#loops.clear();
     if (this.#active) this.#finish(this.#active, { status: "failed", error: normalized });
     this.#phase = "faulted";
     this.#event({ type: "session.faulted", error: normalized });
@@ -2729,10 +3064,17 @@ export class GrokAdapter implements HarnessAdapter {
           randomUUID: this.#dependencies.randomUUID,
           refreshCredits: () => this.refreshCredits(),
           sessionDirectory,
+          readChild: (id) =>
+            this.subagents.readSnapshot({
+              parent: nativeRef(transport.sessionId),
+              nativeSubagentId: id,
+              cwd,
+            }),
           toolOutputLimit: this.#toolOutputLimit,
         },
       );
       session = openedSession;
+      await openedSession.backgroundActivity.list();
       this.#sessions.add(openedSession);
       this.#scheduleCreditsRefresh();
       return { ok: true, value: openedSession };

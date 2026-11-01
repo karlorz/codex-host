@@ -110,7 +110,7 @@ describe("installed Harness composition", () => {
       "claude-code": ["/compact", "/init", "/recap"],
       "deepseek-harness": ["/compact", "/dsh-goal", "/plan"],
       opencode: ["/compact"],
-      grok: ["/compact", "/goal", "/grok-goal"],
+      grok: ["/compact", "/goal", "/grok-goal", "/loop"],
       omp: ["/compact"],
       antigravity: [
         "/plan",

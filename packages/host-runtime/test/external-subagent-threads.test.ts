@@ -95,6 +95,57 @@ afterEach(async () => {
 });
 
 describe("External native child identity", () => {
+  it("uses the native activity path for discovered child Threads as well as parent activity", async () => {
+    const { repository, parent } = await fixture();
+    try {
+      const child = {
+        subagentId: "loop-child",
+        nativeSubagentId: "loop-child",
+        description: "Loop visibility check",
+        background: true,
+        status: "completed" as const,
+      };
+      const record = await repository.materializeSubagent(parent, child);
+      if (!record) throw new Error("Missing child");
+      for (const running of [true, false]) {
+        expect(
+          externalThreadValue({ record, turns: [], sessionId: parentId, running }),
+        ).toMatchObject({
+          source: {
+            subAgent: {
+              thread_spawn: { parent_thread_id: parentId, agent_path: child.description },
+            },
+          },
+          status: { type: running ? "active" : "idle" },
+          parentThreadId: parentId,
+          canAcceptDirectInput: false,
+          turns: [],
+        });
+      }
+      const snapshot = turn(sourceRef, "parent", [child.nativeSubagentId]);
+      const entry = snapshot.items[0];
+      if (!entry) throw Error("Missing fixture delegation");
+      entry.item = {
+        type: "subagentDelegation",
+        itemId: hostItemIdSchema.parse("spawn"),
+        operation: "spawn",
+        subagents: [child],
+      };
+      const projected = await repository.alignSnapshot(parent, { turns: [snapshot] });
+      expect(projected.turns[0]?.items).toContainEqual(
+        expect.objectContaining({
+          type: "subAgentActivity",
+          agentThreadId: record.hostThreadId,
+          agentPath: child.description,
+        }),
+      );
+      expect(externalThreadValue({ record: parent, turns: [], sessionId: parentId }).source).toBe(
+        "vscode",
+      );
+    } finally {
+      await repository.close();
+    }
+  });
   it("uses native history time for an opened idle child rather than its mapping creation time", async () => {
     const { repository, parent } = await fixture();
     try {

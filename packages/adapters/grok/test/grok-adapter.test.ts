@@ -111,6 +111,9 @@ class FakeGrokTransport implements GrokAcpTransportLike {
   #onElicitation: ((request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>) | null =
     null;
   #onQuestion: ((request: GrokQuestionRequest) => Promise<GrokQuestionResponse>) | null = null;
+  #background?: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0];
+  readonly killTask = vi.fn(async () => "killed" as const);
+  readonly deleteScheduledTask = vi.fn(async () => true);
   #resolve: ((response: PromptResponse) => void) | null = null;
   #compactResolve: ((result: GrokCompactResult) => void) | null = null;
   #compactOnEvent: ((event: GrokTransportEvent) => void) | null = null;
@@ -207,6 +210,16 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     return new Promise((resolve) => {
       this.#resolve = resolve;
     });
+  }
+
+  observeBackground(
+    observer: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0],
+  ): void {
+    this.#background = observer;
+  }
+
+  backgroundEvent(event: GrokTransportEvent): void {
+    this.#background?.onEvent(event);
   }
 
   event(event: GrokTransportEvent): void {
@@ -3598,6 +3611,7 @@ describe("Grok Adapter ACP projection", () => {
           { id: "grok.compact", invocation: "/compact", argumentMode: "text" },
           { id: "grok.desktop-goal", invocation: "/goal", argumentMode: "text" },
           { id: "grok.goal", invocation: "/grok-goal", argumentMode: "text" },
+          { id: "grok.loop", invocation: "/loop", argumentMode: "text" },
         ],
       },
     });
@@ -4312,6 +4326,198 @@ it("observes independent native goal worker rounds without admitting a command T
     await adapter.close();
     await output;
   }
+});
+
+it.each(["event", "list"])(
+  "retains short native-truncated background completion through %s",
+  async (source) => {
+    const transport = new FakeGrokTransport();
+    let tasks: unknown[] = [];
+    Object.assign(transport, { listTasks: async () => ({ tasks }) });
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    try {
+      await session.execute({
+        type: "turn.start",
+        turnId: hostTurnIdSchema.parse("clipped-run"),
+        input: [{ type: "text", text: "run" }],
+      });
+      await nextEvent(iterator);
+      transport.event({
+        type: "tool.call",
+        callId: "clipped-call",
+        name: "run_terminal_command",
+        title: "run",
+        rawInput: { command: "test" },
+        status: "in_progress",
+      });
+      await nextEvent(iterator);
+      transport.event({
+        type: "task.backgrounded",
+        toolCallId: "clipped-call",
+        taskId: "clipped-task",
+        command: "test",
+        kind: "run",
+      });
+      await nextEvent(iterator);
+      transport.finish();
+      await nextEvent(iterator);
+      if (source === "event")
+        transport.backgroundEvent({
+          type: "task.completed",
+          taskId: "clipped-task",
+          output: "short",
+          exitCode: 0,
+          truncated: true,
+        });
+      else {
+        tasks = [
+          {
+            task_id: "clipped-task",
+            command: "test",
+            output: "short",
+            exit_code: 0,
+            completed: true,
+            truncated: true,
+            is_backgrounded: true,
+            owner_session_id: transport.sessionId,
+          },
+        ];
+        expect(await session.backgroundActivity?.list()).toMatchObject({ ok: true });
+      }
+      expect(await nextEvent(iterator)).toMatchObject({ type: "item.updated" });
+      expect(await nextEvent(iterator)).toMatchObject({
+        type: "item.completed",
+        snapshot: { item: { output: "short", outputTruncated: true, exitCode: 0 } },
+      });
+    } finally {
+      await adapter.close();
+    }
+  },
+);
+
+it("detaches native Run output and keeps idle Loop children separate from parent Turns", async () => {
+  const transport = new FakeGrokTransport();
+  const tasks: unknown[] = [];
+  Object.assign(transport, { listTasks: async () => ({ tasks }) });
+  const { adapter, session } = await openedSession(transport);
+  const iterator = session.outputs[Symbol.asyncIterator]();
+  const turnId = hostTurnIdSchema.parse("turn-bg-run");
+  await session.execute({ type: "turn.start", turnId, input: [{ type: "text", text: "watch" }] });
+  expect((await nextEvent(iterator)).type).toBe("turn.started");
+  transport.event({
+    type: "tool.call",
+    callId: "bash-1",
+    title: "run_terminal_command",
+    name: "run_terminal_command",
+    rawInput: { command: "sleep 30" },
+    status: "in_progress",
+  });
+  const started = await nextEvent(iterator);
+  expect(started).toMatchObject({
+    type: "item.started",
+    item: { type: "commandExecution", command: "sleep 30" },
+  });
+  transport.event({
+    type: "task.backgrounded",
+    toolCallId: "bash-1",
+    taskId: "task-run-1",
+    command: "sleep 30",
+    kind: "run",
+    description: "Disposable task",
+  });
+  expect(await nextEvent(iterator)).toMatchObject({ type: "item.detached" });
+  tasks.push({
+    task_id: "task-run-1",
+    command: "sleep 30",
+    output: "",
+    completed: false,
+    truncated: false,
+    is_backgrounded: true,
+  });
+  expect(await session.backgroundActivity?.list()).toMatchObject({
+    ok: true,
+    value: [
+      expect.objectContaining({
+        id: "task:task-run-1",
+        commandItemId: started.type === "item.started" ? started.item.itemId : undefined,
+      }),
+    ],
+  });
+  expect(session.hasBackgroundWork?.()).toBe(true);
+  transport.finish();
+  expect(await nextEvent(iterator)).toMatchObject({ type: "turn.completed", turnId });
+  transport.backgroundEvent({
+    type: "subagent.spawned",
+    nativeSubagentId: "loop-child-1",
+    description: "Disposable check",
+  });
+  transport.backgroundEvent({
+    type: "scheduled.created",
+    taskId: "loop-1",
+    prompt: "Disposable check",
+    humanSchedule: "every 15 minutes",
+    nextFireAt: "2026-11-01T05:15:00Z",
+  });
+  transport.backgroundEvent({
+    type: "scheduled.fired",
+    taskId: "loop-1",
+    prompt: "Disposable check",
+    humanSchedule: "every 15 minutes",
+    nextFireAt: "2026-11-01T05:30:00Z",
+    subagentId: "loop-child-1",
+  });
+  const listed = await session.backgroundActivity?.list();
+  expect(listed).toMatchObject({
+    ok: true,
+    value: expect.arrayContaining([
+      {
+        id: "loop:loop-1",
+        kind: "loop",
+        label: "Disposable check",
+        status: "scheduled",
+        canStop: true,
+        schedule: "every 15 minutes",
+        nextRunAt: "2026-11-01T05:30:00Z",
+        relatedActivityId: "subagent:loop-child-1",
+      },
+      {
+        id: "subagent:loop-child-1",
+        kind: "subagent",
+        label: "Disposable check",
+        status: "running",
+        canStop: false,
+      },
+    ]),
+  });
+  expect(await session.readSnapshot()).toMatchObject({
+    ok: true,
+    value: { turns: expect.any(Array) },
+  });
+  await expect(session.stopBackgroundWork?.()).resolves.toMatchObject({ ok: true });
+  expect(transport.killTask).toHaveBeenCalledWith("task-run-1", "teardown");
+  expect(transport.killTask).toHaveBeenCalledTimes(1);
+  expect(await session.backgroundActivity?.list()).toMatchObject({
+    ok: true,
+    value: expect.arrayContaining([
+      expect.objectContaining({ id: "loop:loop-1", kind: "loop", status: "scheduled" }),
+    ]),
+  });
+  transport.backgroundEvent({
+    type: "task.completed",
+    taskId: "task-run-1",
+    exitCode: 0,
+    output: "done",
+  });
+  expect(await nextEvent(iterator)).toMatchObject({
+    type: "item.updated",
+    update: { type: "output.append", text: "done" },
+  });
+  expect(await nextEvent(iterator)).toMatchObject({
+    type: "item.completed",
+    snapshot: { item: { exitCode: 0 }, outcome: { status: "succeeded" } },
+  });
+  await adapter.close();
 });
 
 it.each([

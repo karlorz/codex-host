@@ -1,3 +1,4 @@
+import { installRendererBackgroundActivity } from "./renderer-background-activity.js";
 import { startVoiceSettingsSync } from "./voice-settings-sync.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
@@ -2958,6 +2959,7 @@ export function installRendererBindingProbe(
     }
     pendingReplacements.clear();
     questions.refreshContext();
+    backgroundActivity.refreshContext();
   };
 
   const scheduleScan = (refreshTargets = false): void => {
@@ -3310,7 +3312,7 @@ export function installRendererBindingProbe(
       (mounted) => isMountedComposer(mounted.composer) && mounted.control.root.isConnected,
     );
 
-  const questions = installRendererQuestions(window, () => {
+  const readActivityContext = () => {
     const visible = connectedComposers().filter(
       (mounted) =>
         mounted.composer.getClientRects().length > 0 &&
@@ -3327,7 +3329,9 @@ export function installRendererBindingProbe(
     return mounted && threadId && hostId && route
       ? { hostId, threadId, composer: mounted.composer, route: route.manager }
       : null;
-  });
+  };
+  const questions = installRendererQuestions(window, readActivityContext);
+  const backgroundActivity = installRendererBackgroundActivity(window, readActivityContext);
 
   const api: RendererBindingProbeApi = {
     remoteConnections: (request) => handleRemoteConnectionsRequest(remoteConnections, request),
@@ -3436,6 +3440,7 @@ export function installRendererBindingProbe(
       if (disposed) return;
       disposed = true;
       questions.dispose();
+      backgroundActivity.dispose();
       usageNotificationDispose();
       adapterDispose?.();
       adapterDispose = null;

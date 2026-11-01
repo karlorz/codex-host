@@ -1,3 +1,11 @@
+import { executeExternalActivity } from "./external-thread-activity.js";
+import {
+  THREAD_ACTIVITY_LIST_METHOD,
+  THREAD_ACTIVITY_READ_METHOD,
+  THREAD_ACTIVITY_STOP_METHOD,
+  threadActivityParamsSchema,
+  threadActivityItemParamsSchema,
+} from "@codexhost/shared-contracts";
 import { EXTERNAL_GOAL_METHODS, executeExternalGoal } from "./external-thread-goals.js";
 import { projectCodexGoalChanged } from "@codexhost/protocol-core";
 import {
@@ -1466,6 +1474,49 @@ export class AppServerHost {
         this.#diagnose(error);
         await this.#writer.json(rpcError(request, -32075, "External prewarm could not close"));
       }
+      return;
+    }
+    if (
+      [
+        THREAD_ACTIVITY_LIST_METHOD,
+        THREAD_ACTIVITY_READ_METHOD,
+        THREAD_ACTIVITY_STOP_METHOD,
+      ].includes(request.method)
+    ) {
+      const parsed = (
+        request.method === THREAD_ACTIVITY_LIST_METHOD
+          ? threadActivityParamsSchema
+          : threadActivityItemParamsSchema
+      ).safeParse(request.params);
+      if (!parsed.success) {
+        await this.#writer.json(rpcError(request, -32602, "Invalid background activity request"));
+        return;
+      }
+      await this.#externalRuntime.idleRelease.runOperation(parsed.data.threadId, async () => {
+        const resolution = await this.#resolveExternalThread(parsed.data.threadId);
+        if (await this.#writeResolutionError(request, resolution)) return;
+        if (resolution.kind !== "external") {
+          await this.#writer.json(
+            request.method === THREAD_ACTIVITY_LIST_METHOD
+              ? rpcEnvelope(request, { result: { supported: false, activities: [] } })
+              : rpcError(request, -32076, "Background activity is unsupported"),
+          );
+          return;
+        }
+        const thread = resolution.thread;
+        const result = await executeExternalActivity({
+          session: thread.session,
+          method: request.method,
+          ...("activityId" in parsed.data ? { activityId: String(parsed.data.activityId) } : {}),
+          isCurrent: () => this.#externalRuntime.get(thread.id) === thread,
+          materialize: (child) => this.#materializeSubagent(thread, child),
+        });
+        await this.#writer.json(
+          result.error
+            ? rpcError(request, result.error.code, result.error.message)
+            : rpcEnvelope(request, { result: jsonValueSchema.parse(result.result) }),
+        );
+      });
       return;
     }
     if (

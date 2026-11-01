@@ -31,6 +31,14 @@ export const grokCommandCatalog = harnessCommandCatalogSchema.parse({
       },
       argumentMode: "text",
     },
+    {
+      id: "grok.loop",
+      invocation: "/loop",
+      label: "Loop",
+      description: "Create a native timed Loop; include the interval and task",
+
+      argumentMode: "text",
+    },
   ],
 });
 

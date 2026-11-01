@@ -624,7 +624,7 @@ export function externalThreadValue(input: {
             thread_spawn: {
               parent_thread_id: record.subagent.parentHostThreadId,
               depth: 1,
-              agent_path: null,
+              agent_path: record.title || record.subagent.role || record.subagent.nativeSubagentId,
               agent_nickname: record.title || null,
               agent_role: record.subagent.role ?? null,
             },

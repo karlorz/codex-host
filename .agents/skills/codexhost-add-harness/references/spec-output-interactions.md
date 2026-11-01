@@ -110,3 +110,7 @@ Subagent 的 `observe` 和 `readTranscript` 分别声明。原生后台子任务
 - Interaction 的合法、非法、重复、过期和取消响应，以及响应与关闭的竞态。
 - 如果支持：自主 Turn、后台 Subagent 与普通 Turn 不串用身份、不吞事件、不破坏唯一终态。
 - 同一个最终回答在实时投影和只读历史中都能看到，且一致。
+
+## Background activity
+
+The optional `HarnessSession.backgroundActivity` capability supplies native Session-owned `list`, `read`, `stop` and optional `subagents` identities. Browser-safe shared schemas validate kind, status, native schedule text, next-run timestamp, related child activity, bounded output and truncation. Shared `codexhost/thread/activity/{list,read,stop}` routes preserve unsupported behavior and isolate replaced Sessions. The compact composer entry and detail panel are a generic product extension; Goal and Plan state remain independent. Native scheduling and lifecycle interpretation stay in the Adapter. A schedule is never a fabricated child or parent Turn. Use ordinary detached command Items and actual read-only child Threads where their semantics apply.

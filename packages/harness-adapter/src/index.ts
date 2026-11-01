@@ -136,3 +136,5 @@ export {
   type LiveCommandExclusions,
   type LiveHarnessCommand,
 } from "./live-command-catalog.js";
+
+export type { HarnessBackgroundActivityCapability } from "./background-activity.js";

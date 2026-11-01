@@ -95,6 +95,7 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok native goal helpers, Subagent identity/status, final child transcripts and Desktop projection. |
+| [`harnesses/grok/background-activity.md`](harnesses/grok/background-activity.md) | Grok native processes and children, Loop schedules in the shared summary panel, controls and the verification matrix. |
 | [`harnesses/grok/generated-images.md`](harnesses/grok/generated-images.md) | Grok Imagine files project to Desktop `imageGeneration`; keep Markdown rewrite for videos and cited paths. |
 | [`harnesses/grok/questions.md`](harnesses/grok/questions.md) | Grok native ACP questions, shared choice/Other cards, Composer availability, native timeout countdowns, and grokgod limits. |
 | [`harnesses/grok/mcp-elicitation.md`](harnesses/grok/mcp-elicitation.md) | Grok MCP consent forms project to Desktop approval, including offered Always allow; bounded empty forms only. |

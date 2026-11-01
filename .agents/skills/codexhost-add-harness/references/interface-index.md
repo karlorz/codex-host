@@ -61,6 +61,7 @@
 | `readSnapshot()` | ✓ | 只读的历史快照 | [历史](spec-history.md#只读快照) |
 | `close()` | ✓ | 幂等，并结束 outputs | [会话核心](spec-session-core.md#命令并发与错误) |
 | `refreshUsage()` | | 主动刷新用量 | [用量](spec-usage-accounts.md#会话用量快照) |
+| `backgroundActivity` | | Optional native Session list/read/stop and actual child identities; shared activity entry/panel | [输出](spec-output-interactions.md#background-activity) |
 | `questionActivity(interactionId)` | | 转发真实提问卡片活动，仅返回原生计时器确认的截止时间 | [输出](spec-output-interactions.md#question) |
 
 ## 公共命令（`execute`）

@@ -13,6 +13,9 @@ describe("Grok native goals", () => {
     expect(grokCommandCatalog.commands).toContainEqual(
       expect.objectContaining({ id: "grok.goal", invocation: "/grok-goal", argumentMode: "text" }),
     );
+    expect(grokCommandCatalog.commands).toContainEqual(
+      expect.objectContaining({ id: "grok.loop", invocation: "/loop", argumentMode: "text" }),
+    );
   });
   it.each([
     [undefined, "/goal"],

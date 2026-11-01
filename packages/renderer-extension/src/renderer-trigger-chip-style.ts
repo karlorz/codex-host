@@ -80,19 +80,32 @@ export function applyRendererTriggerChipSqueezeTrigger(trigger: HTMLElement): vo
 
 /** Follow the Composer width, which also changes when a sidebar opens. */
 export function observeRendererCompactComposer(composer: Element): () => void {
+  let compact: boolean | undefined;
+  let frame: number | null = null;
   const update = (): void => {
     const width = composer.getBoundingClientRect().width;
-    if (width > 0) {
-      composer.toggleAttribute(COMPACT_COMPOSER_ATTRIBUTE, width <= COMPACT_COMPOSER_WIDTH);
-    }
+    if (width <= 0) return;
+    const next = width <= COMPACT_COMPOSER_WIDTH;
+    if (next === compact) return;
+    compact = next;
+    composer.toggleAttribute(COMPACT_COMPOSER_ATTRIBUTE, next);
   };
   update();
   if (typeof ResizeObserver === "undefined")
     return () => composer.removeAttribute(COMPACT_COMPOSER_ATTRIBUTE);
-  const observer = new ResizeObserver(update);
+  // Compact chrome can change the observed Composer's height. Apply it outside
+  // ResizeObserver delivery so native layout observers can settle in that frame.
+  const observer = new ResizeObserver(() => {
+    if (frame !== null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      update();
+    });
+  });
   observer.observe(composer, { box: "border-box" });
   return () => {
     observer.disconnect();
+    if (frame !== null) cancelAnimationFrame(frame);
     composer.removeAttribute(COMPACT_COMPOSER_ATTRIBUTE);
   };
 }

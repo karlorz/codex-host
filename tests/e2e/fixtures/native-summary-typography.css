@@ -1,0 +1,29 @@
+/* Static-derived typography from Desktop 26.1027.30824, 5257da4ba4ae.css.
+   Fixture tokens exercise the native utility rules; this is not live UI evidence. */
+:root {
+  --spacing: 4px;
+  --text-sm: 14px;
+  --text-sm--line-height: calc(20 / 14);
+  --text-xs: 12px;
+  --text-xs--line-height: calc(16 / 12);
+  --font-weight-normal: 400;
+  --color-text-secondary: #aaa;
+}
+.text-sm {
+  font-size: var(--text-sm);
+  line-height: var(--tw-leading, var(--text-sm--line-height));
+}
+.text-xs {
+  font-size: var(--text-xs);
+  line-height: var(--tw-leading, var(--text-xs--line-height));
+}
+.font-normal {
+  --tw-font-weight: var(--font-weight-normal);
+  font-weight: var(--font-weight-normal);
+}
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+.h-7 {
+  height: calc(var(--spacing) * 7);
+}

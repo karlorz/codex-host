@@ -4,7 +4,7 @@
 
 The Grok Adapter maps native goal helper events and spawn/task tools to the existing Host `subagentDelegation` contract. Desktop receives native `subAgentActivity` Items and remains responsible for its Subagent list, collapse behavior, navigation, and visual presentation.
 
-This integration does not inject a replacement list, custom status subtitles, avatars, or a history panel. It does not inspect React Fiber, add child `thread/read` requests, or scan and rewrite official Codex protocol frames. Native Codex Subagent behavior is unchanged.
+The native `subAgentActivity` projection keeps Desktop-owned list, status and history presentation. The shared [Background activity capability](background-activity.md) retains actual Session-owned child descriptors, including idle Loop runs. Host activity list/read materializes those children without a parent Turn, so scoped native child discovery can find them. The summary section uses the genuine latest-child Thread for navigation and does not add duplicate child rows. Activity polling continues when no extension section mounts; terminal state events update existing child mappings. It does not add child `thread/read` requests or scan and rewrite official Codex protocol frames. Native Codex Subagent behavior is unchanged.
 
 ## Lifecycle and transcripts
 

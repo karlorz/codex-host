@@ -7,7 +7,13 @@ import { jsonValueSchema, type HostItemId, type JsonValue } from "@codexhost/sha
 
 export const DEFAULT_GROK_TOOL_OUTPUT_LIMIT = 64_000;
 
-const EXECUTE_TOOL_NAMES = new Set(["bash", "run_terminal_command", "shell", "cursor_shell"]);
+const EXECUTE_TOOL_NAMES = new Set([
+  "bash",
+  "run_terminal_command",
+  "shell",
+  "cursor_shell",
+  "monitor",
+]);
 
 export interface GrokToolProjection {
   output?: HostToolOutput;

@@ -386,3 +386,5 @@ export {
 } from "./remote-connections.js";
 
 export * from "./voice-settings.js";
+
+export * from "./background-activity.js";
