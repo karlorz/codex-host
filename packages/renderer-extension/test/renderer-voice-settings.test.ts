@@ -197,14 +197,15 @@ describe("voice Settings provider explanation", () => {
 
 afterEach(() => vi.useRealTimers());
 describe("voice Settings explanation lifecycle", () => {
-  it.each(["26.1021.31345", "26.1023.51421"])(
+  it.each(["26.1021.31345", "26.1023.51421", "26.1027.61615"])(
     "waits for the complete %s native asset pair during document startup",
     async (version) => {
       vi.useFakeTimers();
       const f = fixture();
+      const modern = version === "26.1027.61615";
       const current = version === "26.1023.51421";
       const names = [
-        `app://-/assets/${current ? "app-initial-bc8256c3cccb.js" : "app-initial-feb30b196d11.js"}`,
+        `app://-/assets/${modern ? "app-initial-18b189e867e7.js" : current ? "app-initial-bc8256c3cccb.js" : "app-initial-feb30b196d11.js"}`,
       ];
       const target = {
         __codexhostCpaLiveVoiceHookV1: {
@@ -221,23 +222,32 @@ describe("voice Settings explanation lifecycle", () => {
       } as unknown as typeof globalThis;
       const importModule = vi.fn(async (url: string): Promise<Record<string, unknown>> =>
         url.includes("app-initial")
-          ? current
+          ? modern
             ? {
-                N4n: () => {},
-                yer: f.modules.access,
-                M4n: f.modules.capability,
-                Par: f.modules.gates,
+                Ler: () => {},
+                Dsr: f.modules.access,
+                Ier: f.modules.capability,
+                Vfr: f.modules.gates,
               }
-            : {
-                l0n: () => {},
-                k5n: f.modules.access,
-                c0n: f.modules.capability,
-                Cnr: f.modules.gates,
-              }
+            : current
+              ? {
+                  N4n: () => {},
+                  yer: f.modules.access,
+                  M4n: f.modules.capability,
+                  Par: f.modules.gates,
+                }
+              : {
+                  l0n: () => {},
+                  k5n: f.modules.access,
+                  c0n: f.modules.capability,
+                  Cnr: f.modules.gates,
+                }
           : url.includes("app-shared")
-            ? current
-              ? { uct: f.modules.appScope }
-              : { Bst: f.modules.appScope }
+            ? modern
+              ? { klt: f.modules.appScope }
+              : current
+                ? { uct: f.modules.appScope }
+                : { Bst: f.modules.appScope }
             : { VoiceSettings: f.modules.page },
       );
       const hook = installVoiceSettingsExplanation({ target, importModule });
@@ -245,7 +255,7 @@ describe("voice Settings explanation lifecycle", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(importModule).not.toHaveBeenCalled();
         names.push(
-          `app://-/assets/${current ? "app-shared-e9f258fd3588.js" : "app-shared-2cae01273bae.js"}`,
+          `app://-/assets/${modern ? "app-shared-601019a330d7.js" : current ? "app-shared-e9f258fd3588.js" : "app-shared-2cae01273bae.js"}`,
         );
         await vi.advanceTimersByTimeAsync(1000);
         expect(f.description.textContent).toContain("Your account allows voice chat");

@@ -14,10 +14,10 @@ import {
 } from "./renderer-cpa-live-voice-preference.js";
 import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
 
-export const CLIENT_OWNED_VOICE_VERSION = "26.1027.30824";
-export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-60f141238751.js";
-export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-7815d5a1a42a.js";
-export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-d9d400e751cd.js";
+export const CLIENT_OWNED_VOICE_VERSION = "26.1027.61615";
+export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-18b189e867e7.js";
+export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-601019a330d7.js";
+export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-920d05377bbe.js";
 export const CLIENT_OWNED_VOICE_ASSETS = [
   {
     platform: "darwin",
@@ -25,6 +25,23 @@ export const CLIENT_OWNED_VOICE_ASSETS = [
     initial: CLIENT_OWNED_VOICE_INITIAL_ASSET,
     shared: CLIENT_OWNED_VOICE_SHARED_ASSET,
     overlay: CLIENT_OWNED_VOICE_OVERLAY_ASSET,
+    init: "Adr",
+    fetch: "Odr",
+    fetchFrom: "initial",
+    bridge: "LRt",
+    services: "Vct",
+    responseError: "Pdr",
+    responseErrorFrom: "initial",
+    capabilityInit: "Ler",
+    capabilityFamily: "Ier",
+    inferenceGateFamily: "Vfr",
+  },
+  {
+    platform: "darwin",
+    version: "26.1027.30824",
+    initial: "app-initial-60f141238751.js",
+    shared: "app-shared-7815d5a1a42a.js",
+    overlay: "avatar-overlay-native-page-d9d400e751cd.js",
     init: "Edr",
     fetch: "wdr",
     fetchFrom: "initial",

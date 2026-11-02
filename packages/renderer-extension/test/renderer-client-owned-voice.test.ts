@@ -67,8 +67,10 @@ function sharedExports(f: ReturnType<typeof fixture>) {
     Htr: fetch,
     yir: fetch,
     wdr: fetch,
+    Odr: fetch,
+    Pdr: f.responseError,
     LRt: bridge,
-    Adr: f.responseError,
+    Adr: vi.fn(),
     QIt: bridge,
     bIt: bridge,
     Qot: { realtimeVoiceRuntime: vi.fn() },
@@ -542,6 +544,57 @@ describe("client-owned voice gateway", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(hook.status).toBe("active");
       expect(initial.Edr).toHaveBeenCalledOnce();
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await expect(f.client.fetch(url, options(speechBody()))).rejects.toMatchObject({
+        message: "usage_limit_reached",
+        status: 429,
+      });
+      expect(f.responseError).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+      expect(unrelated).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.client.fetch).toBe(f.original);
+  });
+
+  it("routes 26.1027.61615 Work through the initialized fetch owner and its native error handler", async () => {
+    vi.useFakeTimers();
+    const f = fixture({ status: 429, body: "usage_limit_reached", headers: { location: "" } });
+    const unrelated = vi.fn(() => {
+      throw new Error("Unrelated native export");
+    });
+    const initial: Record<string, unknown> = {
+      Adr: vi.fn(() => {
+        initial.Odr = { getInstance: () => f.client };
+      }),
+      Pdr: f.responseError,
+      Oit: unrelated,
+    };
+    const shared = { LRt: { getInstance: () => f.bridge }, Oit: unrelated, Mit: unrelated };
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: "26.1027.61615",
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => "app://-/assets/app-shared-601019a330d7.js" },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async (url) => (url.includes("app-initial") ? initial : shared),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(initial.Adr).toHaveBeenCalledOnce();
       rememberVoiceProductExperience({ productExperience: "work" });
       await expect(f.client.fetch(url, options(speechBody()))).rejects.toMatchObject({
         message: "usage_limit_reached",
