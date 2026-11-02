@@ -26,7 +26,7 @@ describe("external turn/start text input", () => {
     }
   });
 
-  it("rejects a turn/start whose input array has no text", async () => {
+  it("rejects a turn/start whose input array is empty", async () => {
     const fixture = createFixture();
     try {
       const threadId = await startPiThread(fixture);
@@ -38,7 +38,7 @@ describe("external turn/start text input", () => {
       await expect(
         fixture.collector.waitFor((message) => requestId(message, 2)),
       ).resolves.toMatchObject({
-        error: { code: -32602, message: "turn/start must contain text input" },
+        error: { code: -32602, message: "External input must be a non-empty array" },
       });
     } finally {
       await stopFixture(fixture);

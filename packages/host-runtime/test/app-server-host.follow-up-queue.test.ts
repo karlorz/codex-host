@@ -155,7 +155,7 @@ describe("external follow-up queue", () => {
       await expect(
         fixture.collector.waitFor((message) => requestId(message, 5)),
       ).resolves.toMatchObject({
-        error: { code: -32602, message: "turn/start must contain text input" },
+        error: { code: -32602, message: "External input must be a non-empty array" },
       });
     } finally {
       await stopFixture(fixture);
