@@ -258,7 +258,7 @@ Invalid request: unknown variant `clear-prewarmed-threads-for-host`
     checked: button.getAttribute("aria-checked"),
     disabled: button.disabled,
   }))
-  .filter((item) => /agent|model|pi|claude|deepseek|grok/i.test(
+  .filter((item) => /agent|model|pi|claude|deepseek|grok|qwen/i.test(
     [item.text, item.aria, item.title].join(" "),
   ));
 ```
@@ -452,6 +452,7 @@ pi
 claude-code
 deepseek-harness
 grok
+qwen-code
 ```
 
 如果 RPC 返回 `status: ready`，说明 Harness、账号和网络不是根因。
@@ -602,6 +603,7 @@ ChatGPT 登录的 Codex 额度耗尽时，外部 Agent 的发送按钮仍为 dis
 - [ ] 点击 Claude Code 后 Model catalog 可加载
 - [ ] 点击 DeepSeek Harness 后 Model catalog 可加载
 - [ ] 点击 Grok 后 Model catalog 可加载
+- [ ] 点击 Qwen Code 后 Model catalog 可加载
 - [ ] 切回 Codex 后原生 Composer 仍可用
 - [ ] ChatGPT 账号 Codex 额度耗尽时，新 Thread、已有外部 Thread 和 Codex Thread 的发送按钮均可点击（空输入等其他原生限制仍生效）
 - [ ] 新 Thread 和未锁定 Thread 都完成切换验证

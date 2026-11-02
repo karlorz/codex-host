@@ -4,9 +4,9 @@ title: Codex Desktop 新版兼容性提醒
 type: danger
 ---
 
-**Codex Desktop 10 月 30 日的更新调整了内部架构，当前 codexhost 暂时无法兼容。Codex Desktop 本身不受影响。**
+**codexhost v0.16.1 已适配 Codex Desktop 26.1027.30824，修复外部 Harness 无法创建聊天和对话的问题。**
 
-我们正在尝试新的适配方案，争取今天或本周末发布修复版本，请耐心等待更新。
+如果你受到 10 月 30 日 Desktop 更新的影响，请将 codexhost 升级至最新版本。
 
 欢迎加入微信群交流，添加微信 **a28417416**，我拉你入群。
 
@@ -14,9 +14,9 @@ type: danger
 
 ## English
 
-**The October 30 update changed Codex Desktop’s internal architecture, making it temporarily incompatible with the current version of codexhost. Codex Desktop itself is unaffected.**
+**codexhost v0.16.1 restores compatibility with Codex Desktop 26.1027.30824, fixing external Harness chat creation and conversation.**
 
-We are trying a new integration approach and aim to release a fix today or over the weekend. Thank you for your patience.
+If you were affected by the October 30 Desktop update, please upgrade codexhost to the latest version.
 
 To join our WeChat group, add me on WeChat at **a28417416**, and I’ll invite you.
 

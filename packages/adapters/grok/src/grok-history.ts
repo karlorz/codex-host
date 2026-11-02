@@ -8,6 +8,7 @@ import type {
   HostThreadSnapshot,
   HostTurnSnapshot,
 } from "@codexhost/harness-adapter";
+import { rewriteLocalMediaMarkdown } from "@codexhost/harness-adapter/local-media-markdown";
 import {
   hostItemIdSchema,
   nativeCheckpointRefSchema,
@@ -34,7 +35,7 @@ import {
   projectGrokGeneratedImage,
   type GrokGeneratedImage,
 } from "./grok-generated-image.js";
-import { grokMediaResolveRoots, rewriteLocalMediaMarkdown } from "./local-media-markdown.js";
+import { grokMediaResolveRoots } from "./local-media-markdown.js";
 import {
   grokNativeSubagentId,
   grokSubagentBackground,

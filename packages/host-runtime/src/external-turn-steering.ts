@@ -9,7 +9,7 @@ import {
   type HostTurnId,
   type ThreadSteerDelivery,
 } from "@codexhost/shared-contracts";
-import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
+import type { JsonObject } from "@codexhost/protocol-core";
 import type {
   HarnessResult,
   HarnessSession,
@@ -24,7 +24,7 @@ import type {
 
 import { rewriteDelegationMentionText } from "./delegation-mention-rewrite.js";
 import { isExternalCommandCandidate } from "./external-command-routing.js";
-import { queuedSubmissionInput, queuedSubmissionText } from "./external-thread-follow-up-queue.js";
+import { externalTurnInputText } from "./external-turn-input.js";
 import type { TurnProjectionGate } from "./external-thread-runtime.js";
 
 interface SteeringThread {
@@ -112,23 +112,11 @@ function parseInput(params: JsonObject): SteeringInput {
   if (typeof params.expectedTurnId !== "string" || !params.expectedTurnId.trim()) {
     throw new ExternalSteerError(-32602, "External steering requires expectedTurnId");
   }
-  const input = Array.isArray(params.input)
-    ? queuedSubmissionInput(params.input as JsonValue[])
-    : [];
-  const textItems = input.filter(
-    (item): item is JsonObject =>
-      item !== null &&
-      typeof item === "object" &&
-      !Array.isArray(item) &&
-      typeof item.text === "string" &&
-      (item.type === undefined || item.type === "text" || item.type === "input_text"),
-  );
-  if (input.length === 0 || textItems.length !== input.length) {
-    throw new ExternalSteerError(-32602, "External steering requires text input");
-  }
-  const text = queuedSubmissionText(textItems);
-  if (!text.trim()) {
-    throw new ExternalSteerError(-32602, "External steering input must not be empty");
+  let text: string;
+  try {
+    text = externalTurnInputText(params.input);
+  } catch (error) {
+    throw new ExternalSteerError(-32602, error instanceof Error ? error.message : String(error));
   }
   const clientUserMessageId = params.clientUserMessageId;
   if (

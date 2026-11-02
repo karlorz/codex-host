@@ -1,10 +1,17 @@
 import path from "node:path";
+import { statSync } from "node:fs";
 
 import type { HostGeneratedImageItem } from "@codexhost/harness-adapter";
 import type { HostItemId } from "@codexhost/shared-contracts";
 
 import { validAbsolutePath } from "./grok-file-change.js";
-import { mediaFileExists } from "./local-media-markdown.js";
+function mediaFileExists(absolutePath: string): boolean {
+  try {
+    return statSync(absolutePath).isFile();
+  } catch {
+    return false;
+  }
+}
 
 const GENERATED_IMAGE_TYPES = new Set(["ImageGen", "ImageEdit"]);
 
