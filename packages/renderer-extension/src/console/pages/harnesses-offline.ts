@@ -18,6 +18,7 @@ interface ConsoleHarness {
   icon: string | null;
   launchPath: string | null;
   computerUse?: GrokComputerUseSettings;
+  launchPathError: string | null;
 }
 
 /**
@@ -110,15 +111,14 @@ export function createOfflineHarnessesPage(
                   { className: "console-harness__path" },
                   input,
                   button(document, messages.save, () => submit(input.value.trim() || null)),
-                  harness.launchPath
+                  harness.launchPath || harness.launchPathError
                     ? button(document, messages.useAutomatic, () => submit(null))
                     : null,
                 ),
               );
-              if (status.has(harness.id)) {
-                row.append(
-                  h(document, "div", { className: "console-muted" }, status.get(harness.id) ?? ""),
-                );
+              const message = status.get(harness.id) ?? harness.launchPathError;
+              if (message) {
+                row.append(h(document, "div", { className: "console-muted" }, message));
               }
             }
             if (harness.computerUse) {

@@ -1,6 +1,6 @@
 # CPA live-voice Desktop hook
 
-CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, **26.1021.31345**, **26.1023.51421**, and **26.1027.30824** use the native client-owned-call flow described below. Native Chat Instant Connect has separate **26.1021.31345**, **26.1023.51421**, and macOS **26.1027.30824** profiles.
+CodexHost routes native live-voice call creation through the configured realtime gateway without rewriting `app.asar` or replacing `/Applications/ChatGPT.app`. Desktop **26.1007.30912** uses a call-ownership gate override. Desktop **26.1013.40934**, **26.1016.51333**, **26.1016.61520**, **26.1016.62342**, **26.1021.31345**, **26.1023.51421**, **26.1027.30824**, and **26.1027.61615** use the native client-owned-call flow described below. Native Chat Instant Connect has separate **26.1021.31345**, **26.1023.51421**, and macOS **26.1027.30824** / **26.1027.61615** profiles.
 
 For upstream merges, follow the [Live Voice preservation checklist](fork-versioning.md#preserve-live-voice-when-syncing-upstream), including regression checks and separate Desktop-version qualification.
 
@@ -51,6 +51,56 @@ The hook only changes Desktop call ownership. Point Codex at the realtime host i
 experimental_realtime_ws_base_url = "https://<realtime-host>/v1"
 experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 ```
+
+## Desktop 26.1027.61615 qualification
+
+The macOS **26.1027.61615** build **24141** profile binds Work gateway voice,
+native Chat Instant Connect and Voice Settings to the exact assets below.
+The retained **26.1027.30824** profiles remain independently selectable.
+
+| Contract | macOS 26.1027.61615 asset and exports |
+| --- | --- |
+| Initial | `app-initial-18b189e867e7.js` |
+| Shared | `app-shared-601019a330d7.js` |
+| Work transport | Initial `Adr()` initializes `Odr.getInstance().fetch`; `Pdr` handles response errors; shared `LRt` owns the Host bridge |
+| Work capability | Initial `Ler()` initializes capability family `Ier`; gate family `Vfr` identifies the scoped inference gate |
+| Work launch / overlay | Shared `Vct.realtimeVoiceRuntime`; `avatar-overlay-native-page-920d05377bbe.js` exports `AvatarOverlayNativePage` |
+| Chat ownership | Shared `klt` is AppScope; initial `p5n` is RouteScope and `w6n` is ComposerScope; `_On` resolves the backend conversation |
+| Chat runtime | `app-primary-75d53eef2374.js`: `Qp()` initializes browser voice and publishes enable signal `Zp`; initial `etn` reads the native voice store |
+| Chat START / prewarm | `start-voice-221a396d38a5.js` exports initializer `t` and Composer start `n`; `voice-prewarm-a7cd5160219e.js` exports `VoiceInstantConnectCacheController` |
+| Chat draft selection | Initial `ofr` is navigation location, `yEn` navigates, `FOn` is message mapping, `JOn` is current node, and `Z6` reads voice intent version; shared `_ct` builds the conversation path |
+| Voice Settings | `voice-settings-320cf1212f2c.js` exports `VoiceSettings`; initial `Dsr` owns access and `UO` owns platform-specific dictation mode |
+
+`start-voice-145b03c435b3.js` exposes the starter-prompt entry and cannot replace
+the Composer START contract. Work and Chat retain exact platform/version/asset
+checks; unknown or mixed assets fail closed. The profile does not change global
+Statsig, native capability atoms, provider configuration or the installed Desktop.
+
+Focused regressions reproduce unsupported Work/Chat installation before the
+profile and verify initialized native owners, scoped startup, gateway error
+propagation and disposal after the profile. Live narrow refresh on the existing
+primary and overlay documents confirms active Work transport, launch, capability
+and overlay hooks. Attended trials confirm Work and native Chat both connect
+and play replies.
+On a document that registered its native overlay starter before the refresh,
+the service wrapper applies only to future registrations: an initial retry
+retained unset launch ownership and used Desktop call creation. Re-registering
+the single verified idle starter through the installed wrapper restored explicit
+Work gateway routing. A clean launch loads the wrapper before registration.
+The native Chat loader uses its separately verified browser runtime and
+Composer START. The read-only Renderer probe confirms the current
+Composer, Model, Permission, Context, sidebar, transcript and usage-gate shapes.
+The main-process Inspector is unavailable in this running installation, so the
+combined audit command and new-Thread/Fork/title behavior are unverified.
+
+The reviewed version is **26.1027.30824**, based on the qualification below;
+its vendor bundle was not retained locally. The preceding feed alert names
+**26.1027.51404**, but neither its bundle nor proof that it is the direct
+predecessor is available. Current source and live checks therefore establish
+current bindings, not a complete vendor-bundle diff. Microphone release,
+audible playback, interruption and spontaneous-close recovery remain attended
+acceptance under [issue #4](https://github.com/karlorz/codex-host/issues/4).
+Pin-drift alerts #16–20 do not establish those behaviors.
 
 ## Desktop 26.1027.30824 Work qualification
 
@@ -1093,10 +1143,10 @@ The hook does not copy OpenAI frontend JavaScript into git. Tests cover the asse
 
 ## Version gate
 
-Work voice has audited profiles through **26.1027.30824**, including the
+Work voice has audited profiles through **26.1027.61615**, including the
 retained 26.1007 gate path and the supported client-owned-call profiles listed
 above. Native Chat has its own versioned profiles and current pin
-**26.1027.30824** on macOS. Exact platform, version, asset-pair and export guards remain
+**26.1027.61615** on macOS. Exact platform, version, asset-pair and export guards remain
 authoritative; acceptance on one build or platform does not qualify another.
 Re-audit before enabling an unknown build. Unsupported assets fail closed
 without an ASAR patch.

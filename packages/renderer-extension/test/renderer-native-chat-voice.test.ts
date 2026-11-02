@@ -543,6 +543,79 @@ describe("native Chat voice lifecycle installation", () => {
     expect(f.listeners.size).toBe(0);
   });
 
+  it("starts 26.1027.61615 Chat with its native scopes, runtime and public prewarm wrapper", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: "26.1027.61615",
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, "app-shared-601019a330d7.js");
+    const primary: Record<string, unknown> = {};
+    const initializeBrowser = vi.fn(() => {
+      primary.Zp = f.initial.aT;
+    });
+    primary.Qp = initializeBrowser;
+    const initializeStart = vi.fn();
+    const prewarm = vi.fn();
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith("app-initial-18b189e867e7.js"))
+        return {
+          p5n: f.initial.MOr,
+          w6n: f.initial.CDr,
+          _On: f.initial.B1n,
+          etn: f.initial.SPn,
+          ofr: f.initial.Ycr,
+          yEn: f.initial.Nir,
+          FOn: f.initial.n0n,
+          JOn: f.initial.Y1n,
+        };
+      if (url.endsWith("app-shared-601019a330d7.js"))
+        return {
+          klt: f.shared.Qst,
+          pWt: f.shared.FBt,
+          GFt: f.shared.PNt,
+          _ct: f.shared.Vot,
+        };
+      if (url.endsWith("app-primary-75d53eef2374.js")) return primary;
+      if (url.endsWith("start-voice-221a396d38a5.js")) return { t: initializeStart, n: f.start };
+      if (url.endsWith("voice-prewarm-a7cd5160219e.js"))
+        return { VoiceInstantConnectCacheController: prewarm };
+      throw new Error("Unaudited module");
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(initializeBrowser).toHaveBeenCalledOnce();
+      expect(initializeStart).toHaveBeenCalledOnce();
+      expect(f.browserEnabled()).toBe(true);
+      expect(f.createRoot).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.importModule.mock.calls.map(([url]) => url)).toEqual(
+        [
+          "app-shared-601019a330d7.js",
+          "app-initial-18b189e867e7.js",
+          "start-voice-221a396d38a5.js",
+          "voice-prewarm-a7cd5160219e.js",
+          "app-primary-75d53eef2374.js",
+        ].map((asset) => `app://-/assets/${asset}`),
+      );
+      await hook.start();
+      expect(f.start).toHaveBeenCalledExactlyOnceWith(
+        f.scope,
+        f.props,
+        { event_source: "composer" },
+        expect.any(AbortSignal),
+      );
+      expect(f.initial.oT).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.browserEnabled()).toBe(false);
+    expect(f.listeners.size).toBe(0);
+  });
+
   it.each([
     {
       platform: "darwin",
@@ -1004,6 +1077,8 @@ describe("native Chat voice lifecycle installation", () => {
   );
 
   it.each([
+    ["26.1027.61615", ["app-initial-18b189e867e7.js", "app-shared-7815d5a1a42a.js"]],
+    ["26.1027.61615", ["app-initial-60f141238751.js", "app-shared-601019a330d7.js"]],
     ["26.1027.30824", ["app-initial-bc8256c3cccb.js", "app-shared-e9f258fd3588.js"]],
     ["26.1027.30824", ["app-initial-60f141238751.js", "app-shared-e9f258fd3588.js"]],
     ["26.1027.30824", ["app-initial-bc8256c3cccb.js", "app-shared-7815d5a1a42a.js"]],

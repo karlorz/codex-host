@@ -348,20 +348,29 @@ export function installVoiceSettingsExplanation(
           ),
         );
         if (disposed) return;
+        const modern = assets.version === "26.1027.61615";
         const latest = assets.version === "26.1023.51421";
-        const initialize = latest ? initial.N4n : initial.l0n;
+        const initialize = modern ? initial.Ler : latest ? initial.N4n : initial.l0n;
         if (typeof initialize !== "function" || typeof settings.VoiceSettings !== "function")
           return;
         initialize();
         const dictationMode = (
-          latest ? initial.KG : initial.mW
+          modern ? initial.UO : latest ? initial.KG : initial.mW
         ) as SettingsModules["dictationMode"];
         modules = {
-          appScope: (latest ? shared.uct : shared.Bst) as SettingsModules["appScope"],
+          appScope: (modern
+            ? shared.klt
+            : latest
+              ? shared.uct
+              : shared.Bst) as SettingsModules["appScope"],
           page: settings.VoiceSettings,
-          access: latest ? initial.yer : initial.k5n,
-          capability: (latest ? initial.M4n : initial.c0n) as SettingsModules["capability"],
-          gates: (latest ? initial.Par : initial.Cnr) as Family,
+          access: modern ? initial.Dsr : latest ? initial.yer : initial.k5n,
+          capability: (modern
+            ? initial.Ier
+            : latest
+              ? initial.M4n
+              : initial.c0n) as SettingsModules["capability"],
+          gates: (modern ? initial.Vfr : latest ? initial.Par : initial.Cnr) as Family,
           ...(dictationMode ? { dictationMode } : {}),
         };
       }
