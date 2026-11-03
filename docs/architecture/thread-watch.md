@@ -61,6 +61,10 @@
 
 ## 实现与边界
 
+### Caller identity
+
+The caller must use its own Host-provided `CODEXHOST_THREAD_ID`, native `CODEX_THREAD_ID`, or independently verified explicit `--parent-thread` / `--notify`. Do not extract a different process's environment or source a shared runtime environment file to recover these values. Runtime access and chat identity serve different purposes: another session's valid connection does not make its Thread the caller. Before registering a watch, verify that a delegation's returned parent is the intended originating chat. A copied parent identity can misattribute both the child and its completion notification; successful delivery then does not establish correct origin.
+
 - `packages/host-runtime/src/delegation-watch.ts` 只依赖公开的 `read` 与 `send`，每轮完成后间隔 2 秒继续轮询（现有 `thread wait` 同样基于轮询）。它不依赖具体 Harness、Desktop、Renderer 或委派血缘。
 - 服务由 `DelegationControlRegistry` 持有，位于各 Host 会话之上，因此两端可以属于不同的 Host 会话。
 - watch 只存在于 Host Runtime 内存中，Runtime 重启后丢失；委派关系本身仍然持久化，重启后可重新注册。

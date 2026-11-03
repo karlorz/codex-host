@@ -25,6 +25,8 @@
   "scripts": {
     "start": "node --disable-warning=UNDICI-EHPA tools/dev-desktop/run.mjs",
     "install:local": "bash scripts/install-local.sh",
+    "backups:gc": "node tools/local-app-backups.mjs",
+    "backups:test": "vitest run --config tests/vitest.config.js tools/local-app-backups.test.mjs",
     "build": "npm run build:typescript && npm run build:renderer && npm run build:rust",
     "build:typescript": "tsc -b && npm run build:plugins",
     "build:plugins": "node scripts/release/harness-plugins.mjs --output packages/host-runtime/dist/plugins",
