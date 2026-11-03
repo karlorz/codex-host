@@ -31,6 +31,9 @@ describe("workflow and form contracts", () => {
   it("keeps CI job names synchronized with the actual matrix", async () => {
     const workflow = await read(".github/workflows/ci.yml");
     expect(workflow).toContain("name: Check ${{ matrix.os }}");
+    expect(workflow).toContain(
+      "runs-on: ${{ matrix.os == 'macos-15' && 'macos-26' || matrix.os }}",
+    );
     for (const name of CI_JOBS.filter((value) => value !== "Check Linux ARM64")) {
       expect(workflow).toContain(`- ${name.slice("Check ".length)}\n`);
     }
@@ -40,7 +43,7 @@ describe("workflow and form contracts", () => {
   it("builds macOS packages on supported runners with matching architectures", async () => {
     const workflow = await read(".github/workflows/release-packages.yml");
     expect(workflow).toMatch(
-      /- target: macos-arm64\s+runner: macos-15\s+rustTarget: aarch64-apple-darwin/u,
+      /- target: macos-arm64\s+runner: macos-26\s+rustTarget: aarch64-apple-darwin/u,
     );
     expect(workflow).toMatch(
       /- target: macos-x64\s+runner: macos-15-intel\s+rustTarget: x86_64-apple-darwin/u,
