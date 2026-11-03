@@ -5,6 +5,12 @@ export {
 } from "./renderer-react-ownership.js";
 export type { RendererHostRoute, RendererHostRouting } from "./renderer-host-routing.js";
 export {
+  installRendererRpcSubmissionPreparation,
+  type RendererRpcSubmissionContext,
+  type RendererRpcClientRegistry,
+} from "./renderer-rpc-submission.js";
+export { findRendererAppScopeStore } from "./renderer-host-rpc-discovery.js";
+export {
   NATIVE_SCHEDULE_SIDEBAR_ROW_SELECTOR,
   readNativeScheduleSidebarThread,
 } from "./renderer-native-schedule-sidebar.js";

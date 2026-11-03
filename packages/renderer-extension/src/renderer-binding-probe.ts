@@ -2,6 +2,8 @@ import { installRendererBackgroundActivity } from "./renderer-background-activit
 import { startVoiceSettingsSync } from "./voice-settings-sync.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
+import { prepareRendererRpcAttachments } from "./renderer-rpc-attachments.js";
+import { rendererRpcClientRegistryReader } from "./renderer-rpc-client-registry.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
 import { handleRemoteConnectionsRequest } from "./remote-connections-request.js";
 import {
@@ -119,6 +121,7 @@ import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./rend
 import {
   createNativeScheduleWorkspaceThread,
   isNativeProjectThreadCreator,
+  installRendererRpcSubmissionPreparation,
 } from "@codexhost/desktop-control/renderer-bindings";
 import { loadCodexNativeServices } from "./codex-native-services.js";
 import { openCodexSchedules } from "./codex-schedule-navigation.js";
@@ -3030,6 +3033,7 @@ export function installRendererBindingProbe(
     pendingReplacements.clear();
     questions.refreshContext();
     backgroundActivity.refreshContext();
+    rpcSubmission.refresh();
   };
 
   const scheduleScan = (refreshTargets = false): void => {
@@ -3402,6 +3406,13 @@ export function installRendererBindingProbe(
   };
   const questions = installRendererQuestions(window, readActivityContext);
   const backgroundActivity = installRendererBackgroundActivity(window, readActivityContext);
+  const rpcRegistry = rendererRpcClientRegistryReader(window, () => rpcSubmission.refresh());
+  const rpcSubmission = installRendererRpcSubmissionPreparation(
+    document,
+    prepareRendererRpcAttachments,
+    (hostId, draftId) => modelControl?.draftModel?.(hostId, draftId) ?? null,
+    rpcRegistry.read,
+  );
 
   const api: RendererBindingProbeApi = {
     remoteConnections: (request) => handleRemoteConnectionsRequest(remoteConnections, request),
@@ -3512,6 +3523,8 @@ export function installRendererBindingProbe(
       disposed = true;
       questions.dispose();
       backgroundActivity.dispose();
+      rpcSubmission.dispose();
+      rpcRegistry.dispose();
       usageNotificationDispose();
       adapterDispose?.();
       adapterDispose = null;

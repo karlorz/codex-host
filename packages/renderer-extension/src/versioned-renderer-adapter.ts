@@ -945,7 +945,11 @@ export function installCurrentRendererAdapter(): {
     if (!client) throw new Error("Renderer Model request manager is unavailable");
     return client;
   };
+  const draftModels = createScopedDraftModelWriter();
+  const draftHosts = new Map<string, string>();
   const modelControl: RendererModelClient = Object.freeze({
+    draftModel: (hostId: string, draftId: string) =>
+      !disposed && draftHosts.get(draftId) === hostId ? draftModels.model(draftId) : null,
     currentHostId: (composer?: Element) => {
       if (composer) {
         return disposed
@@ -1058,7 +1062,6 @@ export function installCurrentRendererAdapter(): {
   });
 
   const selectedPolicies = new Map<string, RendererDraftPrewarmPolicy>();
-  const draftModels = createScopedDraftModelWriter();
   const handleRoutingPolicyChange = (): void => {
     currentRequestRoute();
   };
@@ -1113,6 +1116,8 @@ export function installCurrentRendererAdapter(): {
         liveStatus.modelUpdates = modelUpdates;
       }
       selectedPolicies.set(route.hostId, route.policy);
+      if (carrier) draftHosts.set(draftKey, route.hostId);
+      else draftHosts.delete(draftKey);
     } catch {
       updateStatus("installing", "draft-routing-policy-unavailable", null);
       return false;
@@ -1126,6 +1131,7 @@ export function installCurrentRendererAdapter(): {
     dispose() {
       if (disposed) return;
       disposed = true;
+      draftHosts.clear();
       draftModels.dispose();
       window.removeEventListener(
         "codexhost:draft-prewarm-policy-changed",

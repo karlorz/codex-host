@@ -248,7 +248,7 @@ function installFakeBrowser(): void {
     }),
     removeEventListener: vi.fn(),
   };
-  vi.stubGlobal("window", window_);
+  vi.stubGlobal("window", { ...window_, document: document_ });
   vi.stubGlobal("document", document_);
   vi.stubGlobal("Node", { ELEMENT_NODE: 1 });
   vi.stubGlobal("Element", FakeElement);

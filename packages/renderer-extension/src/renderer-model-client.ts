@@ -217,6 +217,8 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   setIdleReleaseSettings?(settings: IdleReleaseSettings): Promise<IdleReleaseSettings>;
   listLoadedSessions?(): Promise<LoadedSession[]>;
   currentHostId?(composer?: Element): string | null;
+  /** Captured external carrier for this exact native draft and Host. */
+  draftModel?(hostId: string, draftId: string): string | null;
   knownHostIds?(): readonly string[];
   listHarnessPlugins?(): Promise<HarnessPluginListResult>;
   clientForHost?(hostId: string): RendererModelClient | null;

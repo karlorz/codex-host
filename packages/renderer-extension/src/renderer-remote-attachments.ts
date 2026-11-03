@@ -52,7 +52,7 @@ function imageFile(value: Record<string, unknown>): { contents: Blob; extension:
 }
 
 /**
- * Desktop 26.930 carries remote images inline and fills file paths asynchronously.
+ * Desktop carries remote and annotation images inline without completed file paths.
  * Materialize missing paths through the same Manager's native attachment store,
  * before the outgoing Turn. Harness input remains text; images stay in the Desktop
  * request for presentation. No filesystem, SSH, or Harness SDK is implemented here.
@@ -65,8 +65,8 @@ export function createRemoteAttachmentSender(
   const prepared = new WeakMap<object, Promise<unknown>>();
   return (params, send) => {
     if (
-      hostId === "local" ||
       !isRecord(target) ||
+      (typeof target.getHostId === "function" && target.getHostId() !== hostId) ||
       !isRecord(params) ||
       typeof params.threadId !== "string" ||
       !Array.isArray(params.input) ||

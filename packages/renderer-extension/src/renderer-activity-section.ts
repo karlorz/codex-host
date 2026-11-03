@@ -58,6 +58,19 @@ export function activitySectionTarget(
   // A validated container can outlive its last native section while a Loop remains.
   if (containers.size === 0 && previous?.isConnected && previous.closest(PANEL) === root)
     return { target: previous, reason: null };
+  if (containers.size === 0) {
+    // Native Content retains its scroll/content wrappers before any Section exists.
+    const emptyTargets = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        ":scope > div.flex.flex-col.overflow-x-hidden.overflow-y-auto > div.flex.flex-col",
+      ),
+    ).filter(
+      (node) => node.closest(PANEL) === root && !node.closest(OWNED) && visible(window, node),
+    );
+    if (emptyTargets.length === 1 && emptyTargets[0])
+      return { target: emptyTargets[0], reason: null };
+    if (emptyTargets.length > 1) return { target: null, reason: "ambiguous-sections" };
+  }
   return { target: null, reason: containers.size ? "ambiguous-sections" : "missing-sections" };
 }
 

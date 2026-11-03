@@ -38,6 +38,7 @@ if (!targetSource) throw Error("Missing target fixture bundle");
 
 // Static-derived primitives from Desktop 26.1027.30824/build22943:
 // thread-summary-panel-components-265aaea48bf8.js. This is not live DOM evidence.
+// Scroll/content wrappers also verified in Desktop 26.1027.61615/build24141.
 const nativeTypography = readFileSync(
   new URL("./fixtures/native-summary-typography.css", import.meta.url),
   "utf8",
@@ -221,6 +222,62 @@ test("Loop-only uses the native summary section with no composer entry or separa
   ).toBeVisible();
   await expect(page.locator("#goal,[data-composer-rail]")).toHaveCount(0);
 });
+
+for (const variant of ["summary", "dynamic-isle"] as const) {
+  test(`Loop-only mounts initially in an empty ${variant} content wrapper`, async ({ page }) => {
+    await page.evaluate((value) => {
+      Reflect.get(window, "activityControl").dispose();
+      const panel = document.querySelector("[data-summary-panel-variant]");
+      panel?.setAttribute("data-summary-panel-variant", value);
+      const content = document.querySelector("[data-fixture-sections]");
+      content?.replaceChildren();
+      if (value === "dynamic-isle") content?.classList.remove("gap-2", "py-2.5");
+      document
+        .querySelectorAll("#goal,#plan,[data-composer-rail]")
+        .forEach((node) => node.remove());
+      Reflect.get(window, "activityRestart")();
+    }, variant);
+
+    await expect(page.locator(`[data-fixture-sections] > ${section}`)).toBeVisible();
+    await expect(page.locator(section).getByRole("button", { name: /Health check/ })).toBeVisible();
+    await expect(page.locator("[data-fixture-sections] > section")).toHaveCount(1);
+    await expect(page.locator("form")).toBeVisible();
+    await expect(
+      page.locator("[data-codexhost-activity-pane],[data-codexhost-activity-rail]"),
+    ).toHaveCount(0);
+
+    await page.locator("[data-fixture-sections]").evaluate((content, html) => {
+      content.insertAdjacentHTML("afterbegin", html);
+    }, nativeSection);
+    await expect(page.getByText("Native context", { exact: true })).toBeVisible();
+    await expect.poll(() => calls(page)).toBeGreaterThan(1);
+    await expect(page.locator(section)).toHaveCount(1);
+
+    await change(page, { empty: true });
+    await expect(page.locator(section)).toHaveCount(0);
+    await expect(page.getByText("Native context", { exact: true })).toBeVisible();
+  });
+}
+
+for (const mode of ["hidden", "ambiguous", "unrecognized"] as const) {
+  test(`rejects an empty ${mode} summary content wrapper`, async ({ page }) => {
+    await page.evaluate((value) => {
+      Reflect.get(window, "activityControl").dispose();
+      const content = document.querySelector("[data-fixture-sections]");
+      content?.replaceChildren();
+      const scroll = content?.parentElement;
+      if (!scroll) throw Error("Missing native scroll wrapper");
+      if (value === "hidden") scroll.hidden = true;
+      if (value === "ambiguous") scroll.parentElement?.append(scroll.cloneNode(true));
+      if (value === "unrecognized") scroll.classList.remove("overflow-y-auto");
+      Reflect.get(window, "activityRestart")();
+    }, mode);
+    const before = await calls(page);
+    await expect.poll(() => calls(page)).toBeGreaterThan(before + 1);
+    await expect(page.locator(section)).toHaveCount(0);
+    await expect(page.locator("form")).toBeVisible();
+  });
+}
 
 test("Loop detail separates the title from collapsed instructions and preserves disclosure across polls", async ({
   page,
@@ -532,7 +589,7 @@ for (const mode of [
   "missing",
   "ambiguous",
   "decoy",
-  "no-section",
+  "no-content-wrapper",
   "ambiguous-sections",
   "lost-context",
 ] as const) {
@@ -546,7 +603,7 @@ for (const mode of [
       if (kind === "missing") root.remove();
       if (kind === "ambiguous") root.parentElement?.append(root.cloneNode(true));
       if (kind === "decoy") document.body.append(root);
-      if (kind === "no-section") root.replaceChildren();
+      if (kind === "no-content-wrapper") root.replaceChildren();
       if (kind === "ambiguous-sections") {
         const other = document.createElement("div");
         other.innerHTML = '<section class="flex flex-col">Other native section</section>';
@@ -565,7 +622,7 @@ for (const mode of [
       expect(reason).toBe(
         mode === "ambiguous"
           ? "ambiguous-panel"
-          : mode === "no-section"
+          : mode === "no-content-wrapper"
             ? "missing-sections"
             : mode === "ambiguous-sections"
               ? "ambiguous-sections"

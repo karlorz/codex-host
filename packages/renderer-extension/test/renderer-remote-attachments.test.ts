@@ -64,6 +64,17 @@ function submittedText(rpc: ReturnType<typeof fixture>["rpc"]): string {
 }
 
 describe("remote external attachments through the native Desktop file store", () => {
+  it("stores a local inline annotation image before sending it to an external Harness", async () => {
+    const f = fixture("local");
+    try {
+      await f.manager.sendRequest("turn/start", request());
+      expect(f.createFileAttachment).toHaveBeenCalledOnce();
+      expect(submittedText(f.rpc)).toContain("Image attachment: true");
+      expect((f.rpc.mock.calls[0]?.[1] as ReturnType<typeof request>).input).toContain(image);
+    } finally {
+      f.dispose();
+    }
+  });
   it("uploads inline images before sending, retaining the image preview and text contract", async () => {
     const f = fixture();
     const params = request();
@@ -428,7 +439,7 @@ describe("remote external attachments through the native Desktop file store", ()
   });
 
   it.each([
-    ["local", "codexhost"],
+    ["local", "openai"],
     ["ssh:remote", "openai"],
   ])("leaves %s / %s submissions byte-for-byte unchanged", async (hostId, provider) => {
     const f = fixture(hostId, provider);

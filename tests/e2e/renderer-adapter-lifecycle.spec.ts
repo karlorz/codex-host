@@ -525,3 +525,29 @@ for (const usesAccountPreferences of [false, true]) {
     });
   }
 }
+
+test("first-message image routing reads the exact draft and Host after Composer unmount", async ({
+  page,
+}) => {
+  await setup(page, "local", { emptyDraft: true });
+  const carrier = encodeHarnessPluginRoute({ harnessId: harnessIdSchema.parse("pi") });
+  const result = await page.evaluate(() => {
+    const state = Reflect.get(globalThis, "hostRoutes");
+    const applied = state.adapter.applyAgent("pi", undefined, undefined, undefined, state.editor);
+    const read = state.adapter.modelControl.draftModel;
+    const wrongHost = read(state.remote.getHostId(), "client-new-thread:fixture");
+    const wrongDraft = read("local", "client-new-thread:another");
+    state.editor.closest("form").remove();
+    const unmounted = read("local", "client-new-thread:fixture");
+    state.adapter.dispose();
+    const disposed = read("local", "client-new-thread:fixture");
+    return { applied, wrongHost, wrongDraft, unmounted, disposed };
+  });
+  expect(result).toEqual({
+    applied: true,
+    wrongHost: null,
+    wrongDraft: null,
+    unmounted: carrier,
+    disposed: null,
+  });
+});
