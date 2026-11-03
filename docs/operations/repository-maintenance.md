@@ -58,6 +58,11 @@ PR 维护只做两件事：**明确标题自动标签、CI 结束后更新一条
 
 `ci.yml` 保留四项基线 job，不配置分支保护。为减少重复工作，执行范围如下：
 
+The macOS CI lane and macOS ARM64 release builds use the `macos-26` ARM runner
+image. Release verification identifies the macOS CI lane as `Check macos-15`;
+that stable job identifier is independent of the runner image. macOS x64 release
+builds use `macos-15-intel`.
+
 | 检查 | Linux x64 | macOS / Windows | Linux ARM64 |
 | --- | --- | --- | --- |
 | 格式、ESLint、包边界、完整 TypeScript 类型检查（含测试） | 执行 | 不重复执行 | 不重复执行 |
