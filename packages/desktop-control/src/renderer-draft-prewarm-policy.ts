@@ -18,6 +18,7 @@ import {
 } from "./renderer-host-rpc-discovery.js";
 import { installRendererExternalQueuePolicy } from "./renderer-external-queue-policy.js";
 import { installRendererHostRpcRouting } from "./renderer-host-rpc-routing.js";
+import { readRendererConnectionGeneration } from "./renderer-connection-generation.js";
 
 export { requestManagerFromHookState } from "./renderer-host-discovery.js";
 
@@ -42,15 +43,19 @@ function directRendererInstaller(): string {
     const retainRendererHostResponses = ${retainRendererHostResponses.toString()};
     const createDraftPrewarmPolicyBridge = ${createDraftPrewarmPolicyBridge.toString()};
     const isolateRendererPrewarmConsumption = ${isolateRendererPrewarmConsumption.toString()};
+    const findRendererAppScopeStore = ${findRendererAppScopeStore.toString()};
+    const readRendererConnectionGeneration = ${readRendererConnectionGeneration.toString()};
     const discover = (root) =>
       discoverRendererHosts(root, committedReactAncestors, requestManagerFromHookState);
-    const installNative = () => (${installRendererHostRouting.toString()})(
+    const installNative = (publishRouting = true) => (${installRendererHostRouting.toString()})(
       document, window, discover,
       (discovery, hostId) => resolveRendererHostManager(discovery, hostId, requestManagerFromHookState),
       (manager, bridge, hostId, target, prewarmed, isCurrent) => createDraftPrewarmPolicyBridge(
         manager, bridge, hostId, target, prewarmed, isCurrent, retainRendererHostResponses,
         isolateRendererPrewarmConsumption,
       ),
+      (hostId) => readRendererConnectionGeneration(findRendererAppScopeStore(document), hostId),
+      publishRouting,
     );
     const installRpc = () => typeof MessagePort !== 'function' ? null : (${installRendererHostRpcRouting.toString()})(document, window, {
       findStore: ${findRendererAppScopeStore.toString()},
@@ -69,20 +74,21 @@ function directRendererInstaller(): string {
         portPrototype: MessagePort.prototype,
       }),
       portPrototype: MessagePort.prototype,
+      nativeRouting: () => {
+        const native = discover(document);
+        return native.managers.length || native.registries.length ? installNative(false) : null;
+      },
+      readConnection: (hostId) => readRendererConnectionGeneration(findRendererAppScopeStore(document), hostId),
     });
     const connected = (routing) => routing.forComposer() !== null ||
       ['local', ...(routing.knownHostIds?.() ?? [])].some((hostId) => routing.forHost(hostId) !== null);
     let nativeReady = false;
-    // A legacy registry can remain mounted without a usable native manager.
-    // Prefer a ready native route, then try the identified main-process RPC store.
+    // Mixed layouts can expose native managers for only some Hosts. Keep one
+    // router that selects a native owner or the current ready RPC peer per Host.
     const routing = (() => {
-      if (window.__codexhostHostRoutingV1) {
-        const existing = window.__codexhostHostRoutingV1;
-        if (['local', ...(existing.knownHostIds?.() ?? [])].some(
-          hostId => existing.forHost(hostId)?.manager.kind === 'main-process-rpc'
-        )) installRpc();
-        return existing;
-      }
+      if (window.__codexhostHostRoutingV1) return window.__codexhostHostRoutingV1;
+      const rpc = installRpc();
+      if (rpc) return rpc;
       const native = discover(document);
       if (native.managers.length || native.registries.length) {
         const routing = installNative();
@@ -92,8 +98,6 @@ function directRendererInstaller(): string {
         }
         routing.dispose();
       }
-      const rpc = installRpc();
-      if (rpc) return rpc;
       throw new Error('Renderer Host request manager is unavailable');
     })();
     // Publish a default draft policy only when its Host is unambiguous. Host
