@@ -3,14 +3,31 @@ import { describe, expect, it } from "vitest";
 
 import {
   GROK_PERMISSION_MODE_CATALOG,
+  GROK_PLAN_MODE_ID,
   decodeGrokPermissionModeId,
+  grokCatalogPermissionModeId,
+  grokOpenPermissionPolicy,
   grokPermissionModeSessionMeta,
+  isGrokPlanModeId,
 } from "../src/index.js";
 
 describe("Grok Permission Modes", () => {
   it("matches the native Grok Build Permission Mode picker", () => {
     expect(GROK_PERMISSION_MODE_CATALOG).toEqual({
       modes: [
+        {
+          id: "plan",
+          label: "Plan",
+          localizations: {
+            "zh-CN": {
+              label: "规划模式",
+              description:
+                "先探索并写计划；批准后退出规划并开始实现。工具权限仍由询问/自动/始终批准决定。",
+            },
+          },
+          description:
+            "Explore and write a plan; approval exits planning and starts implementation. Tool permission stays Ask, Auto, or Always approve.",
+        },
         {
           id: "ask",
           label: "Ask",
@@ -50,5 +67,18 @@ describe("Grok Permission Modes", () => {
     expect(grokPermissionModeSessionMeta(decodeGrokPermissionModeId(permissionModeId))).toEqual(
       expected,
     );
+  });
+
+  it("keeps Plan as a session mode overlay on the Ask/Auto/Always-approve policy", () => {
+    expect(isGrokPlanModeId(GROK_PLAN_MODE_ID)).toBe(true);
+    expect(grokCatalogPermissionModeId(GROK_PLAN_MODE_ID)).toBe("plan");
+    expect(() => decodeGrokPermissionModeId(GROK_PLAN_MODE_ID)).toThrow(
+      "Grok Permission Mode belongs to another Adapter",
+    );
+    expect(grokOpenPermissionPolicy(GROK_PLAN_MODE_ID, "create")).toBe("ask");
+    expect(grokOpenPermissionPolicy(GROK_PLAN_MODE_ID, "resume")).toBeUndefined();
+    expect(
+      grokOpenPermissionPolicy(harnessPermissionModeIdSchema.parse("always-approve"), "resume"),
+    ).toBe("always-approve");
   });
 });

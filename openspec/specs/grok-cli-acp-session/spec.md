@@ -39,6 +39,20 @@ GrokAdapter SHALL derive Model, Thinking/Effort, Permission Mode, and Usage supp
 
 Permission Mode confirmation MAY use the dedicated native permission manager's applied-flag diagnostics when the native protocol has no permission getter or reply. This signal SHALL be confined to the Grok Adapter and combined with a round trip identifying the target Session. Missing or mismatched confirmation SHALL fail closed rather than publish a requested value as effective.
 
+Grok Plan is native ACP session mode `plan`, not a YOLO/auto flag. The Adapter SHALL expose Plan in the Permission Mode catalog, enter and leave it with `session/set_mode`, and project `_x.ai/exit_plan_mode` as a Host Question whose answers map to native `approved`, `cancelled` (optional `feedback`), or `abandoned`. The Adapter SHALL NOT treat Plan as a permission-manager mode and SHALL NOT invent Host-owned plan state.
+
+#### Scenario: User selects Plan then approves implementation
+- **WHEN** a live Grok Session is idle and the user selects Plan
+- **THEN** the Adapter SHALL send ACP `session/set_mode` with `modeId: "plan"` without changing Ask/Auto/Always approve flags
+- **AND** when Grok issues `exit_plan_mode` with plan text during an active Turn
+- **THEN** the Session SHALL show a Review plan Question offering stay, approve and implement, and exit without implementing
+- **AND** an accepted approve answer SHALL return native `approved` without the Adapter calling `session/set_mode` itself
+
+#### Scenario: Empty plan remains approvable
+- **WHEN** Grok issues `exit_plan_mode` without plan text
+- **THEN** the Review plan Question SHALL still offer approve and implement
+- **AND** stay or dismiss SHALL return native `cancelled` so Grok remains in plan mode
+
 #### Scenario: Grok advertises Models and Effort
 - **WHEN** validated initialization and Session responses expose selectable Models and Thinking/Effort values
 - **THEN** inspection SHALL return normalized opaque Model Refs and Thinking options

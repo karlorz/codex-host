@@ -118,6 +118,15 @@ describe.skipIf(process.platform === "win32")("Grok ACP session rules wire", () 
         sessionId: "rewind",
         targetPromptIndex: 0,
       });
+      const createPlan = await capturedMeta(root, {
+        kind: "create",
+        permissionModeId: harnessPermissionModeIdSchema.parse("plan"),
+      });
+      const resumePlan = await capturedMeta(root, {
+        kind: "resume",
+        sessionId: "resume-plan",
+        permissionModeId: harnessPermissionModeIdSchema.parse("plan"),
+      });
 
       expect(createAsk).toEqual([grokCodexhostSessionMeta("ask")]);
       expect(createAuto).toEqual([grokCodexhostSessionMeta("auto")]);
@@ -125,6 +134,8 @@ describe.skipIf(process.platform === "win32")("Grok ACP session rules wire", () 
       expect(resumeAsk).toEqual([grokCodexhostSessionMeta("ask")]);
       expect(resumeAuto).toEqual([grokCodexhostSessionMeta("auto")]);
       expect(resumeAlways).toEqual([grokCodexhostSessionMeta("always-approve")]);
+      expect(createPlan).toEqual([grokCodexhostSessionMeta("ask")]);
+      expect(resumePlan).toEqual([grokCodexhostSessionMeta()]);
       expect(forkLoad).toEqual([grokCodexhostSessionMeta()]);
       expect(rewindLoad).toEqual([grokCodexhostSessionMeta()]);
       expect(forkLoad[0]?.yoloMode).toBeUndefined();

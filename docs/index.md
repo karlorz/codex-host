@@ -112,6 +112,7 @@
 | [`harnesses/grok/computer-use-settings.md`](harnesses/grok/computer-use-settings.md) | Grok `cua_repl` Computer Use and in-app browser (IAB) switches, surface matrix, IAB vs Computer Use vs Chrome extension, fail-closed binding. |
 | [`harnesses/grok/goals-and-history.md`](harnesses/grok/goals-and-history.md) | Native `/goal` controls, verified completion/restart history, helper transcripts, checkpoint rewind and remaining control/edit limits. |
 | [`harnesses/grok/permission-modes.md`](harnesses/grok/permission-modes.md) | Grok 会话内权限切换、原生生效确认、失败处理与验证范围。 |
+| [`harnesses/grok/plan-mode.md`](harnesses/grok/plan-mode.md) | Grok Plan picker, `exit_plan_mode` review card, and native session-mode ownership. |
 | [`harnesses/grok/grok-steer.md`](harnesses/grok/grok-steer.md) | Grok native interjection, Composer queue ownership, editable pending delivery, and execution limits. |
 
 ### Copilot

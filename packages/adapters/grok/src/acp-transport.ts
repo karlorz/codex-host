@@ -70,7 +70,12 @@ import {
   type GrokMcpElicitResponse,
 } from "./grok-elicitation.js";
 import { grokCodexhostSessionMeta } from "./grok-codexhost-session-rules.js";
-import { decodeGrokPermissionModeId, grokPermissionModeSessionMeta } from "./permission-modes.js";
+import {
+  decodeGrokPermissionModeId,
+  grokOpenPermissionPolicy,
+  grokPermissionModeSessionMeta,
+  type GrokSessionMode,
+} from "./permission-modes.js";
 import {
   GROK_PERMISSION_MODE_METHOD,
   GrokPermissionConfirmation,
@@ -83,6 +88,12 @@ import {
   type GrokQuestionRequest,
   type GrokQuestionResponse,
 } from "./grok-questions.js";
+import {
+  isGrokExitPlanModeMethod,
+  parseGrokPlanApprovalRequest,
+  type GrokPlanApprovalRequest,
+  type GrokPlanApprovalResponse,
+} from "./grok-plan-approval.js";
 import {
   GROK_INTERJECT_FALLBACK_METHOD,
   GROK_INTERJECT_METHOD,
@@ -196,6 +207,7 @@ export type GrokTransportEvent =
       metadata?: Record<string, unknown>;
     }
   | { type: "interaction.resolved"; toolCallId: string; metadata?: Record<string, unknown> }
+  | { type: "session.mode"; modeId: string; metadata?: Record<string, unknown> }
   | GrokBackgroundTransportEvent;
 
 export interface GrokPermissionRequest {
@@ -250,6 +262,7 @@ interface ActivePrompt {
   onPermission(request: GrokPermissionRequest): Promise<RequestPermissionResponse>;
   onElicitation(request: GrokMcpElicitFormRequest): Promise<GrokMcpElicitResponse>;
   onQuestion(request: GrokQuestionRequest): Promise<GrokQuestionResponse>;
+  onPlanApproval?(request: GrokPlanApprovalRequest): Promise<GrokPlanApprovalResponse>;
 }
 
 interface ActiveCompact {
@@ -390,6 +403,16 @@ function transportEvent(
       ...(extension.usage !== undefined ? { usage: extension.usage } : {}),
       ...(metadata ? { metadata } : {}),
     };
+  }
+  if (extension.sessionUpdate === "current_mode_update") {
+    const modeId =
+      typeof extension.currentModeId === "string"
+        ? extension.currentModeId
+        : typeof extension.current_mode_id === "string"
+          ? extension.current_mode_id
+          : "";
+    if (!modeId) return null;
+    return { type: "session.mode", modeId, ...(metadata ? { metadata } : {}) };
   }
   if (extension.sessionUpdate === "rewind_marker") {
     const targetPromptIndex =
@@ -729,7 +752,7 @@ export class GrokAcpTransport {
       let session: NewSessionResponse | LoadSessionResponse;
       let sessionId: string;
       if (input.kind === "create") {
-        const permissionMode = decodeGrokPermissionModeId(input.permissionModeId);
+        const permissionMode = grokOpenPermissionPolicy(input.permissionModeId, "create");
         const created = await withTimeout(
           connection.newSession({
             cwd: this.#options.cwd,
@@ -771,7 +794,9 @@ export class GrokAcpTransport {
         sessionId = forked.newSessionId;
       } else {
         const permissionMode =
-          input.kind === "resume" ? decodeGrokPermissionModeId(input.permissionModeId) : undefined;
+          input.kind === "resume"
+            ? grokOpenPermissionPolicy(input.permissionModeId, "resume")
+            : undefined;
         session = await withTimeout(
           connection.loadSession({
             cwd: this.#options.cwd,
@@ -1046,6 +1071,7 @@ export class GrokAcpTransport {
     onPermission: ActivePrompt["onPermission"],
     onElicitation: ActivePrompt["onElicitation"],
     onQuestion: ActivePrompt["onQuestion"] = async () => ({ outcome: "cancelled" }),
+    onPlanApproval: ActivePrompt["onPlanApproval"] = async () => ({ outcome: "cancelled" }),
   ): Promise<PromptResponse> {
     const connection = this.#connection;
     if (!connection || !this.#sessionId || this.#closed || this.#closing) {
@@ -1054,7 +1080,7 @@ export class GrokAcpTransport {
     if (this.#activePrompt) throw new Error("Grok ACP Session already has an active Prompt");
     if (this.#permissionConfirmation)
       throw new GrokTransportError("unavailable", "Grok ACP Session has an active operation");
-    const active = { onEvent, onPermission, onElicitation, onQuestion };
+    const active = { onEvent, onPermission, onElicitation, onQuestion, onPlanApproval };
     this.#activePrompt = active;
     try {
       const historyStart = (await this.getHistory()).length;
@@ -1282,6 +1308,22 @@ export class GrokAcpTransport {
     }
   }
 
+  async setSessionMode(modeId: GrokSessionMode): Promise<void> {
+    const connection = this.#connection;
+    const sessionId = this.#sessionId;
+    if (!connection || !sessionId || this.#closed || this.#closing) {
+      throw new GrokTransportError("unavailable", "Grok ACP Session is unavailable");
+    }
+    if (this.#activePrompt || this.#activeCompact || this.#permissionConfirmation) {
+      throw new GrokTransportError("unavailable", "Grok ACP Session has an active operation");
+    }
+    await withTimeout(
+      connection.request("session/set_mode", { sessionId, modeId }),
+      this.#options.commandTimeoutMs,
+      "Grok Session Mode",
+    );
+  }
+
   close(): Promise<void> {
     return (this.#closePromise ??= this.#close());
   }
@@ -1460,6 +1502,21 @@ export class GrokAcpTransport {
       }
       if (!activePrompt || request.sessionId !== this.#sessionId) return { outcome: "cancelled" };
       return { ...(await activePrompt.onQuestion(request)) };
+    }
+    if (isGrokExitPlanModeMethod(method)) {
+      let request: GrokPlanApprovalRequest;
+      try {
+        request = parseGrokPlanApprovalRequest(params);
+      } catch (error) {
+        throw RequestError.invalidParams(
+          undefined,
+          error instanceof Error ? error.message : "Invalid Grok plan approval",
+        );
+      }
+      if (!activePrompt || request.sessionId !== this.#sessionId) return { outcome: "cancelled" };
+      return {
+        ...((await activePrompt.onPlanApproval?.(request)) ?? { outcome: "cancelled" }),
+      };
     }
     if (method !== GROK_MCP_ELICIT_METHOD) {
       throw RequestError.methodNotFound(method);

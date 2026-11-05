@@ -6,14 +6,29 @@ import {
 } from "@codexhost/shared-contracts";
 
 export type GrokPermissionMode = "ask" | "auto" | "always-approve";
+export type GrokSessionMode = "default" | "plan";
 
 const nativePermissionModes = new Set<GrokPermissionMode>(["ask", "auto", "always-approve"]);
 
 export const GROK_DEFAULT_PERMISSION_MODE_ID = harnessPermissionModeIdSchema.parse("ask");
+export const GROK_PLAN_MODE_ID = harnessPermissionModeIdSchema.parse("plan");
 
 export const GROK_PERMISSION_MODE_CATALOG: HarnessPermissionModeCatalog =
   harnessPermissionModeCatalogSchema.parse({
     modes: [
+      {
+        id: "plan",
+        label: "Plan",
+        localizations: {
+          "zh-CN": {
+            label: "规划模式",
+            description:
+              "先探索并写计划；批准后退出规划并开始实现。工具权限仍由询问/自动/始终批准决定。",
+          },
+        },
+        description:
+          "Explore and write a plan; approval exits planning and starts implementation. Tool permission stays Ask, Auto, or Always approve.",
+      },
       {
         id: "ask",
         label: "Ask",
@@ -41,6 +56,14 @@ export const GROK_PERMISSION_MODE_CATALOG: HarnessPermissionModeCatalog =
     defaultModeId: GROK_DEFAULT_PERMISSION_MODE_ID,
   });
 
+export function isGrokPlanModeId(permissionModeId: HarnessPermissionModeId | undefined): boolean {
+  return String(permissionModeId ?? "") === "plan";
+}
+
+export function isGrokSessionMode(value: string): value is GrokSessionMode {
+  return value === "default" || value === "plan";
+}
+
 export function decodeGrokPermissionModeId(
   permissionModeId: HarnessPermissionModeId,
 ): GrokPermissionMode {
@@ -49,6 +72,22 @@ export function decodeGrokPermissionModeId(
     throw new Error("Grok Permission Mode belongs to another Adapter");
   }
   return parsed as GrokPermissionMode;
+}
+
+export function grokCatalogPermissionModeId(
+  permissionModeId: HarnessPermissionModeId,
+): HarnessPermissionModeId {
+  if (isGrokPlanModeId(permissionModeId)) return GROK_PLAN_MODE_ID;
+  return harnessPermissionModeIdSchema.parse(decodeGrokPermissionModeId(permissionModeId));
+}
+
+/** Create uses Ask flags when the picker is Plan. Resume with Plan omits flags so native YOLO stays. */
+export function grokOpenPermissionPolicy(
+  permissionModeId: HarnessPermissionModeId,
+  kind: "create" | "resume",
+): GrokPermissionMode | undefined {
+  if (isGrokPlanModeId(permissionModeId)) return kind === "create" ? "ask" : undefined;
+  return decodeGrokPermissionModeId(permissionModeId);
 }
 
 export function grokPermissionModeSessionMeta(permissionMode: GrokPermissionMode): {

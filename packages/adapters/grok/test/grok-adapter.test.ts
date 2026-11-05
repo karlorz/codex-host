@@ -13,6 +13,10 @@ import {
   type GrokMcpElicitResponse,
 } from "../src/grok-elicitation.js";
 import type { GrokQuestionRequest, GrokQuestionResponse } from "../src/grok-questions.js";
+import type {
+  GrokPlanApprovalRequest,
+  GrokPlanApprovalResponse,
+} from "../src/grok-plan-approval.js";
 import type { HarnessOutput, HostEvent } from "@codexhost/harness-adapter";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -91,6 +95,9 @@ class FakeGrokTransport implements GrokAcpTransportLike {
   readonly setPermissionMode = vi.fn<GrokAcpTransportLike["setPermissionMode"]>(
     async () => undefined,
   );
+  readonly setSessionMode = vi.fn<NonNullable<GrokAcpTransportLike["setSessionMode"]>>(
+    async () => undefined,
+  );
   readonly deleteSession = vi.fn(async (sessionId: string) => {
     this.histories.delete(sessionId);
   });
@@ -111,6 +118,8 @@ class FakeGrokTransport implements GrokAcpTransportLike {
   #onElicitation: ((request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>) | null =
     null;
   #onQuestion: ((request: GrokQuestionRequest) => Promise<GrokQuestionResponse>) | null = null;
+  #onPlanApproval:
+    ((request: GrokPlanApprovalRequest) => Promise<GrokPlanApprovalResponse>) | null = null;
   #background?: Parameters<NonNullable<GrokAcpTransportLike["observeBackground"]>>[0];
   readonly killTask = vi.fn(async () => "killed" as const);
   readonly deleteScheduledTask = vi.fn(async () => true);
@@ -190,6 +199,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
   }
 
   onQuestion!: Parameters<GrokAcpTransportLike["runTurn"]>[4];
+  onPlanApproval!: NonNullable<Parameters<GrokAcpTransportLike["runTurn"]>[5]>;
   onFault: ((error: GrokTransportError) => void) | undefined;
   lastPromptText: string | null = null;
   runTurn(
@@ -198,8 +208,10 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     onPermission: (request: GrokPermissionRequest) => Promise<RequestPermissionResponse>,
     onElicitation: (request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>,
     onQuestion: (request: GrokQuestionRequest) => Promise<GrokQuestionResponse>,
+    onPlanApproval?: (request: GrokPlanApprovalRequest) => Promise<GrokPlanApprovalResponse>,
   ): Promise<PromptResponse> {
     this.onQuestion = onQuestion;
+    this.onPlanApproval = onPlanApproval ?? (async () => ({ outcome: "cancelled" }));
     this.lastPromptText = text;
     this.#activePromptText = text;
     this.#activePromptEvents = [];
@@ -207,6 +219,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
     this.#onPermission = onPermission;
     this.#onElicitation = onElicitation;
     this.#onQuestion = onQuestion;
+    this.#onPlanApproval = this.onPlanApproval;
     return new Promise((resolve) => {
       this.#resolve = resolve;
     });
@@ -271,6 +284,25 @@ class FakeGrokTransport implements GrokAcpTransportLike {
         options,
       },
       options,
+    });
+  }
+
+  planApproval(planContent: string | null = "# Plan"): Promise<GrokPlanApprovalResponse> {
+    if (!this.#onPlanApproval) throw new Error("No active Grok Prompt");
+    return this.#onPlanApproval({
+      sessionId: this.sessionId,
+      toolCallId: "exit-plan-1",
+      planContent,
+    });
+  }
+
+  backgroundPlanApproval(planContent: string | null = "# Plan"): Promise<GrokPlanApprovalResponse> {
+    const ask = this.#background?.onPlanApproval;
+    if (!ask) throw new Error("No Grok background observer");
+    return ask({
+      sessionId: this.sessionId,
+      toolCallId: "exit-plan-parked",
+      planContent,
     });
   }
 
@@ -690,6 +722,200 @@ describe("Grok Adapter questions", () => {
   );
 });
 
+describe("Grok Adapter plan review", () => {
+  it.each(["approved", "cancelled", "abandoned"] as const)(
+    "projects ExitPlanMode as a Review plan card and maps %s to the native outcome",
+    async (choice) => {
+      const transport = new FakeGrokTransport();
+      const { adapter, session } = await openedSession(transport);
+      const iterator = session.outputs[Symbol.asyncIterator]();
+      try {
+        await session.execute({
+          type: "turn.start",
+          turnId: hostTurnIdSchema.parse("plan-review"),
+          input: [{ type: "text", text: "plan" }],
+        });
+        await nextEvent(iterator);
+        const plan = `# Implementation plan\n${"Read, edit, verify.\n".repeat(40)}`;
+        const pending = transport.planApproval(plan);
+        const output = await nextOutput(iterator);
+        if (output.kind !== "interaction") throw new Error("Missing plan review");
+        expect(output.interaction).toMatchObject({
+          type: "question",
+          title: "Review plan",
+          questions: [
+            {
+              id: "plan-decision",
+              type: "choice",
+              multiple: false,
+              allowOther: false,
+              optional: false,
+              options: [
+                { value: "cancelled", label: "Stay in plan mode" },
+                { value: "approved", label: "Approve plan and start implementation" },
+                { value: "abandoned", label: "Exit plan mode without implementing" },
+              ],
+            },
+            { id: "plan-feedback", type: "text", optional: true },
+          ],
+        });
+        if (output.interaction.type !== "question") throw new Error("Expected a plan review");
+        expect(output.interaction.questions[0]?.prompt).toContain(plan);
+        const interactionId = output.interaction.interactionId;
+        for (const response of [
+          { type: "approval" as const, actionId: "allowOnce" },
+          { type: "question" as const, answers: { "plan-decision": ["allowOnce"] } },
+          { type: "question" as const, answers: { "plan-decision": ["approved", "cancelled"] } },
+          { type: "question" as const, answers: {} },
+        ]) {
+          await expect(
+            session.execute({
+              type: "interaction.respond",
+              interactionId,
+              response,
+            }),
+          ).resolves.toMatchObject({ ok: false, error: { code: "invalidRequest" } });
+        }
+        await expect(
+          session.execute({
+            type: "interaction.respond",
+            interactionId,
+            response: { type: "question", answers: { "plan-decision": [choice] } },
+          }),
+        ).resolves.toMatchObject({ ok: true });
+        await expect(pending).resolves.toEqual({ outcome: choice });
+        expect(transport.setSessionMode).not.toHaveBeenCalled();
+        expect(await nextEvent(iterator)).toMatchObject({
+          type: "interaction.closed",
+          interactionId,
+          reason: "responded",
+        });
+        transport.finish();
+        while ((await nextEvent(iterator)).type !== "turn.completed") {
+          /* drain usage */
+        }
+      } finally {
+        await adapter.close();
+      }
+    },
+  );
+
+  it("returns stay-in-plan feedback and still offers approve when the plan body is empty", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    try {
+      await session.execute({
+        type: "turn.start",
+        turnId: hostTurnIdSchema.parse("empty-plan"),
+        input: [{ type: "text", text: "plan" }],
+      });
+      await nextEvent(iterator);
+      const pending = transport.planApproval(null);
+      const output = await nextOutput(iterator);
+      if (output.kind !== "interaction" || output.interaction.type !== "question")
+        throw new Error("Missing plan review");
+      expect(output.interaction.questions[0]?.prompt).toContain("No plan written yet");
+      expect(
+        output.interaction.questions[0]?.type === "choice" &&
+          output.interaction.questions[0].options,
+      ).toHaveLength(3);
+      await expect(
+        session.execute({
+          type: "interaction.respond",
+          interactionId: output.interaction.interactionId,
+          response: {
+            type: "question",
+            answers: {
+              "plan-decision": ["cancelled"],
+              "plan-feedback": ["Please add error handling"],
+            },
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(pending).resolves.toEqual({
+        outcome: "cancelled",
+        feedback: "Please add error handling",
+      });
+      transport.finish();
+      while ((await nextEvent(iterator)).type !== "turn.completed") {
+        /* drain */
+      }
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it("treats dismissing the Review plan card as stay in plan mode", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    try {
+      await session.execute({
+        type: "turn.start",
+        turnId: hostTurnIdSchema.parse("dismiss-plan"),
+        input: [{ type: "text", text: "plan" }],
+      });
+      await nextEvent(iterator);
+      const pending = transport.planApproval("# Plan");
+      const output = await nextOutput(iterator);
+      if (output.kind !== "interaction") throw new Error("Missing plan review");
+      await expect(
+        session.execute({
+          type: "interaction.respond",
+          interactionId: output.interaction.interactionId,
+          response: { type: "question", answers: {}, cancelled: true },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(pending).resolves.toEqual({ outcome: "cancelled" });
+      expect(transport.setSessionMode).not.toHaveBeenCalled();
+      expect(await nextEvent(iterator)).toMatchObject({
+        type: "interaction.closed",
+        interactionId: output.interaction.interactionId,
+        reason: "cancelled",
+      });
+      transport.finish();
+      while ((await nextEvent(iterator)).type !== "turn.completed") {
+        /* drain */
+      }
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it("follows native CurrentModeUpdate after plan approval", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    const plan = harnessPermissionModeIdSchema.parse("plan");
+    try {
+      await session.execute({ type: "permissionMode.select", permissionModeId: plan });
+      expect(await nextEvent(iterator)).toMatchObject({
+        type: "session.state.changed",
+        state: { effectivePermissionModeId: "plan" },
+      });
+      await session.execute({
+        type: "turn.start",
+        turnId: hostTurnIdSchema.parse("mode-update"),
+        input: [{ type: "text", text: "plan" }],
+      });
+      await nextEvent(iterator);
+      transport.event({ type: "session.mode", modeId: "default" });
+      expect(await nextEvent(iterator)).toMatchObject({
+        type: "session.state.changed",
+        state: { effectivePermissionModeId: "ask" },
+      });
+      expect(transport.setSessionMode).toHaveBeenCalledTimes(1);
+      transport.finish();
+      while ((await nextEvent(iterator)).type !== "turn.completed") {
+        /* drain */
+      }
+    } finally {
+      await adapter.close();
+    }
+  });
+});
+
 describe("Grok Adapter ACP projection", () => {
   it("does not spawn a session with stale Computer Use config after an apply failure", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "grok-cua-apply-"));
@@ -849,6 +1075,7 @@ describe("Grok Adapter ACP projection", () => {
       catalog: { models: [{ ref: { id: "grok-4.6" } }] },
       permissionModes: {
         modes: [
+          { id: "plan", label: "Plan" },
           { id: "ask", label: "Ask" },
           { id: "auto", label: "Auto" },
           { id: "always-approve", label: "Always approve", dangerous: true },
@@ -1095,6 +1322,119 @@ describe("Grok Adapter ACP projection", () => {
       transport.finish();
       await adapter.close();
       await collecting;
+    }
+  });
+
+  it("selects Plan through session/set_mode and restores the permission policy on exit", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const plan = harnessPermissionModeIdSchema.parse("plan");
+    const alwaysApprove = harnessPermissionModeIdSchema.parse("always-approve");
+    try {
+      await expect(
+        session.execute({ type: "permissionMode.select", permissionModeId: plan }),
+      ).resolves.toEqual({ ok: true, value: { completed: true } });
+      expect(transport.setSessionMode).toHaveBeenCalledWith("plan");
+      expect(transport.setPermissionMode).toHaveBeenCalledTimes(1);
+      expect(await session.readSnapshot()).toMatchObject({
+        ok: true,
+        value: { state: { effectivePermissionModeId: "plan" } },
+      });
+      await expect(
+        session.execute({ type: "permissionMode.select", permissionModeId: alwaysApprove }),
+      ).resolves.toEqual({ ok: true, value: { completed: true } });
+      expect(transport.setSessionMode).toHaveBeenLastCalledWith("default");
+      expect(transport.setPermissionMode).toHaveBeenLastCalledWith(alwaysApprove);
+      expect(await session.readSnapshot()).toMatchObject({
+        ok: true,
+        value: { state: { effectivePermissionModeId: "always-approve" } },
+      });
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it("opens a Plan Session without sending Plan as a YOLO policy", async () => {
+    const transport = new FakeGrokTransport();
+    const adapter = new GrokAdapter(
+      {},
+      {
+        randomUUID: () => "grok-id",
+        createTransport: () => transport,
+        fetchCredits: async () => null,
+      },
+    );
+    const plan = harnessPermissionModeIdSchema.parse("plan");
+    const opened = await adapter.open({
+      kind: "create",
+      cwd: "/synthetic",
+      permissionModeId: plan,
+    });
+    if (!opened.ok) throw new Error(opened.error.message);
+    expect(transport.openCalls).toContainEqual({ kind: "create", permissionModeId: plan });
+    expect(transport.setSessionMode).toHaveBeenCalledWith("plan");
+    expect(transport.setPermissionMode).not.toHaveBeenCalled();
+    expect(opened.value.initialState.effectivePermissionModeId).toBe("plan");
+    await adapter.close();
+  });
+
+  it("resumes a Plan Session without sending Plan as a YOLO policy", async () => {
+    const transport = new FakeGrokTransport();
+    const adapter = new GrokAdapter(
+      {},
+      {
+        randomUUID: () => "grok-id",
+        createTransport: () => transport,
+        fetchCredits: async () => null,
+      },
+    );
+    const plan = harnessPermissionModeIdSchema.parse("plan");
+    const opened = await adapter.open({
+      kind: "resume",
+      cwd: "/synthetic",
+      nativeRef: {
+        harnessId: adapter.harnessId,
+        nativeSessionId: transport.sessionId,
+        formatVersion: 1,
+      },
+      permissionModeId: plan,
+    });
+    if (!opened.ok) throw new Error(opened.error.message);
+    expect(transport.openCalls).toContainEqual({
+      kind: "resume",
+      sessionId: transport.sessionId,
+      permissionModeId: plan,
+    });
+    expect(transport.setSessionMode).toHaveBeenCalledWith("plan");
+    expect(transport.setPermissionMode).not.toHaveBeenCalled();
+    expect(opened.value.initialState.effectivePermissionModeId).toBe("plan");
+    await adapter.close();
+  });
+
+  it("overlays Plan from the last native session.mode when Host stored Ask", async () => {
+    const transport = new FakeGrokTransport();
+    transport.replay = [{ type: "session.mode", modeId: "plan" }];
+    const { adapter, session } = await openedSession(transport, "resume");
+    try {
+      expect(session.initialState.effectivePermissionModeId).toBe("plan");
+      expect(transport.setPermissionMode).toHaveBeenCalledWith(
+        harnessPermissionModeIdSchema.parse("ask"),
+      );
+      expect(transport.setSessionMode).not.toHaveBeenCalled();
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it("cancels a parked plan approval when no Turn is active", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter } = await openedSession(transport);
+    try {
+      await expect(transport.backgroundPlanApproval()).resolves.toEqual({
+        outcome: "cancelled",
+      });
+    } finally {
+      await adapter.close();
     }
   });
 

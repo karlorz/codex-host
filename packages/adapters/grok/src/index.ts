@@ -35,9 +35,15 @@ export type { GrokForkParams, GrokForkResponse } from "./grok-fork.js";
 export {
   GROK_DEFAULT_PERMISSION_MODE_ID,
   GROK_PERMISSION_MODE_CATALOG,
+  GROK_PLAN_MODE_ID,
   decodeGrokPermissionModeId,
+  grokCatalogPermissionModeId,
+  grokOpenPermissionPolicy,
   grokPermissionModeSessionMeta,
+  isGrokPlanModeId,
+  isGrokSessionMode,
 } from "./permission-modes.js";
+export type { GrokSessionMode } from "./permission-modes.js";
 export {
   GROK_CODEXHOST_SESSION_RULES,
   grokCodexhostSessionMeta,
@@ -59,6 +65,18 @@ export type {
   GrokMcpElicitResponse,
 } from "./grok-elicitation.js";
 export { GROK_ASK_USER_QUESTION_METHOD, parseGrokQuestionRequest } from "./grok-questions.js";
+export {
+  GROK_EXIT_PLAN_MODE_METHODS,
+  createGrokPlanReview,
+  grokPlanReviewResponse,
+  isGrokExitPlanModeMethod,
+  parseGrokPlanApprovalRequest,
+} from "./grok-plan-approval.js";
+export type {
+  GrokPlanApprovalOutcome,
+  GrokPlanApprovalRequest,
+  GrokPlanApprovalResponse,
+} from "./grok-plan-approval.js";
 export {
   GROK_INTERJECT_FALLBACK_METHOD,
   GROK_INTERJECT_METHOD,

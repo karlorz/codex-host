@@ -270,7 +270,7 @@ adapter.open({
 
 `configurationHint` 是设计占位名称，不是现有接口。它不是强制覆盖指令，也不授权提升权限。对应插件须保留自身现有策略：
 
-- Grok 在打开时恢复并确认权限，空闲会话可继续切换；详见[权限模式](../harnesses/grok/permission-modes.md)。
+- Grok 在打开时恢复并确认权限，空闲会话可继续切换 Ask/Auto/Always approve 与 Plan；Plan 走 ACP `session/set_mode`，批准卡片见 [Grok plan mode](../harnesses/grok/plan-mode.md)。
 - OpenCode 尊重原生实际权限，不重放累加设置。
 - OMP 处理实际 Model 回退、权限恢复与必要的连接重启。
 - Claude 等插件接管此前 Host 为其执行的配置恢复步骤。

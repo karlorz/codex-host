@@ -1,6 +1,8 @@
 # Grok 权限模式
 
-Grok 插件提供 `ask`（询问）、`auto`（自动）和 `always-approve`（始终批准）。`permissionModeScope` 为 `live`：会话创建后仍可切换，不重新创建 Native Session。切换需要会话空闲；活动 Turn、上下文压缩或其他配置操作期间返回可重试的 `sessionBusy`。
+Grok 插件提供 `plan`（规划）、`ask`（询问）、`auto`（自动）和 `always-approve`（始终批准）。`permissionModeScope` 为 `live`：会话创建后仍可切换，不重新创建 Native Session。切换需要会话空闲；活动 Turn、上下文压缩或其他配置操作期间返回可重试的 `sessionBusy`。
+
+Plan 是原生 ACP session mode，与 Ask/Auto/Always approve 的工具权限轴独立。选择 Plan 发送 `session/set_mode` `plan`，不改 YOLO/auto。从 Plan 选回其余三项先退出规划再应用该权限。Grok 完成计划时的批准界面见 [Grok plan mode](plan-mode.md)。
 
 ## 原生接线与生效确认
 
@@ -22,7 +24,7 @@ Grok `1.0.67` 的 `session/set_config_option` 仅提供模型与 Thinking，`_x.
 
 ## 验证范围
 
-- 聚焦测试覆盖三个模式及重复选择、正确扩展前缀、两个开关与会话往返的等待、受管限制、Auto 被禁用、缺失或部分确认、错误身份、进程退出、关闭与并发，以及确认后才发布状态。
+- 聚焦测试覆盖 Ask/Auto/Always approve 三个权限、Plan session mode、重复选择、正确扩展前缀、两个开关与会话往返的等待、受管限制、Auto 被禁用、缺失或部分确认、错误身份、进程退出、关闭与并发，以及确认后才发布状态。
 - `CODEXHOST_GROK_PERMISSION_LIVE=1 npx vitest run --config tests/vitest.config.js packages/adapters/grok/test/grok-permission-live.test.ts` 使用已安装 CLI 和已有登录，在临时 GROK_HOME 与项目中验证切换及 Resume；不发送模型 Prompt，要求 `modelCalls=0`。临时凭据副本与会话在结束后清理。
 - 原生基线为 macOS Grok `1.0.67`（`2fe064390d07`）。没有验证活动工具执行中切换；插件要求空闲后操作。该验证不代表真实 Desktop UI、Windows CLI 或完整委派验收。
 

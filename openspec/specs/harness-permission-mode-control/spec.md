@@ -36,7 +36,8 @@ A capable Adapter SHALL report `configuration.permissionModeScope`. `live` means
 - **WHEN** Grok is inspected or opened
 - **THEN** it SHALL report `selectPermissionMode=true` and `permissionModeScope=live`
 - **AND** an idle Session SHALL accept `permissionMode.select` without changing its Native Session identity
-- **AND** the Adapter SHALL send the underscore-prefixed native extension notification and confirm both effective native permission flags plus the target Session round trip before publishing state or completing the command
+- **AND** selecting Ask, Auto, or Always approve SHALL send the underscore-prefixed native extension notification and confirm both effective native permission flags plus the target Session round trip before publishing state or completing the command
+- **AND** selecting Plan SHALL send ACP `session/set_mode` without changing those permission flags
 - **AND** a busy Session SHALL reject the selection with retryable `sessionBusy`
 - **AND** missing, mismatched or interrupted confirmation SHALL fail and retire the Transport without publishing the requested mode
 - **AND** Host SHALL NOT persist `transportModelId` or `requestedPermissionModeId` for a failed selection

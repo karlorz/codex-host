@@ -112,6 +112,11 @@ import {
   type GrokQuestionRequest,
   type GrokQuestionResponse,
 } from "./grok-questions.js";
+import {
+  GrokPlanApprovals,
+  type GrokPlanApprovalRequest,
+  type GrokPlanApprovalResponse,
+} from "./grok-plan-approval.js";
 import { GrokSessionImport } from "./session-import.js";
 import { grokMediaResolveRoots } from "./local-media-markdown.js";
 import { GrokSubagentLifecycle } from "./grok-subagent-lifecycle.js";
@@ -145,7 +150,9 @@ import { rewindGrokSession } from "./grok-rewind.js";
 import {
   GROK_DEFAULT_PERMISSION_MODE_ID,
   GROK_PERMISSION_MODE_CATALOG,
-  decodeGrokPermissionModeId,
+  GROK_PLAN_MODE_ID,
+  grokCatalogPermissionModeId,
+  isGrokPlanModeId,
 } from "./permission-modes.js";
 import {
   applyGrokToolProjection,
@@ -224,6 +231,7 @@ export interface GrokAcpTransportLike {
     onPermission: (request: GrokPermissionRequest) => Promise<RequestPermissionResponse>,
     onElicitation: (request: GrokMcpElicitFormRequest) => Promise<GrokMcpElicitResponse>,
     onQuestion: (request: GrokQuestionRequest) => Promise<GrokQuestionResponse>,
+    onPlanApproval?: (request: GrokPlanApprovalRequest) => Promise<GrokPlanApprovalResponse>,
   ): Promise<PromptResponse>;
   compact(
     userContext: string | undefined,
@@ -232,6 +240,7 @@ export interface GrokAcpTransportLike {
   interject?(text: string, interjectionId?: string): Promise<{ status: "queued" }>;
   setModel(modelId: string, reasoningEffort?: string, contextWindowTokens?: number): Promise<void>;
   setPermissionMode(permissionModeId: HarnessPermissionModeId): Promise<void>;
+  setSessionMode?(modeId: "plan" | "default"): Promise<void>;
   cancel(): Promise<void>;
   close(): Promise<void>;
   /** Latest native command list of the open Session; absent on older transports. */
@@ -242,6 +251,7 @@ export interface GrokAcpTransportLike {
     onPermission(request: GrokPermissionRequest): Promise<RequestPermissionResponse>;
     onElicitation(request: GrokMcpElicitFormRequest): Promise<GrokMcpElicitResponse>;
     onQuestion(request: GrokQuestionRequest): Promise<GrokQuestionResponse>;
+    onPlanApproval?(request: GrokPlanApprovalRequest): Promise<GrokPlanApprovalResponse>;
   }): void;
   killTask?(
     taskId: string,
@@ -291,6 +301,7 @@ interface ActiveTurn {
   approvals: Map<HostInteractionId, ActiveApproval>;
   elicitations: Map<HostInteractionId, ActiveElicitation>;
   questions: GrokQuestions;
+  planApprovals: GrokPlanApprovals;
   cancellationRequested: boolean;
   beforeNativeTurnKeys: Set<string>;
   historyStart: number;
@@ -426,6 +437,7 @@ class GrokHarnessSession implements HarnessSession {
   #configuring = false;
   #phase: SessionPhase = "open";
   #state: HarnessSessionState;
+  #permissionPolicyId: HarnessPermissionModeId;
   #usage: HostUsage | null = null;
   readonly #initialCostUsd: number;
   #costRequest = 0;
@@ -537,12 +549,22 @@ class GrokHarnessSession implements HarnessSession {
       ...capabilitiesForModels(this.#modelState),
       steer: this.#canSteerActiveTurn(),
     });
+    this.#permissionPolicyId = isGrokPlanModeId(options.initialPermissionModeId)
+      ? GROK_DEFAULT_PERMISSION_MODE_ID
+      : options.initialPermissionModeId;
+    const restoredPlan =
+      options.history.findLast(
+        (event): event is Extract<GrokTransportEvent, { type: "session.mode" }> =>
+          event.type === "session.mode",
+      )?.modeId === "plan";
     this.#state = stateForGrokModel(
       modelState,
       { nativeRef: nativeRef(opened.sessionId) },
       modelState.currentModel,
       modelState.currentThinkingOptionId,
-      options.initialPermissionModeId,
+      isGrokPlanModeId(options.initialPermissionModeId) || restoredPlan
+        ? GROK_PLAN_MODE_ID
+        : options.initialPermissionModeId,
     );
     this.initialState = this.#state;
     this.#snapshot = {
@@ -640,6 +662,10 @@ class GrokHarnessSession implements HarnessSession {
         onQuestion: async (request) => {
           await this.#backgroundQueue;
           return this.#active ? this.#active.questions.ask(request) : { outcome: "cancelled" };
+        },
+        onPlanApproval: async (request) => {
+          await this.#backgroundQueue;
+          return this.#active ? this.#active.planApprovals.ask(request) : { outcome: "cancelled" };
         },
       });
       void goals?.read();
@@ -792,8 +818,15 @@ class GrokHarnessSession implements HarnessSession {
           this.#active === active && this.#phase === "open" && !active.cancellationRequested
             ? active.questions.ask(request)
             : Promise.resolve({ outcome: "cancelled" }),
+        (request) =>
+          this.#active === active && this.#phase === "open" && !active.cancellationRequested
+            ? active.planApprovals.ask(request)
+            : Promise.resolve({ outcome: "cancelled" }),
       )
-      .finally(() => active.questions.cancel())
+      .finally(() => {
+        active.questions.cancel();
+        active.planApprovals.cancel();
+      })
       .then(
         (response) =>
           this.#settleFromHistory(
@@ -882,6 +915,9 @@ class GrokHarnessSession implements HarnessSession {
       approvals: new Map(),
       elicitations: new Map(),
       questions: new GrokQuestions(command.turnId, this.#randomUUID, (output) =>
+        this.#channel.emit(output),
+      ),
+      planApprovals: new GrokPlanApprovals(command.turnId, this.#randomUUID, (output) =>
         this.#channel.emit(output),
       ),
       cancellationRequested: false,
@@ -1094,6 +1130,10 @@ class GrokHarnessSession implements HarnessSession {
   async #backgroundEvent(event: GrokTransportEvent): Promise<void> {
     await this.#goalCommand;
     if (this.#phase !== "open") return;
+    if (event.type === "session.mode") {
+      this.#applyNativeSessionMode(event.modeId);
+      return;
+    }
     if (this.#bufferGoalHelper(event)) return;
     if (!this.#active && event.type === "subagent.finished") {
       this.#event({
@@ -1410,6 +1450,9 @@ class GrokHarnessSession implements HarnessSession {
       questions: new GrokQuestions(command.turnId, this.#randomUUID, (output) =>
         this.#channel.emit(output),
       ),
+      planApprovals: new GrokPlanApprovals(command.turnId, this.#randomUUID, (output) =>
+        this.#channel.emit(output),
+      ),
       cancellationRequested: false,
       beforeNativeTurnKeys: new Set(),
       historyStart: this.#historyLength,
@@ -1598,7 +1641,7 @@ class GrokHarnessSession implements HarnessSession {
     command: PermissionModeSelectCommand,
   ): Promise<HarnessResult<PermissionModeSelectCompleted>> {
     try {
-      decodeGrokPermissionModeId(command.permissionModeId);
+      grokCatalogPermissionModeId(command.permissionModeId);
     } catch {
       return {
         ok: false,
@@ -1625,12 +1668,50 @@ class GrokHarnessSession implements HarnessSession {
         },
       };
     }
+    const wantPlan = isGrokPlanModeId(command.permissionModeId);
+    const inPlan = isGrokPlanModeId(this.#state.effectivePermissionModeId);
+    if (wantPlan && !this.#transport.setSessionMode) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "Grok Session Mode is unavailable",
+          retryable: false,
+        },
+      };
+    }
     this.#configuring = true;
     try {
-      await this.#transport.setPermissionMode(command.permissionModeId);
+      if (wantPlan) {
+        if (!inPlan) await this.#transport.setSessionMode?.("plan");
+      } else {
+        if (inPlan) {
+          try {
+            await this.#transport.setSessionMode?.("default");
+          } catch (error) {
+            return { ok: false, error: normalizeError(error, "nativeFailure") };
+          }
+        }
+        try {
+          await this.#transport.setPermissionMode(command.permissionModeId);
+        } catch (error) {
+          if (inPlan) {
+            try {
+              await this.#transport.setSessionMode?.("plan");
+            } catch {
+              // Report the permission failure; native plan may already have left.
+            }
+          }
+          throw error;
+        }
+        this.#permissionPolicyId = command.permissionModeId;
+      }
       if (this.#phase !== "open")
         return { ok: false, error: invalidState("Grok Session is closed") };
-      this.#state = { ...this.#state, effectivePermissionModeId: command.permissionModeId };
+      this.#state = {
+        ...this.#state,
+        effectivePermissionModeId: wantPlan ? GROK_PLAN_MODE_ID : command.permissionModeId,
+      };
       this.#event({ type: "session.state.changed", state: this.#state });
       return { ok: true, value: { completed: true } };
     } catch (error) {
@@ -1652,6 +1733,7 @@ class GrokHarnessSession implements HarnessSession {
     }
     this.#cancelActiveElicitations(active);
     active.questions.cancel();
+    active.planApprovals.cancel();
     try {
       await this.#transport.cancel();
       return { ok: true, value: { cancellationRequested: true } };
@@ -1667,6 +1749,8 @@ class GrokHarnessSession implements HarnessSession {
     const permission = active?.approvals.get(command.interactionId);
     const elicitation = active?.elicitations.get(command.interactionId);
     if (active?.questions.has(command.interactionId)) return active.questions.respond(command);
+    if (active?.planApprovals.has(command.interactionId))
+      return active.planApprovals.respond(command);
     if (!active || (!permission && !elicitation))
       return { ok: false, error: invalidState("Grok Interaction is not pending") };
     if (command.response.type !== "approval") {
@@ -1812,8 +1896,19 @@ class GrokHarnessSession implements HarnessSession {
     }
   }
 
+  #applyNativeSessionMode(modeId: string): void {
+    const next = modeId === "plan" ? GROK_PLAN_MODE_ID : this.#permissionPolicyId;
+    if (this.#state.effectivePermissionModeId === next) return;
+    this.#state = { ...this.#state, effectivePermissionModeId: next };
+    this.#event({ type: "session.state.changed", state: this.#state });
+  }
+
   #handleEvent(active: ActiveTurn, event: GrokTransportEvent): void {
     if (this.#active !== active || this.#phase !== "open") return;
+    if (event.type === "session.mode") {
+      this.#applyNativeSessionMode(event.modeId);
+      return;
+    }
     const requestUsage = active.usage?.observe(event);
     if (requestUsage) {
       this.#publishUsage(requestUsage, active.command.turnId, true);
@@ -1841,6 +1936,7 @@ class GrokHarnessSession implements HarnessSession {
       this.#completeCompaction(active, event);
     } else if (event.type === "interaction.resolved") {
       active.questions.withdraw(event.toolCallId);
+      active.planApprovals.withdraw(event.toolCallId);
       for (const pending of [...active.elicitations.values()]) {
         if (pending.nativeToolCallId === event.toolCallId) {
           this.#settleElicitation(active, pending, grokMcpElicitCancel(), "cancelled");
@@ -2484,6 +2580,7 @@ class GrokHarnessSession implements HarnessSession {
     }
     this.#cancelActiveElicitations(active);
     active.questions.cancel();
+    active.planApprovals.cancel();
     this.#active = null;
     if (usage || this.#usage)
       this.#publishUsage({ ...usage, ...active.usage?.metrics() }, active.command.turnId, true);
@@ -2532,6 +2629,7 @@ class GrokHarnessSession implements HarnessSession {
         approval.resolve({ outcome: { outcome: "cancelled" } });
       this.#cancelActiveElicitations(active);
       active.questions.cancel();
+      active.planApprovals.cancel();
       await this.#transport.cancel().catch(() => undefined);
       await Promise.race([
         active.completion,
@@ -2762,7 +2860,7 @@ export class GrokAdapter implements HarnessAdapter {
           ? (input.permissionModeId ?? GROK_DEFAULT_PERMISSION_MODE_ID)
           : GROK_DEFAULT_PERMISSION_MODE_ID;
     try {
-      decodeGrokPermissionModeId(requestedPermissionModeId);
+      grokCatalogPermissionModeId(requestedPermissionModeId);
     } catch {
       return {
         ok: false,
@@ -3009,7 +3107,22 @@ export class GrokAdapter implements HarnessAdapter {
           ]);
         }
       }
-      await transport.setPermissionMode(initialPermissionModeId);
+      if (isGrokPlanModeId(initialPermissionModeId)) {
+        if (!transport.setSessionMode) {
+          await transport.close().catch(() => undefined);
+          return {
+            ok: false,
+            error: {
+              code: "unsupported",
+              message: "Grok Session Mode is unavailable",
+              retryable: false,
+            },
+          };
+        }
+        await transport.setSessionMode("plan");
+      } else {
+        await transport.setPermissionMode(initialPermissionModeId);
+      }
       const history = await transport.getHistory();
       let initialUsage =
         input.kind === "resume" ||
