@@ -572,6 +572,20 @@ it("routes Host requests through the main-process RPC client without native inte
   }
 });
 
+it("discovers an SSH-only Host RPC family without a local member", async () => {
+  const fixture = setup({ hosts: ["ssh:remote"] });
+  const routing = await install(fixture);
+  try {
+    expect(routing.knownHostIds?.()).toEqual(["ssh:remote"]);
+    const route = routing.forHost("ssh:remote");
+    expect(route?.manager).toMatchObject({ kind: "main-process-rpc" });
+    await route?.manager.sendRequest("model/list", {});
+    expect(fixture.rpc.sendRequest).toHaveBeenCalledExactlyOnceWith("model/list", {});
+  } finally {
+    routing.dispose();
+  }
+});
+
 it("applies an external draft's carrier only to that draft's creation call", async () => {
   const fixture = setup();
   const routing = await install(fixture);

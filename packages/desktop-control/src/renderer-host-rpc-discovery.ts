@@ -89,8 +89,10 @@ export function findRendererHostRpcFamily(
     if (!record(members) || typeof members.get !== "function") continue;
     for (const [hostId, member] of members) {
       // Reading a signal mounts it, so members keyed by Thread or hash stay unread.
-      // Every connection family has `local`, so unknown Host kinds still find it.
-      if (typeof hostId !== "string" || !/^(?:local$|durable$|remote[-:])/u.test(hostId)) continue;
+      // Probe known Host IDs only. `ssh:` is Desktop's SSH Host prefix; `local`
+      // still finds mixed families, but an SSH-only family has no `local` member.
+      if (typeof hostId !== "string" || !/^(?:local$|durable$|remote[-:]|ssh:)/u.test(hostId))
+        continue;
       if (!record(member)) continue;
       const signal = member.value;
       if (!record(signal) || typeof signal.get !== "function") continue;
