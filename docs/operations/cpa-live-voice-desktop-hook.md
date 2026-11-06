@@ -57,6 +57,10 @@ experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 The macOS **26.1027.61615** build **24141** profile binds Work gateway voice,
 native Chat Instant Connect and Voice Settings to the exact assets below.
 The retained **26.1027.30824** profiles remain independently selectable.
+Fork `v0.17.3-0` keeps this pin. Compat Daily on 6 November 2026 reported
+public Sparkle latest **26.1103.31037** build **25241** without qualifying
+that Desktop ([#30](https://github.com/karlorz/codex-host/issues/30),
+[#31](https://github.com/karlorz/codex-host/issues/31)).
 
 | Contract | macOS 26.1027.61615 asset and exports |
 | --- | --- |
