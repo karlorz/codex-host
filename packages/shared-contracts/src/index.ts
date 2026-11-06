@@ -210,6 +210,8 @@ export {
   threadSteeringInspectParamsSchema,
   threadSteeringInspectResultSchema,
   THREAD_STEER_DELIVERY_PARAM,
+  THREAD_STEERING_CONTEXT_PARAM,
+  threadSteeringContextSchema,
   threadSteerDeliverySchema,
   threadOwnershipSchema,
 } from "./harness-models.js";

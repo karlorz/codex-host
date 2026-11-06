@@ -88,7 +88,12 @@ export function findRendererHostRpcFamily(
     if (!record(definition) || definition.kind !== "signal-family") continue;
     if (!record(members) || typeof members.get !== "function") continue;
     for (const [hostId, member] of members) {
-      if (typeof hostId !== "string" || !record(member)) continue;
+      // Reading a signal mounts it, so members keyed by Thread or hash stay unread.
+      // Probe known Host IDs only. `ssh:` is Desktop's SSH Host prefix; `local`
+      // still finds mixed families, but an SSH-only family has no `local` member.
+      if (typeof hostId !== "string" || !/^(?:local$|durable$|remote[-:]|ssh:)/u.test(hostId))
+        continue;
+      if (!record(member)) continue;
       const signal = member.value;
       if (!record(signal) || typeof signal.get !== "function") continue;
       let value: unknown;

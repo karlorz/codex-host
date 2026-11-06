@@ -27,14 +27,13 @@ concurrency:
 jobs:
   check:
     name: Check ${{ matrix.os }}
-    # Release evidence uses stable job names; macOS runs on the macos-26 ARM pool.
-    runs-on: ${{ matrix.os == 'macos-15' && 'macos-26' || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os:
           - ubuntu-22.04
-          - macos-15
+          - macos-26
           - windows-latest
     steps:
       - name: Checkout
