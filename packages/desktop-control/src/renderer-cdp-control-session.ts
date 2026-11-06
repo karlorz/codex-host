@@ -7,6 +7,7 @@ import {
   cdpExceptionMessage,
 } from "./cdp-client.js";
 import { CPA_LIVE_VOICE_HOOK_GLOBAL } from "./cpa-live-voice-hook.js";
+import { BROWSER_ANNOTATION_STYLE_COMPAT_SOURCE } from "./browser-annotation-style-compat.js";
 import {
   installRendererDraftPrewarmPolicyDirect,
   type RendererDraftPrewarmPolicyStatus,
@@ -346,6 +347,54 @@ function isLocalThreadRenderer(target: CdpTarget): boolean {
   );
 }
 
+function isBrowserPage(target: CdpTarget): boolean {
+  if (target.type !== "page") return false;
+  try {
+    return ["http:", "https:"].includes(new URL(target.url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+async function installBrowserAnnotationStyles(
+  target: CdpTarget,
+  browserClients: Map<string, RendererCdpClient>,
+  operations: RendererCdpControlOperations,
+  signal: AbortSignal,
+): Promise<void> {
+  const timeoutMessage = "Browser annotation style compatibility installation timed out";
+  const run = <T>(operation: () => Promise<T>): Promise<T> =>
+    runWithCdpSignal(signal, timeoutMessage, operation);
+  let renderer = browserClients.get(target.id);
+  const registered = renderer !== undefined;
+  renderer ??= await connectRendererTarget(target, operations, signal, timeoutMessage);
+  const connected = renderer;
+  try {
+    if (!registered) {
+      await run(() => connected.command("Page.enable"));
+      await run(() =>
+        connected.command("Page.addScriptToEvaluateOnNewDocument", {
+          source: BROWSER_ANNOTATION_STYLE_COMPAT_SOURCE,
+        }),
+      );
+      // Chromium removes new-document scripts when their CDP session detaches.
+      browserClients.set(target.id, connected);
+    }
+    const installed = await run(() =>
+      connected.evaluate<unknown>(
+        "globalThis.__codexhostBrowserAnnotationStylesV1?.refresh() === true",
+      ),
+    );
+    if (installed !== true) {
+      await run(() => evaluateSource(connected, BROWSER_ANNOTATION_STYLE_COMPAT_SOURCE));
+    }
+  } catch (error) {
+    browserClients.delete(target.id);
+    connected.close();
+    throw error;
+  }
+}
+
 async function installLocalThreadRenderer(
   target: CdpTarget,
   source: string,
@@ -376,6 +425,7 @@ async function installAuxiliaryRenderers(
   rendererSource: string,
   enabledAgents: readonly string[] | undefined,
   overlayHookSource: string | undefined,
+  browserStyleClients: Map<string, RendererCdpClient>,
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
 ): Promise<void> {
@@ -385,7 +435,19 @@ async function installAuxiliaryRenderers(
       signal,
       "Auxiliary Renderer CDP target discovery timed out",
     );
+    const liveTargets = new Set(targets.map((target) => target.id));
+    for (const [id, client] of browserStyleClients) {
+      if (!liveTargets.has(id)) {
+        client.close();
+        browserStyleClients.delete(id);
+      }
+    }
     await Promise.allSettled([
+      ...targets
+        .filter(isBrowserPage)
+        .map((target) =>
+          installBrowserAnnotationStyles(target, browserStyleClients, operations, signal),
+        ),
       ...(overlayHookSource
         ? selectAvatarOverlayRendererTargets(targets).map((overlay) =>
             installOverlayHook(overlay, overlayHookSource, operations, signal),
@@ -439,6 +501,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     private readonly rendererCdpEndpoint: string,
     private readonly rendererSource: string,
     private readonly overlayHookSource: string | undefined,
+    private readonly browserStyleClients: Map<string, RendererCdpClient>,
     private readonly enabledAgents: readonly string[] | undefined,
     private readonly timeoutMs: number,
     private readonly pollIntervalMs: number,
@@ -509,6 +572,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
       this.rendererSource,
       this.enabledAgents,
       this.overlayHookSource,
+      this.browserStyleClients,
       this.operations,
       discoveryTimeoutSignal(this.timeoutMs),
     );
@@ -531,6 +595,8 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     this.#closed = true;
     this.disposeModules();
     this.renderer.close();
+    for (const client of this.browserStyleClients.values()) client.close();
+    this.browserStyleClients.clear();
   }
 }
 
@@ -567,11 +633,13 @@ export async function createRendererCdpControlSession(
     pollIntervalMs,
     operations,
   );
+  const browserStyleClients = new Map<string, RendererCdpClient>();
   await installAuxiliaryRenderers(
     options.rendererCdpEndpoint,
     options.rendererSource,
     enabledAgents,
     options.overlayHookSource,
+    browserStyleClients,
     operations,
     discoveryTimeoutSignal(timeoutMs, options.signal),
   );
@@ -580,6 +648,7 @@ export async function createRendererCdpControlSession(
     options.rendererCdpEndpoint,
     options.rendererSource,
     options.overlayHookSource,
+    browserStyleClients,
     enabledAgents,
     timeoutMs,
     pollIntervalMs,
