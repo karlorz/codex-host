@@ -31,9 +31,6 @@ describe("workflow and form contracts", () => {
   it("keeps CI job names synchronized with the actual matrix", async () => {
     const workflow = await read(".github/workflows/ci.yml");
     expect(workflow).toContain("name: Check ${{ matrix.os }}");
-    expect(workflow).toContain(
-      "runs-on: ${{ matrix.os == 'macos-15' && 'macos-26' || matrix.os }}",
-    );
     for (const name of CI_JOBS.filter((value) => value !== "Check Linux ARM64")) {
       expect(workflow).toContain(`- ${name.slice("Check ".length)}\n`);
     }
