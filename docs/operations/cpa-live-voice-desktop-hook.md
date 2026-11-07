@@ -57,10 +57,10 @@ experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 The macOS **26.1027.61615** build **24141** profile binds Work gateway voice,
 native Chat Instant Connect and Voice Settings to the exact assets below.
 The retained **26.1027.30824** profiles remain independently selectable.
-Fork `v0.17.3-0` keeps this pin. Compat Daily on 6 November 2026 reported
-public Sparkle latest **26.1103.31037** build **25241** without qualifying
-that Desktop ([#30](https://github.com/karlorz/codex-host/issues/30),
-[#31](https://github.com/karlorz/codex-host/issues/31)).
+Fork `v0.17.4-0` keeps this pin. Public Sparkle latest is **26.1103.41825**
+build **25679** ([#35](https://github.com/karlorz/codex-host/issues/35),
+[#36](https://github.com/karlorz/codex-host/issues/36)). Karl's decision is
+to keep production on this pin; 26.1103 is skipped, not a pending remap.
 
 | Contract | macOS 26.1027.61615 asset and exports |
 | --- | --- |
@@ -102,23 +102,25 @@ its vendor bundle was not retained locally. The preceding feed alert names
 **26.1027.51404**, but neither its bundle nor proof that it is the direct
 predecessor is available. Current source and live checks therefore establish
 current bindings, not a complete vendor-bundle diff. Microphone release,
-audible playback, interruption and spontaneous-close recovery remain attended
-acceptance under [issue #4](https://github.com/karlorz/codex-host/issues/4).
-Pin-drift alerts #16–20 do not establish those behaviors.
+interruption/mute, and spontaneous-close recovery are opportunistic dogfood
+under [issue #4](https://github.com/karlorz/codex-host/issues/4), not a
+release gate.
 
-## Desktop 26.1103.32239 mapping
+## Desktop 26.1103.41825 (skipped)
 
-Public Sparkle **26.1103.32239** build **25471** is not a Work/Chat pin.
-Named `app-initial-*`, `app-shared-*`, `start-voice-*`, and
+Public Sparkle **26.1103.41825** build **25679** is not a Work/Chat pin.
+Scratch-launched from ignored `.codexhost/update-impact/26.1103.41825/` with
+isolated user data; production `/Applications/ChatGPT.app` stayed
+**26.1027.61615**. Named `app-initial-*`, `app-shared-*`, `start-voice-*`, and
 `avatar-overlay-native-page-*` assets are absent. `webview/index.html` loads
 numeric rspack chunks `782259.7a3e865ee5.js`, `727403.da6b00f04b.js`,
-`158624.0baba19172.js`, and `348410.792d1c9584.js`. The native
-`requestRealtimeStart`, `registerRealtimeStarter`, and `realtimeVoiceRuntime`
-strings still exist, including in `webview/assets/async/366057.8dff3ed0b6.js`
-and `webview/assets/async/884655.2edb304734.js`. Those async chunks are not the
-pinned ESM service records (`Vct`, `LRt`, overlay page export). Unknown assets
-fail closed. Do not re-pin until those exports and a Host-attached scratch
-Desktop are qualified. Production Work/Chat pins remain **26.1027.61615**.
+`158624.0baba19172.js`, and `348410.46c6a64506.js`. Chromium product is
+157.0.8103.39 versus production 156.0.8078.79. Native
+`requestRealtimeStart` / `registerRealtimeStarter` strings still exist in
+async chunks that are not the pinned ESM service records. Unknown assets fail
+closed. Keep 26.1027; this is not a remap queue. Earlier scratch
+**26.1103.32239** build **25471** had the same named-asset absence; its
+`348410` hash was `792d1c9584`.
 
 ## Desktop 26.1027.30824 Work qualification
 

@@ -32,11 +32,13 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 
 ## Daily driver
 
-The daily driver is `/Applications/ChatGPT.app` at the pinned Work/Chat
-version. Operator production use of that bundle is the acceptance for ordinary
-Work/Chat voice on this pin. Open `compat-broken` issues and remaining
-[#4](https://github.com/karlorz/codex-host/issues/4) edge items do not withhold
-that baseline. Live voice, Composer, and hook debug attach to that
+The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Sparkle
+**26.1103.41825** stays skipped. Pin-drift [#35](https://github.com/karlorz/codex-host/issues/35)
+and [#36](https://github.com/karlorz/codex-host/issues/36) remain the live
+alerts, not a queue to install that feed. Operator production use of that
+bundle is the acceptance for ordinary Work/Chat voice on this pin. Open
+`compat-broken` issues and [#4](https://github.com/karlorz/codex-host/issues/4)
+dogfood items do not withhold that baseline. Live voice, Composer, and hook debug attach to that
 already-running Desktop. Leave `app.asar` unchanged.
 
 Only the operator may quit or restart `/Applications/ChatGPT.app`. Agents must

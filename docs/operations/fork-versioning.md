@@ -19,18 +19,19 @@ re-pin or qualify a newer Desktop.
 At the 22 October 2026 baseline (`origin/main` at `10ba06b7`), Work and Chat
 pins were **26.1013.40934** against Sparkle **26.1016.61520**. As of fork
 `v0.17.4-0` (7 November 2026), Work and Chat remain pinned to
-**26.1027.61615**. Compat Daily on this release reports Sparkle latest
-**26.1103.41825** as pin-drift; do not re-pin or install that Desktop until
-it is qualified. A scratch copy of 26.1103.41825 (build 25679) was downloaded
-and launched from ignored `.codexhost/update-impact/26.1103.41825/` with
-isolated user data; production `/Applications/ChatGPT.app` stayed on the pin.
-Named 26.1027.61615 voice assets are absent in that candidate, and its
-Chromium product is 157.0.8103.39 versus production 156.0.8078.79.
+**26.1027.61615**. Karl's decision is to keep that daily driver; do not
+install or re-pin Sparkle **26.1103.41825**. Compat Daily reports that feed
+as pin-drift on [#35](https://github.com/karlorz/codex-host/issues/35) /
+[#36](https://github.com/karlorz/codex-host/issues/36). Those issues are the
+live alert pair, not a qualification queue. A scratch copy of 26.1103.41825
+(build 25679) was inspected under ignored
+`.codexhost/update-impact/26.1103.41825/`; named 26.1027.61615 voice assets
+are absent, and its Chromium product is 157.0.8103.39 versus production
+156.0.8078.79. Upstream `BytePioneer-AI/codex-host` still holds `v0.17.4` and
+does not ship this fork's Live Voice pin files. This drop is closed.
 
-Live pin-drift trackers are
-[#35](https://github.com/karlorz/codex-host/issues/35) (work) and
-[#36](https://github.com/karlorz/codex-host/issues/36) (chat). Historical
-Sparkle snapshots [#25](https://github.com/karlorz/codex-host/issues/25)–[#33](https://github.com/karlorz/codex-host/issues/33)
+Historical Sparkle snapshots
+[#25](https://github.com/karlorz/codex-host/issues/25)–[#33](https://github.com/karlorz/codex-host/issues/33)
 are closed as superseded.
 [#4](https://github.com/karlorz/codex-host/issues/4) stays open as opportunistic
 dogfood for microphone release, interruption/mute, and spontaneous-close
