@@ -39,6 +39,10 @@ export function enrollmentStorePath(environment: NodeJS.ProcessEnv, clientId: st
   );
 }
 
+export function enrollmentRuntimeRecordsPath(environment: NodeJS.ProcessEnv): string {
+  return path.join(enrollmentDirectory(environment), "runtime-records.json");
+}
+
 export function isPrivateFileMode(mode: number): boolean {
   if (process.platform === "win32") return true;
   return (mode & 0o777) === 0o600;
@@ -121,6 +125,59 @@ function isEnrollmentRecord(value: unknown): value is EnrollmentRecord {
     typeof record.allowlistDigest === "string" &&
     Array.isArray(record.allowlist)
   );
+}
+
+export async function writeRuntimeEnrollmentRecords(
+  filePath: string,
+  records: readonly EnrollmentRecord[],
+): Promise<void> {
+  for (const record of records) {
+    const digest = allowlistDigest(record.allowlist);
+    if (digest !== record.allowlistDigest) {
+      throw enrollmentError(
+        "ENROLLMENT_INVALID",
+        "Enrollment allowlist no longer matches its consent digest",
+        "allowlist_tamper",
+      );
+    }
+    assertNotParentIdentity(record.threadId);
+    assertLoopbackHttpUrl(record.endpoint);
+  }
+  await writePrivateJsonFile(filePath, { schemaVersion: 1, records });
+}
+
+export async function readRuntimeEnrollmentRecords(filePath: string): Promise<EnrollmentRecord[]> {
+  let text: string;
+  let mode: number;
+  try {
+    const info = await stat(filePath);
+    mode = info.mode;
+    text = await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return [];
+    throw error;
+  }
+  if (!isPrivateFileMode(mode)) {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Runtime enrollment records are not user-private mode 600",
+      "insecure_store_mode",
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Runtime enrollment records are not valid JSON",
+      "allowlist_tamper",
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+  const records = (parsed as { records?: unknown }).records;
+  if (!Array.isArray(records)) return [];
+  return records.filter(isEnrollmentRecord);
 }
 
 export async function writeEnrollmentStore(

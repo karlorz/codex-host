@@ -19,12 +19,15 @@ import { EnrollmentAuthority } from "../src/client-enrollment-authority.js";
 import {
   ENROLL_FROM_ENV_FILE_ENV,
   ENROLL_FROM_PID_ENV,
+  enrollmentBootstrapPath,
   enrollmentStorePath,
   loadEnrollmentCredentialsFromEnvFile,
   loadEnrollmentCredentialsFromPid,
   rejectForeignCredentialSources,
+  writeEnrollmentBootstrap,
   writeEnrollmentStore,
 } from "../src/client-enrollment-store.js";
+import { resolveCliRuntimeConnection } from "../src/delegation-cli-enrollment.js";
 import { DELEGATION_HELP, runDelegationCli } from "../src/delegation-cli.js";
 import { startDelegationControlServer } from "../src/delegation-control-server.js";
 import {
@@ -257,6 +260,86 @@ describe("client enrollment store and Runtime", () => {
     } finally {
       await enrollment.close();
       await server.close();
+    }
+  });
+
+  it("prefers live bootstrap endpoint over a stale enrollment store port", async () => {
+    const dataDir = await tempDataDir();
+    const stale = record({ endpoint: "http://127.0.0.1:49702" });
+    await writeEnrollmentStore(
+      enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot"),
+      stale,
+    );
+    await writeEnrollmentBootstrap(enrollmentBootstrapPath({ CODEXHOST_DATA_DIR: dataDir }), {
+      schemaVersion: 1,
+      endpoint: "http://127.0.0.1:50843",
+      bootstrapToken: "bootstrap-token",
+      pid: 9,
+      startedAt: "2026-11-07T00:00:00.000Z",
+    });
+    const connection = await resolveCliRuntimeConnection({
+      environment: { CODEXHOST_DATA_DIR: dataDir },
+      parsed: { positionals: ["read"], options: new Map() },
+      nowMs: Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    expect(connection.endpoint).toBe("http://127.0.0.1:50843");
+    expect(connection.token).toBe("enrolled-token");
+    expect(connection.source).toBe("enrollment");
+  });
+
+  it("reloads persisted enrollments onto a new Runtime listen port", async () => {
+    const dataDir = await tempDataDir();
+    const first = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("approve"),
+      bootstrapToken: "bootstrap-token",
+      createId: (() => {
+        let index = 0;
+        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
+      })(),
+      createToken: () => "enrolled-token",
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const firstServer = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment: first,
+    });
+    try {
+      await first.publishBootstrap(firstServer.endpoint);
+      await first.enroll({
+        clientId: "grok-bot",
+        executablePath: "/synthetic/grok-bot",
+        allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "watch"] }],
+        attendedHostApprove: true,
+      });
+    } finally {
+      await first.close();
+      await firstServer.close();
+    }
+    const second = new EnrollmentAuthority({
+      hostToken: "new-host-token",
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("timeout"),
+      bootstrapToken: "new-bootstrap-token",
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const secondServer = await startDelegationControlServer({
+      token: "new-host-token",
+      api: controlApi(),
+      enrollment: second,
+    });
+    try {
+      await second.publishBootstrap(secondServer.endpoint);
+      const principal = second.authenticate("Bearer enrolled-token");
+      expect(principal?.kind).toBe("enrollment");
+      if (principal?.kind === "enrollment") {
+        expect(principal.record.endpoint).toBe(secondServer.endpoint);
+      }
+    } finally {
+      await second.close();
+      await secondServer.close();
     }
   });
 

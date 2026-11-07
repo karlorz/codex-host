@@ -25,7 +25,10 @@ import {
 } from "./client-enrollment-consent.js";
 import {
   enrollmentBootstrapPath,
+  enrollmentRuntimeRecordsPath,
+  readRuntimeEnrollmentRecords,
   writeEnrollmentBootstrap,
+  writeRuntimeEnrollmentRecords,
   type EnrollmentBootstrapDescriptor,
 } from "./client-enrollment-store.js";
 import { matchesBearerToken } from "./bearer-token.js";
@@ -103,8 +106,36 @@ export class EnrollmentAuthority {
   async publishBootstrap(endpoint: string): Promise<string> {
     this.#endpoint = endpoint;
     this.#bootstrapPath = enrollmentBootstrapPath({ CODEXHOST_DATA_DIR: this.#dataDirectory });
+    await this.#restoreRecords();
+    for (const [token, record] of this.#byToken) {
+      this.#byToken.set(token, { ...record, endpoint });
+    }
+    await this.#saveRecords();
     await writeEnrollmentBootstrap(this.#bootstrapPath, this.bootstrapDescriptor());
     return this.#bootstrapPath;
+  }
+
+  async #restoreRecords(): Promise<void> {
+    const records = await readRuntimeEnrollmentRecords(
+      enrollmentRuntimeRecordsPath({ CODEXHOST_DATA_DIR: this.#dataDirectory }),
+    );
+    this.#byToken.clear();
+    for (const record of records) {
+      const next = { ...record, endpoint: this.#endpoint ?? record.endpoint };
+      try {
+        verifyEnrollmentRecord(next, this.#now());
+      } catch {
+        continue;
+      }
+      this.#byToken.set(next.token, next);
+    }
+  }
+
+  async #saveRecords(): Promise<void> {
+    await writeRuntimeEnrollmentRecords(
+      enrollmentRuntimeRecordsPath({ CODEXHOST_DATA_DIR: this.#dataDirectory }),
+      [...this.#byToken.values()],
+    );
   }
 
   async close(): Promise<void> {
@@ -177,10 +208,11 @@ export class EnrollmentAuthority {
       allowlistDigest: allowlistDigest(allowlist),
     };
     this.#byToken.set(token, record);
+    await this.#saveRecords();
     return record;
   }
 
-  revoke(header: string | undefined): EnrollmentRecord {
+  async revoke(header: string | undefined): Promise<EnrollmentRecord> {
     const principal = this.authenticate(header);
     if (principal?.kind !== "enrollment") {
       throw enrollmentError("ENROLLMENT_INVALID", "Enrollment has been revoked", "revoked");
@@ -190,6 +222,7 @@ export class EnrollmentAuthority {
       revokedAt: new Date(this.#now()).toISOString(),
     };
     this.#byToken.set(revoked.token, revoked);
+    await this.#saveRecords();
     return revoked;
   }
 

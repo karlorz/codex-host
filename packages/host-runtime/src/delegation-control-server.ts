@@ -210,7 +210,7 @@ export async function startDelegationControlServer(input: {
         if (!input.enrollment) {
           throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
         }
-        const revoked = input.enrollment.revoke(request.headers.authorization);
+        const revoked = await input.enrollment.revoke(request.headers.authorization);
         writeJson(response, 200, { enrollmentId: revoked.enrollmentId, revoked: true });
         return;
       }

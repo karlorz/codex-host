@@ -108,8 +108,15 @@ export async function resolveCliRuntimeConnection(input: {
     input.nowMs,
   );
   if (!record) throw missingRuntimeEnvironmentError(undefined, undefined);
+  let liveEndpoint = record.endpoint;
+  try {
+    const bootstrap = await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
+    if (bootstrap.endpoint) liveEndpoint = bootstrap.endpoint;
+  } catch {
+    // Runtime is down or bootstrap unpublished; fall back to the stored endpoint.
+  }
   return {
-    endpoint: record.endpoint,
+    endpoint: liveEndpoint,
     token: record.token,
     callerThreadId: record.threadId,
     source: "enrollment",
