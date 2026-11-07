@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use codexhost_platform::{STOCK_CODEX_PATH_ENV, process_executable_path};
+use codexhost_platform::{STOCK_CODEX_PATH_ENV, node_entrypoint_path, process_executable_path};
 
 struct Fixture {
     root: PathBuf,
@@ -112,12 +112,19 @@ impl Fixture {
     fn assert_selected(&self, observed: Option<(PathBuf, String)>, stderr: &str) {
         let (executable, identity) =
             observed.unwrap_or_else(|| panic!("Host did not start: {stderr}"));
-        assert_eq!(executable, self.node, "Shim must execute the selected Node");
+        assert_eq!(
+            node_entrypoint_path(&executable),
+            node_entrypoint_path(&self.node),
+            "Shim must execute the selected Node"
+        );
         let runtime = identity
             .lines()
             .find_map(|line| line.strip_prefix("host_runtime_path="))
             .unwrap();
-        assert_eq!(Path::new(runtime), self.runtime.canonicalize().unwrap());
+        assert_eq!(
+            node_entrypoint_path(Path::new(runtime)),
+            node_entrypoint_path(&self.runtime.canonicalize().unwrap()),
+        );
     }
 }
 
