@@ -32,8 +32,12 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 ## Daily driver
 
 The daily driver is `/Applications/ChatGPT.app` at the pinned Work/Chat
-version. Live voice, Composer, and hook debug attach to that already-running
-Desktop. Leave `app.asar` unchanged.
+version. Operator production use of that bundle is the acceptance for ordinary
+Work/Chat voice on this pin. Open `compat-broken` issues and remaining
+[#4](https://github.com/karlorz/codex-host/issues/4) edge items do not withhold
+that baseline. Live voice, Composer, and hook debug attach to that
+already-running Desktop. Leave `app.asar` unchanged. Do not quit or relaunch
+it for pin-drift alerts or scratch inspection.
 
 Sparkle **Install Update** replaces that bundle. Use **Skip this version** or
 **Remind me later**, and leave automatic future installs off, until the offered
