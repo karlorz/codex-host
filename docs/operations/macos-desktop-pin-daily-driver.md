@@ -36,8 +36,17 @@ version. Operator production use of that bundle is the acceptance for ordinary
 Work/Chat voice on this pin. Open `compat-broken` issues and remaining
 [#4](https://github.com/karlorz/codex-host/issues/4) edge items do not withhold
 that baseline. Live voice, Composer, and hook debug attach to that
-already-running Desktop. Leave `app.asar` unchanged. Do not quit or relaunch
-it for pin-drift alerts or scratch inspection.
+already-running Desktop. Leave `app.asar` unchanged.
+
+Only the operator may quit or restart `/Applications/ChatGPT.app`. Agents must
+not quit, relaunch, or run `npm start` / `npm run install:local` against that
+production Desktop. Current-document voice-hook refresh uses the live
+`Runtime.evaluate` attach in
+[cpa-live-voice-desktop-hook.md](cpa-live-voice-desktop-hook.md#live-voice-hook-debug-on-a-running-desktop).
+That is an attended debug path for the open page, not a generic Renderer
+hot-reload. Skip mutation during an active or unknown call. New document-start
+source still waits for the operator's later manual restart. Scratch inspection
+and pin-drift alerts do not justify a relaunch.
 
 Sparkle **Install Update** replaces that bundle. Use **Skip this version** or
 **Remind me later**, and leave automatic future installs off, until the offered
