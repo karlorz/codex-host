@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import type { EnrollmentAuthority, EnrollmentPrincipal } from "./client-enrollment-authority.js";
+import type { EnrollmentAllowlistEntry, EnrollmentRequestAction } from "./client-enrollment.js";
 import {
   DelegationControlError,
   type DelegationControlApi,
@@ -41,6 +43,52 @@ function errorBody(error: unknown): {
 function writeJson(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(`${JSON.stringify(value)}\n`);
+}
+
+function enrollmentHttpStatus(error: unknown): number {
+  if (!(error instanceof DelegationControlError)) return 500;
+  if (error.code === "UNAUTHORIZED_TARGET" || error.code === "ENROLLMENT_DENIED") return 403;
+  if (error.code === "ENROLLMENT_INVALID") return 401;
+  return 400;
+}
+
+function enrollmentActionForRoute(
+  url: string | undefined,
+  body: Record<string, unknown>,
+): EnrollmentRequestAction {
+  switch (url) {
+    case "/v1/thread/send":
+      return { type: "send", threadId: String(body.threadId ?? "") };
+    case "/v1/thread/cancel":
+      return { type: "cancel", threadId: String(body.threadId ?? "") };
+    case "/v1/thread/read":
+      return { type: "read", threadId: String(body.threadId ?? "") };
+    case "/v1/thread/wait":
+      return { type: "wait", threadId: String(body.threadId ?? "") };
+    case "/v1/thread/watch":
+      return {
+        type: "watch",
+        threadId: String(body.threadId ?? ""),
+        notifyThreadId: String(body.notifyThreadId ?? ""),
+      };
+    case "/v1/thread/watches":
+      return { type: "watches" };
+    case "/v1/thread/list":
+      return { type: "list" };
+    case "/v1/delegate/start":
+      return { type: "delegate" };
+    default:
+      return { type: "harness" };
+  }
+}
+
+function authenticateControlRequest(
+  header: string | undefined,
+  hostToken: string,
+  enrollment: EnrollmentAuthority | undefined,
+): EnrollmentPrincipal | undefined {
+  if (enrollment) return enrollment.authenticate(header);
+  return matchesBearerToken(header, hostToken) ? { kind: "host" } : undefined;
 }
 
 async function jsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -108,6 +156,7 @@ export async function startDelegationControlServer(input: {
   token: string;
   api: DelegationControlApi;
   watchApi?: DelegationWatchApi;
+  enrollment?: EnrollmentAuthority;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
     void (async () => {
@@ -117,13 +166,57 @@ export async function startDelegationControlServer(input: {
         });
         return;
       }
-      if (!matchesBearerToken(request.headers.authorization, input.token)) {
+      if (request.url === "/v1/enroll") {
+        if (!input.enrollment?.matchesBootstrap(request.headers.authorization)) {
+          writeJson(response, 401, {
+            error: { code: "RUNTIME_UNREACHABLE", message: "Runtime token is invalid" },
+          });
+          return;
+        }
+        const enrollBody = await jsonBody(request);
+        const record = await input.enrollment.enroll({
+          clientId: String(enrollBody.clientId ?? ""),
+          executablePath: String(enrollBody.executablePath ?? ""),
+          ...(Array.isArray(enrollBody.allowlist)
+            ? { allowlist: enrollBody.allowlist as EnrollmentAllowlistEntry[] }
+            : {}),
+        });
+        writeJson(response, 200, record);
+        return;
+      }
+      const principal = authenticateControlRequest(
+        request.headers.authorization,
+        input.token,
+        input.enrollment,
+      );
+      if (!principal) {
         writeJson(response, 401, {
           error: { code: "RUNTIME_UNREACHABLE", message: "Runtime token is invalid" },
         });
         return;
       }
       const body = await jsonBody(request);
+      if (request.url === "/v1/enroll/revoke") {
+        if (!input.enrollment) {
+          throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+        }
+        const revoked = input.enrollment.revoke(request.headers.authorization);
+        writeJson(response, 200, { enrollmentId: revoked.enrollmentId, revoked: true });
+        return;
+      }
+      if (request.url === "/v1/enroll/status") {
+        if (!input.enrollment) {
+          throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+        }
+        writeJson(response, 200, input.enrollment.status(request.headers.authorization));
+        return;
+      }
+      if (principal.kind === "enrollment") {
+        if (!input.enrollment) {
+          throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+        }
+        input.enrollment.authorize(principal.record, enrollmentActionForRoute(request.url, body));
+      }
       switch (request.url) {
         case "/v1/harness/list":
           writeJson(response, 200, await input.api.listHarnesses());
@@ -159,17 +252,33 @@ export async function startDelegationControlServer(input: {
             await watchApi(input.watchApi).watch(body as unknown as ThreadWatchInput),
           );
           return;
-        case "/v1/thread/watches":
-          writeJson(response, 200, await watchApi(input.watchApi).watches());
+        case "/v1/thread/watches": {
+          const watches = await watchApi(input.watchApi).watches();
+          writeJson(
+            response,
+            200,
+            principal.kind === "enrollment" && input.enrollment
+              ? input.enrollment.filterWatches(principal.record, watches)
+              : watches,
+          );
           return;
-        case "/v1/thread/list":
-          writeJson(response, 200, await input.api.list(body as unknown as ThreadListInput));
+        }
+        case "/v1/thread/list": {
+          const list = await input.api.list(body as unknown as ThreadListInput);
+          writeJson(
+            response,
+            200,
+            principal.kind === "enrollment" && input.enrollment
+              ? input.enrollment.filterList(principal.record, list)
+              : list,
+          );
           return;
+        }
         default:
           throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
       }
     })().catch((error) => {
-      writeJson(response, error instanceof DelegationControlError ? 400 : 500, errorBody(error));
+      writeJson(response, enrollmentHttpStatus(error), errorBody(error));
     });
   });
   await new Promise<void>((resolve, reject) => {

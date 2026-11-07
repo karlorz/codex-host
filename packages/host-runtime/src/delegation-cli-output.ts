@@ -172,5 +172,9 @@ export function compactDelegationOutput(
         nextCursor: result.nextCursor,
       };
     }
+    case "enroll":
+    case "enroll status":
+    case "enroll revoke":
+      return body;
   }
 }

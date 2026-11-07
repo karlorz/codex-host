@@ -49,6 +49,16 @@ Find existing Threads by workspace, or use --parent to list a Thread's delegated
 Workspace listing defaults to the caller process cwd. Default limit 25 (maximum 100), sorted created-desc.
 --parent uses Delegation relationships. A null nextCursor ends the list.
 Compact output keeps task links, Harness, status, title, and workspace.`,
+  enroll: `codexhost enroll --client <id> [--allow <threadId:verb[,verb][;...]>] [--executable <path>] [--format json|compact]
+Request attended Host enrollment for a local client such as grok-bot.
+Desktop shows the client, executable path, Thread allowlist, and verbs for Approve/Deny.
+On Approve, Host issues a distinct enrollment_id, Thread id, and expiring token, and the CLI writes a user-private mode-600 store.
+The allowlist defaults to empty besides the new Thread (read/watch/send). Parent Thread access requires an explicit allowlist entry.
+Does not copy another process's Runtime environment, a Runtime descriptor, or a parent env file.`,
+  "enroll status": `codexhost enroll status [--client <id>] [--format json|compact]
+Show the local enrollment store for this login without printing the token.`,
+  "enroll revoke": `codexhost enroll revoke [--client <id>] [--format json|compact]
+Revoke the enrollment at the Host Runtime and delete the local store. Later commands fail closed.`,
 } as const;
 
 export type DelegationCliCommand = keyof typeof COMMAND_HELP;
@@ -71,6 +81,9 @@ export const DELEGATION_HELP = `usage:
   codexhost thread watch <thread>
   codexhost thread watches
   codexhost thread list
+  codexhost enroll --client <id>
+  codexhost enroll status
+  codexhost enroll revoke
 
 Use <command> --help for its options. Use harness list to discover targets.
 ${COMMON_HELP}
@@ -85,17 +98,22 @@ function hasHelpOption(arguments_: readonly string[]): boolean {
   return false;
 }
 
+function groupHelp(group: string): string {
+  const usages = Object.entries(COMMAND_HELP)
+    .filter(([name]) => name === group || name.startsWith(`${group} `))
+    .map(([, help]) => help.split("\n")[0]);
+  return `${usages.join("\n")}\n\n${COMMON_HELP}\n`;
+}
+
 export function delegationCliHelp(arguments_: readonly string[]): string | undefined {
   const [group, command, ...rest] = arguments_;
   if (!group || group === "--help" || group === "-h") return DELEGATION_HELP;
   if (!command || command === "--help" || command === "-h" || command === "help") {
     if (group === "delegate") return DELEGATION_HELP;
-    if (group === "harness" || group === "thread") {
-      const usages = Object.entries(COMMAND_HELP)
-        .filter(([name]) => name.startsWith(`${group} `))
-        .map(([, help]) => help.split("\n")[0]);
-      return `${usages.join("\n")}\n\n${COMMON_HELP}\n`;
-    }
+    if (group === "harness" || group === "thread" || group === "enroll") return groupHelp(group);
+  }
+  if (group === "enroll" && command && command !== "status" && command !== "revoke") {
+    if (hasHelpOption([command, ...rest])) return groupHelp("enroll");
   }
   if (hasHelpOption(rest)) {
     const name = `${group} ${command}`;

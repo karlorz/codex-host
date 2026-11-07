@@ -32,6 +32,8 @@ describe("delegation CLI", () => {
     ["thread", "watch", "--help"],
     ["thread", "watches", "--help"],
     ["thread", "list", "--help"],
+    ["enroll", "status", "--help"],
+    ["enroll", "revoke", "--help"],
   ])("shows scoped help for %s %s", async (group, command, help) => {
     const output = new PassThrough();
     const fetchImpl = successfulFetch({});
@@ -623,6 +625,9 @@ describe("delegation CLI", () => {
   });
 
   it("documents the safe native Codex environment-policy recovery", () => {
+    expect(DELEGATION_HELP).toContain("codexhost enroll --client <id>");
+    expect(DELEGATION_HELP).toContain("codexhost enroll status");
+    expect(DELEGATION_HELP).toContain("codexhost enroll revoke");
     expect(DELEGATION_HELP).toContain("shell_environment_policy");
     expect(DELEGATION_HELP).toContain("ignore_default_excludes = true");
     expect(DELEGATION_HELP).toContain('include_only containing "CODEXHOST_RUNTIME_ENDPOINT"');

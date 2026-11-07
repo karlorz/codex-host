@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { expect, it, vi } from "vitest";
@@ -96,20 +99,28 @@ vi.mock("../src/remote-app-server.js", async (importOriginal) => ({
 
 it("registers the primary Remote Control Host as the catalog for its attached sessions", async () => {
   // Exercise the production composition without installing skills or starting a native process.
+  const dataDir = mkdtempSync(path.join(tmpdir(), "codexhost-enroll-runtime-"));
   const { runHostRuntime } = await import("../src/run-host-runtime.js");
-  expect(
-    await runHostRuntime({
-      arguments: [],
-      environment: { CODEXHOST_STOCK_CODEX_PATH: "/synthetic/codex" },
-    }),
-  ).toBe(0);
-  expect(state.hosts).toHaveLength(2);
-  for (const host of state.hosts) {
-    expect(host.mappingStore).toBe(state.store);
-    expect(host.officialRuntimeScope).toBe(state.scope);
+  try {
+    expect(
+      await runHostRuntime({
+        arguments: [],
+        environment: {
+          CODEXHOST_STOCK_CODEX_PATH: "/synthetic/codex",
+          CODEXHOST_DATA_DIR: dataDir,
+        },
+      }),
+    ).toBe(0);
+    expect(state.hosts).toHaveLength(2);
+    for (const host of state.hosts) {
+      expect(host.mappingStore).toBe(state.store);
+      expect(host.officialRuntimeScope).toBe(state.scope);
+    }
+    expect(state.lists[0]).toHaveBeenCalledExactlyOnceWith({ limit: 2, sort: "created-desc" });
+    expect(state.lists[1]).not.toHaveBeenCalled();
+    expect(state.result?.threads.map((entry) => entry.threadId)).toEqual(["native"]);
+    expect(state.result?.nextCursor).toBe("native-cursor");
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
   }
-  expect(state.lists[0]).toHaveBeenCalledExactlyOnceWith({ limit: 2, sort: "created-desc" });
-  expect(state.lists[1]).not.toHaveBeenCalled();
-  expect(state.result?.threads.map((entry) => entry.threadId)).toEqual(["native"]);
-  expect(state.result?.nextCursor).toBe("native-cursor");
 });

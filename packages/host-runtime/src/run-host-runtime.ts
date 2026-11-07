@@ -15,6 +15,12 @@ import { createOwnedUnixBackend } from "./codex-runtime/owned-official-backends.
 import { DelegationControlRegistry } from "./delegation-control-registry.js";
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import { startDelegationControlServer } from "./delegation-control-server.js";
+import { EnrollmentAuthority } from "./client-enrollment-authority.js";
+import {
+  createTimeoutEnrollmentConsent,
+  DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS,
+} from "./client-enrollment-consent.js";
+import { codexhostDataDirectory } from "./client-enrollment-store.js";
 import { retireCodexhostDesktopRules } from "./codexhost-desktop-rule.js";
 import { installDelegationSkills } from "./delegation-skill.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
@@ -176,7 +182,24 @@ async function prepareDelegationRuntime(input: {
       ),
   });
   const token = randomBytes(32).toString("hex");
-  const server = await startDelegationControlServer({ token, api: registry, watchApi: registry });
+  const enrollment = new EnrollmentAuthority({
+    hostToken: token,
+    dataDirectory: codexhostDataDirectory(input.environment),
+    consent: createTimeoutEnrollmentConsent({ timeoutMs: DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS }),
+  });
+  const server = await startDelegationControlServer({
+    token,
+    api: registry,
+    watchApi: registry,
+    enrollment,
+  });
+  try {
+    await enrollment.publishBootstrap(server.endpoint);
+  } catch (error) {
+    process.stderr.write(
+      `codexhost enrollment bootstrap unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
   const environment = {
     ...input.environment,
     ...delegationCliEnvironment(input.environment, input.hostRuntimePath),
@@ -189,6 +212,7 @@ async function prepareDelegationRuntime(input: {
     return await input.createHost(environment, (value) => registry.register(value), registry);
   } finally {
     registry.close();
+    await enrollment.close();
     await server.close();
   }
 }
