@@ -3,6 +3,7 @@ import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bin
 import { VOICE_GATEWAY_STATUS_METHOD } from "@codexhost/shared-contracts";
 import {
   CLIENT_OWNED_VOICE_ASSETS,
+  isExternalHarnessComposer,
   rememberVoiceProductExperience,
   requestVoiceHost,
   type NativeVoiceBridge,
@@ -30,6 +31,7 @@ export function gatewayVoiceStartRequest(
   request: unknown,
   workGateway: boolean,
   chatGateway = false,
+  externalHarness = false,
 ): boolean {
   if (
     !record(request) ||
@@ -49,7 +51,9 @@ export function gatewayVoiceStartRequest(
   const mode = request.activeCollaborationMode;
   const settings = record(mode) ? mode.settings : undefined;
   const model = record(settings) ? settings.model : undefined;
-  return workGateway || (typeof model === "string" && model.startsWith("codexhost/"));
+  return (
+    workGateway || externalHarness || (typeof model === "string" && model.startsWith("codexhost/"))
+  );
 }
 
 export function wrapGatewayVoiceStarter(
@@ -190,6 +194,7 @@ export function installVoiceStartCapabilityHook(
                         request,
                         cpaLiveVoicePreferenceAllowsInstall(target),
                         chatLiveVoicePreferenceAllowsOverride(target),
+                        isExternalHarnessComposer(target),
                       ),
                     ready: async () => {
                       const hook = target.__codexhostClientOwnedVoiceV1;

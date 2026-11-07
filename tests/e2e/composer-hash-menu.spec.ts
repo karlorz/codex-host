@@ -85,7 +85,7 @@ const trigger = (page: Page) => page.locator("[data-codexhost-harness-command-co
 for (const [name, create, count, directId] of [
   ["codebuddy", createCodeBuddyAdapter, 2, "codebuddy.cost"],
   ["hermes", createHermesAdapter, 5, "hermes.help"],
-  ["cursor", createCursorAdapter, 1, "cursor.copy-request-id"],
+  ["cursor", createCursorAdapter, 2, "cursor.copy-request-id"],
 ] as const)
   for (const managedRemoteHost of [false, true])
     for (const hasSession of [false, true]) {

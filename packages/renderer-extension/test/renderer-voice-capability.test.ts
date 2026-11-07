@@ -9,7 +9,10 @@ import {
   applyVoiceGatewayReadiness,
   applySharedVoiceRoutes,
 } from "../src/renderer-cpa-live-voice-preference.js";
-import { CLIENT_OWNED_VOICE_ASSETS } from "../src/renderer-client-owned-voice.js";
+import {
+  CLIENT_OWNED_VOICE_ASSETS,
+  rememberVoiceProductExperience,
+} from "../src/renderer-client-owned-voice.js";
 
 type Atom = { read(get: (atom: Atom) => unknown): unknown; write?: unknown };
 function fixture(name = "voice.realtime", hostId?: string, autoCommit = true) {
@@ -488,6 +491,32 @@ describe("version and runtime qualification", () => {
     expect(hook.status).toBe("active");
     hook.dispose();
   });
+
+  it.each(["grok", "cursor-cli"])(
+    "projects Work Desktop default when lastAgent is %s even without a selected carrier",
+    async (lastAgent) => {
+      rememberVoiceProductExperience({});
+      vi.useFakeTimers();
+      const f = target();
+      applySharedVoiceRoutes(f.target, {
+        chatExperience: "chatgpt",
+        chatConnection: "desktop",
+        workConnection: "desktop",
+      });
+      const route = { hostId: "local", policy: { selectedModel: () => null } };
+      Object.assign(f.target, {
+        __codexhostHostRoutingV1: { forComposer: () => route, forHost: () => route },
+      });
+      f.values.set(
+        "codexhost.new-thread-preference.v1",
+        JSON.stringify({ version: 1, lastAgent, externalByAgent: {} }),
+      );
+      const hook = installVoiceCapabilityProjection(f);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("active");
+      hook.dispose();
+    },
+  );
 
   it("keeps the visible Work projection when Desktop retains hidden Chat composers", async () => {
     vi.useFakeTimers();

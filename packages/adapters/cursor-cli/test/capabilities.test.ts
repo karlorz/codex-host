@@ -6,7 +6,12 @@ import { CursorAdapter, CursorSession } from "../src/adapter.js";
 import { CursorTransport, type CursorSessionInfo } from "../src/transport.js";
 import { cursorCatalog, cursorModelRef, cursorModelSelection } from "../src/models.js";
 import { cursorThinking, cursorThinkingState } from "../src/thinking.js";
-import { cursorCommands, cursorCommandPrompt } from "../src/slash-commands.js";
+import {
+  CURSOR_COMMAND_CATALOG,
+  cursorCommands,
+  cursorCommandPrompt,
+  cursorSessionCatalog,
+} from "../src/slash-commands.js";
 
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Missing test fixture");
@@ -349,9 +354,90 @@ describe("Cursor advertised slash commands", () => {
       ),
     ).toEqual({ ok: true, value: "/review latest changes" });
   });
-  it.each(["review", "copy-request-id"])("uses native history semantics for %s", async (name) => {
+  it("keeps a curated /goal skill that ACP live catalog would drop", () => {
+    expect(CURSOR_COMMAND_CATALOG.commands).toContainEqual(
+      expect.objectContaining({
+        id: "cursor.goal",
+        invocation: "/goal",
+        argumentMode: "text",
+        kind: "skill",
+      }),
+    );
+    const catalog = cursorSessionCatalog([
+      { name: "goal", description: "Start a durable goal that continues while idle" },
+      { name: "review", description: "Review changes" },
+      { name: "copy-request-id", description: "Copy request ID" },
+    ]);
+    expect(catalog.commands.filter(({ invocation }) => invocation === "/goal")).toEqual([
+      expect.objectContaining({ id: "cursor.goal", kind: "skill" }),
+    ]);
+    expect(catalog.commands.map(({ id }) => id)).toEqual([
+      "cursor.copy-request-id",
+      "cursor.goal",
+      "cursor.review",
+    ]);
+    expect(
+      cursorCommandPrompt(
+        { turnId, commandId: "cursor.goal", arguments: { text: "finish the tests" } },
+        catalog,
+      ),
+    ).toEqual({ ok: true, value: "/goal finish the tests" });
+    expect(cursorCommandPrompt({ turnId, commandId: "cursor.goal" }, catalog)).toEqual({
+      ok: true,
+      value: "/goal",
+    });
+    expect(cursorCommands([{ name: "goal", description: "Goal" }]).commands).toEqual([]);
+  });
+  it.each(["review", "copy-request-id", "goal"])(
+    "uses native history semantics for %s",
+    async (name) => {
+      const f = setup();
+      f.transport.availableCommands = native;
+      const prompt = vi.spyOn(f.transport, "prompt").mockImplementation(async (text, callbacks) => {
+        callbacks.update({
+          sessionId: f.transport.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "native output" },
+          },
+        });
+        if (name !== "copy-request-id") history.turns.push({ id: "native-command-turn", text });
+        return { stopReason: "end_turn" };
+      });
+      try {
+        expect(
+          await f.session.commands.execute({ turnId, commandId: `cursor.${name}` }),
+        ).toMatchObject({ ok: true });
+        await vi.waitFor(() =>
+          expect(
+            f.outputs.some(
+              (output) => output.kind === "event" && output.event.type === "turn.completed",
+            ),
+          ).toBe(true),
+        );
+        const terminal = f.outputs.find(
+          (output) => output.kind === "event" && output.event.type === "turn.completed",
+        );
+        expect(terminal).toMatchObject({ event: { outcome: { status: "succeeded" } } });
+        if (name === "copy-request-id")
+          expect(terminal).not.toMatchObject({ event: { nativeTurnRef: expect.anything() } });
+        else
+          expect(terminal).toMatchObject({
+            event: { nativeTurnRef: { nativeTurnKey: "native-command-turn" } },
+          });
+        expect(prompt).toHaveBeenCalledWith(`/${name}`, expect.anything());
+        expect(
+          await f.session.commands.execute({ turnId, commandId: `cursor.${name}` }),
+        ).toMatchObject({ error: { code: "invalidState" } });
+      } finally {
+        await f.session.close();
+        await f.done;
+      }
+      expect(await f.session.commands.list()).toMatchObject({ error: { code: "invalidState" } });
+    },
+  );
+  it("forwards /goal objective text as a native prompt", async () => {
     const f = setup();
-    f.transport.availableCommands = native;
     const prompt = vi.spyOn(f.transport, "prompt").mockImplementation(async (text, callbacks) => {
       callbacks.update({
         sessionId: f.transport.sessionId,
@@ -360,39 +446,27 @@ describe("Cursor advertised slash commands", () => {
           content: { type: "text", text: "native output" },
         },
       });
-      if (name === "review") history.turns.push({ id: "native-command-turn", text });
+      history.turns.push({ id: "native-command-turn", text });
       return { stopReason: "end_turn" };
     });
     try {
+      expect(await f.session.commands.list()).toMatchObject({
+        value: {
+          commands: expect.arrayContaining([expect.objectContaining({ id: "cursor.goal" })]),
+        },
+      });
       expect(
-        await f.session.commands.execute({ turnId, commandId: `cursor.${name}` }),
+        await f.session.commands.execute({
+          turnId,
+          commandId: "cursor.goal",
+          arguments: { text: "finish the tests" },
+        }),
       ).toMatchObject({ ok: true });
-      await vi.waitFor(() =>
-        expect(
-          f.outputs.some(
-            (output) => output.kind === "event" && output.event.type === "turn.completed",
-          ),
-        ).toBe(true),
-      );
-      const terminal = f.outputs.find(
-        (output) => output.kind === "event" && output.event.type === "turn.completed",
-      );
-      expect(terminal).toMatchObject({ event: { outcome: { status: "succeeded" } } });
-      if (name === "copy-request-id")
-        expect(terminal).not.toMatchObject({ event: { nativeTurnRef: expect.anything() } });
-      else
-        expect(terminal).toMatchObject({
-          event: { nativeTurnRef: { nativeTurnKey: "native-command-turn" } },
-        });
-      expect(prompt).toHaveBeenCalledWith(`/${name}`, expect.anything());
-      expect(
-        await f.session.commands.execute({ turnId, commandId: `cursor.${name}` }),
-      ).toMatchObject({ error: { code: "invalidState" } });
+      expect(prompt).toHaveBeenCalledWith("/goal finish the tests", expect.anything());
     } finally {
       await f.session.close();
       await f.done;
     }
-    expect(await f.session.commands.list()).toMatchObject({ error: { code: "invalidState" } });
   });
 });
 

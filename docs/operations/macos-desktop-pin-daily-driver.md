@@ -22,8 +22,9 @@ re-audit before enabling an unknown build.
 The default step toward latest is a scratch download plus static ASAR/export
 inspection, with the daily driver left running. Store that bundle under the
 ignored `.codexhost/update-impact/<version>/` tree, never on a discovery
-candidate. Live launch of the candidate waits for an explicit pause of
-production Desktop.
+candidate. A scratch Desktop may run in parallel with production; it must not
+replace `/Applications/ChatGPT.app` or share that user profile. Agents still
+must not quit production.
 
 Work and Chat pins are the source constants
 `CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION`. Shipping a

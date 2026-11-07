@@ -1,5 +1,6 @@
 import type { AvailableCommand } from "@agentclientprotocol/sdk";
 import {
+  harnessCommandCatalogSchema,
   harnessCommandDescriptorSchema,
   type HarnessCommandCatalog,
 } from "@codexhost/shared-contracts";
@@ -33,10 +34,42 @@ export function cursorCommands(native: AvailableCommand[]): HarnessCommandCatalo
   return { commands: [...commands.values()] };
 }
 
+/**
+ * Host-owned `/goal` skill. Live ACP `goal` is still excluded as a command that
+ * outlives a Turn. This built-in forwards `/goal <objective>` for the current
+ * Turn only; it is not Desktop Goal mode and not TUI idle continuation.
+ */
+const CURSOR_GOAL_SKILL = harnessCommandDescriptorSchema.parse({
+  id: "cursor.goal",
+  invocation: "/goal",
+  label: "Goal",
+  description:
+    "Run Cursor's /goal skill for this turn. It does not continue while idle and does not open Desktop Goal mode.",
+  argumentMode: "text",
+  kind: "skill",
+});
+
 // Host reads this catalog without opening a Session; execution still validates native availability.
-export const CURSOR_COMMAND_CATALOG = cursorCommands([
-  { name: "copy-request-id", description: "Copy the current request ID", input: null },
-]);
+export const CURSOR_COMMAND_CATALOG = harnessCommandCatalogSchema.parse({
+  commands: [
+    ...cursorCommands([
+      { name: "copy-request-id", description: "Copy the current request ID", input: null },
+    ]).commands,
+    CURSOR_GOAL_SKILL,
+  ],
+});
+
+/** Built-ins win on `/goal` and `/copy-request-id`; remaining ACP names stay live. */
+export function cursorSessionCatalog(native: AvailableCommand[]): HarnessCommandCatalog {
+  const builtIns = CURSOR_COMMAND_CATALOG.commands;
+  const invocations = new Set(builtIns.map((command) => command.invocation));
+  return {
+    commands: [
+      ...builtIns,
+      ...cursorCommands(native).commands.filter((command) => !invocations.has(command.invocation)),
+    ],
+  };
+}
 
 export function cursorCommandPrompt(
   command: HarnessCommandInvocation,

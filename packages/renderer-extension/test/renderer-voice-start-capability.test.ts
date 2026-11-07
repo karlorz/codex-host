@@ -71,6 +71,10 @@ describe("gateway start ownership", () => {
         false,
       ),
     ).toBe(true);
+    expect(gatewayVoiceStartRequest(request, false, false, true)).toBe(true);
+    expect(
+      gatewayVoiceStartRequest({ ...request, productExperience: "chat" }, false, false, true),
+    ).toBe(false);
   });
   it("qualifies explicit local Codex Chat only when its gateway connection is selected", () => {
     const chat = { ...request, productExperience: "chat" };

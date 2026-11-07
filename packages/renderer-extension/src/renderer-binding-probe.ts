@@ -48,6 +48,7 @@ import {
   eventElement,
   isComposerInputIntent,
   isComposerSubmissionKey,
+  composerHidesNativeGoalControl,
   mountComposerAgentControl,
   reconcileComposerNativeControls,
   renderComposerAgentControl,
@@ -3032,7 +3033,12 @@ export function installRendererBindingProbe(
       }
       const state = controller.get(composer);
       const hideCodexControls = controller.isSwitching(composer) || state.agent !== "codex";
-      reconcileComposerNativeControls(mounted.control, hideCodexControls, hideCodexControls);
+      reconcileComposerNativeControls(
+        mounted.control,
+        hideCodexControls,
+        hideCodexControls,
+        composerHidesNativeGoalControl(state.agent, controller.isSwitching(composer)),
+      );
       showCodexUsageGateStatus(mounted, mounted.codexUsageGate.refresh());
     }
     for (const editor of document.querySelectorAll(EDITOR_SELECTOR)) {
@@ -3326,10 +3332,15 @@ export function installRendererBindingProbe(
   };
   const onUsageBannerPreference = (): void => {
     for (const mounted of mountedByComposer.values()) {
-      const hideCodexControls =
-        controller.isSwitching(mounted.composer) ||
-        controller.get(mounted.composer).agent !== "codex";
-      reconcileComposerNativeControls(mounted.control, hideCodexControls, hideCodexControls);
+      const switching = controller.isSwitching(mounted.composer);
+      const agent = controller.get(mounted.composer).agent;
+      const hideCodexControls = switching || agent !== "codex";
+      reconcileComposerNativeControls(
+        mounted.control,
+        hideCodexControls,
+        hideCodexControls,
+        composerHidesNativeGoalControl(agent, switching),
+      );
       mounted.codexUsageGate.refresh();
     }
   };
