@@ -55,8 +55,13 @@ build is qualified. The public Sparkle feed
 than this Mac's Check for Updates offer
 (`https://updates.oaistatic.com/codex/app/appcast`).
 
-`npm start` quits running Codex Desktop before launch. Use it only when a
-controlled relaunch is intended.
+`npm start` quits running Codex Desktop before launch. Do not use it against
+the production daily driver. The disposable scratch Desktop is
+`npm run scratch:candidate -- --print` or `--launch`
+(`tools/dev-desktop/scratch-candidate.mjs`). It direct-executes a bundle under
+`.codexhost/update-impact/<version>/bundle/ChatGPT.app` with
+`CODEXHOST_INSTALL_ROOT` and an isolated `CODEX_ELECTRON_USER_DATA_PATH`. It
+refuses discovery-path apps and aborts if production Desktop PIDs disappear.
 
 ## Compat Daily
 
@@ -104,27 +109,28 @@ running.
 
 Isolated probes reject an already-running process of the **selected**
 installation. A probe pointed at a scratch bundle may not detect
-`/Applications/ChatGPT.app`. Before launching a candidate, independently
-confirm that the daily driver has fully exited. Two ChatGPT GUIs must not share
-one user profile. A separate `CODEX_ELECTRON_USER_DATA_PATH` / `--user-data-dir`
-isolates Chromium profile data for one launch; it does not authorize concurrent
-Desktops.
+`/Applications/ChatGPT.app`. Two ChatGPT GUIs must not share one user profile.
+
+The disposable scratch Desktop is the default way to run a candidate while
+production stays up: isolated user data, never `/Applications/ChatGPT.app`,
+never `npm start`. Concurrent Desktops are not a qualified product mode. If
+Electron single-instance activates production instead of the scratch copy, abort
+and do not fight that lock.
 
 Preserve the qualified daily bundle. A gateway `POST /v1/realtime/calls` 201
-establishes call creation only. Temporarily quit the daily driver for sequential
-candidate qualification, then quit the candidate and reopen the daily driver.
-Do not overwrite `/Applications/ChatGPT.app` (Developer ID `2DC432GLL2`).
+establishes call creation only. Do not overwrite `/Applications/ChatGPT.app`
+(Developer ID `2DC432GLL2`). An attended live-qualify that must own the machine
+still waits for the operator to quit production; agents do not perform that quit.
 
-Live-qualify a newer build in a dedicated window:
+Live-qualify a newer build from scratch storage:
 
-1. Finish or pause chats on the daily driver.
-2. Confirm the daily driver has fully exited.
-3. Launch the scratch bundle (set `CODEXHOST_INSTALL_ROOT` when it is not the
-   discovered app).
-4. Audit that exact build's assets, live Renderer contracts, and attended
-   voice behavior. Work and Chat stay separate.
-5. Quit the candidate. Reopen `/Applications/ChatGPT.app` at the pinned
-   version. Clear `CODEXHOST_INSTALL_ROOT`.
+1. Keep production chats on `/Applications/ChatGPT.app`.
+2. `npm run scratch:candidate -- --print`, then `--launch` if production PIDs
+   are listed and the bundle is not a discovery path.
+3. Audit that exact build's assets, live Renderer contracts, and attended
+   voice behavior on the scratch copy. Work and Chat stay separate.
+4. Quit only the scratch PID in `.codexhost/update-impact/<version>/scratch-desktop.pid`.
+   Leave production running. Clear `CODEXHOST_INSTALL_ROOT` in later shells.
 
 After qualification, update only that surface's version and exact
 asset/export mappings, then rerun `compat:daily`. Record remaining drift
