@@ -13,9 +13,17 @@ Renderer/bridge diagnosis after an *installed* update stays in
 
 ## Policy
 
-Keep the qualified `/Applications/ChatGPT.app`. A pin-behind public-feed alert
-does not authorize replacing that bundle. Unknown or mixed Desktop assets fail
-closed; re-audit before enabling an unknown build.
+Prefer qualifying toward the public Sparkle latest so Work/Chat pins can catch
+up. Do not interrupt the daily driver or in-progress production chats to do
+that. A pin-behind public-feed alert does not authorize replacing
+`/Applications/ChatGPT.app`. Unknown or mixed Desktop assets fail closed;
+re-audit before enabling an unknown build.
+
+The default step toward latest is a scratch download plus static ASAR/export
+inspection, with the daily driver left running. Store that bundle under the
+ignored `.codexhost/update-impact/<version>/` tree, never on a discovery
+candidate. Live launch of the candidate waits for an explicit pause of
+production Desktop.
 
 Work and Chat pins are the source constants
 `CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION`. Shipping a
