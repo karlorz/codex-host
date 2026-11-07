@@ -21,8 +21,17 @@ pins were **26.1013.40934** against Sparkle **26.1016.61520**. As of fork
 `v0.17.4-0` (7 November 2026), Work and Chat remain pinned to
 **26.1027.61615**. Compat Daily on this release reports Sparkle latest
 **26.1103.41825** as pin-drift; do not re-pin or install that Desktop until
-it is qualified. Older feed snapshots remain in
-[#25](https://github.com/karlorz/codex-host/issues/25)–[#31](https://github.com/karlorz/codex-host/issues/31).
+it is qualified. A scratch copy of 26.1103.41825 (build 25679) was downloaded
+and launched from ignored `.codexhost/update-impact/26.1103.41825/` with
+isolated user data; production `/Applications/ChatGPT.app` stayed on the pin.
+Named 26.1027.61615 voice assets are absent in that candidate, and its
+Chromium product is 157.0.8103.39 versus production 156.0.8078.79.
+
+Live pin-drift trackers are
+[#35](https://github.com/karlorz/codex-host/issues/35) (work) and
+[#36](https://github.com/karlorz/codex-host/issues/36) (chat). Historical
+Sparkle snapshots [#25](https://github.com/karlorz/codex-host/issues/25)–[#33](https://github.com/karlorz/codex-host/issues/33)
+are closed as superseded.
 [#4](https://github.com/karlorz/codex-host/issues/4) is the attended
 microphone, playback, interruption and lifecycle tracker.
 

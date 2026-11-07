@@ -107,6 +107,23 @@ export function evaluate(pins, latest) {
   };
 }
 
+/** One open tracker per surface while the pin is unchanged; Sparkle bumps comment there. */
+export function livePinIssue(finding, issues, pins) {
+  if (!finding?.surface || typeof finding.title !== "string") return undefined;
+  const pin = finding.surface === "chat-voice" ? pins?.chatVersion : pins?.workVersion;
+  if (typeof pin !== "string") return undefined;
+  const prefix = `compat-daily/${finding.surface}: pin ${pin} behind desktop `;
+  const matches = issues.filter(
+    (issue) =>
+      !issue.pull_request && typeof issue.title === "string" && issue.title.startsWith(prefix),
+  );
+  const exact = matches.find((issue) => issue.title === finding.title);
+  if (exact) return { number: exact.number, title: exact.title, kind: "exact" };
+  if (matches.length === 0) return undefined;
+  const live = matches.slice().sort((left, right) => left.number - right.number)[0];
+  return { number: live.number, title: live.title, kind: "same-pin" };
+}
+
 /** Matching pins clear version drift, independently of live voice acceptance. */
 export function recoveredPinIssues(report, issues) {
   return issues.flatMap((issue) => {

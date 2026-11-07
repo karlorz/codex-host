@@ -4,7 +4,14 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSyn
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evaluate, loadPinsFromRepo, parseAppcast, readPins, recoveredPinIssues } from "./run.mjs";
+import {
+  evaluate,
+  livePinIssue,
+  loadPinsFromRepo,
+  parseAppcast,
+  readPins,
+  recoveredPinIssues,
+} from "./run.mjs";
 import { describe, it } from "node:test";
 
 const files = {
@@ -48,6 +55,50 @@ describe("compat-daily pins", () => {
       [{ number: 4, surface: "chat-voice", version: "26.1016.61520" }],
     );
   });
+
+  it("reuses one live issue per surface when Sparkle moves and the pin is unchanged", () => {
+    const pins = readPins(files);
+    const finding = evaluate(pins, { version: "26.1016.62342", build: "21477" }).findings[0];
+    const exact = { number: 9, title: finding.title };
+    assert.deepEqual(livePinIssue(finding, [exact], pins), {
+      number: 9,
+      title: finding.title,
+      kind: "exact",
+    });
+    const olderSparkle = {
+      number: 25,
+      title: `compat-daily/work-voice: pin ${pins.workVersion} behind desktop 26.1016.61520`,
+    };
+    assert.deepEqual(livePinIssue(finding, [olderSparkle], pins), {
+      number: 25,
+      title: olderSparkle.title,
+      kind: "same-pin",
+    });
+    assert.equal(
+      livePinIssue(
+        finding,
+        [{ number: 1, title: "compat-daily/work-voice: pin 26.9.1 behind desktop 26.1016.62342" }],
+        pins,
+      ),
+      undefined,
+    );
+    assert.equal(
+      livePinIssue(finding, [{ number: 2, title: olderSparkle.title, pull_request: {} }], pins),
+      undefined,
+    );
+    assert.equal(
+      livePinIssue(
+        finding,
+        [
+          { number: 40, title: olderSparkle.title },
+          { number: 25, title: olderSparkle.title },
+        ],
+        pins,
+      ).number,
+      25,
+    );
+  });
+
   it("reads Renderer voice pins from source", () => {
     assert.deepEqual(readPins(files), {
       workVersion: "26.1016.51333",
@@ -198,6 +249,7 @@ async function workflowFixture(report, issues = []) {
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const created = [];
   const comments = [];
+  const updated = [];
   const github = {
     rest: {
       issues: {
@@ -206,6 +258,7 @@ async function workflowFixture(report, issues = []) {
         listComments: async () => ({ data: comments }),
         create: async (args) => created.push(args),
         createComment: async (args) => comments.push({ ...args, user: { type: "Bot" } }),
+        update: async (args) => updated.push(args),
       },
     },
     paginate: async (method, args) => (await method(args)).data,
@@ -260,7 +313,7 @@ async function workflowFixture(report, issues = []) {
       { env: { GITHUB_WORKSPACE: new URL("../..", import.meta.url).href } },
     );
   };
-  return { run, created, comments };
+  return { run, created, comments, updated };
 }
 
 it("runs drift and recovery workflow steps in separate scopes", async () => {
@@ -306,6 +359,32 @@ it("runs drift and recovery workflow steps in separate scopes", async () => {
   await duplicate.run("Open or update issues on pin drift");
   assert.match(duplicate.comments[0].body, /checked-sha/u);
   assert.match(duplicate.comments[0].body, /refs\/heads\/stable/u);
+});
+
+it("comments and retitles the live same-pin issue instead of opening a new pair", async () => {
+  const report = evaluate(readPins(files), { version: "26.1016.62342", build: "21477" });
+  const issues = [
+    {
+      number: 25,
+      title: `compat-daily/work-voice: pin ${report.pins.workVersion} behind desktop 26.1016.61520`,
+    },
+    {
+      number: 26,
+      title: `compat-daily/chat-voice: pin ${report.pins.chatVersion} behind desktop 26.1016.61520`,
+    },
+  ];
+  const { run, created, comments, updated } = await workflowFixture(report, issues);
+  await run("Open or update issues on pin drift");
+  assert.equal(created.length, 0);
+  assert.equal(updated.length, 2);
+  assert.equal(updated[0].issue_number, 25);
+  assert.equal(updated[0].title, report.findings[0].title);
+  assert.equal(updated[1].issue_number, 26);
+  assert.equal(updated[1].title, report.findings[1].title);
+  assert.equal(comments.length, 2);
+  assert.match(comments[0].body, /one live tracker/u);
+  assert.match(comments[0].body, /26\.1016\.62342/u);
+  assert.match(comments[0].body, /checked-sha/u);
 });
 
 it("does not publish drift or recovery from PRs or non-default branches", async () => {

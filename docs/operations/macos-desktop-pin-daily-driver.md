@@ -71,8 +71,10 @@ public macOS feed to the pins. They do not download ChatGPT.app, query the
 per-installation updater, or test microphone/conversation behavior. Local runs
 print JSON and do not open issues. On non-PR default-branch runs, pin-drift
 findings open or comment `compat-broken` issues; operational errors skip issue
-updates. New feed versions produce distinct issue titles. Matching pins add a
-recovery comment but leave issues open for live acceptance review.
+updates. Each surface keeps one live issue while its pin is unchanged; later
+Sparkle versions comment and retitle that issue instead of opening a new pair.
+Matching pins add a recovery comment but leave issues open for live acceptance
+review.
 
 Microphone, playback, interruption, and spontaneous-close acceptance remain
 [#4](https://github.com/karlorz/codex-host/issues/4). Grok stays ◐ and Cursor

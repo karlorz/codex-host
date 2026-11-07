@@ -7,7 +7,7 @@ npm run compat:daily:test
 npm run compat:daily
 ```
 
-GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). macOS pin drift opens or comments `compat-broken` issues on this repository.
+GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). macOS pin drift keeps one live `compat-broken` issue per surface (work-voice, chat-voice). The same pin with a newer Sparkle version comments and retitles that issue instead of opening a new pair.
 
 The macOS feed is the static public release feed at
 `https://persistent.oaistatic.com/codex-app-prod/appcast.xml`. Desktop's production
@@ -32,7 +32,8 @@ default branch, and skips all issue updates for operational errors. Reports incl
 the checked commit and ref. Other branches still run checks without publishing issue
 status. A separate recovery step adds one deduplicated bot comment when a
 voice pin matches an open issue’s tracked Desktop target or Sparkle latest. It
-leaves the issue open for live acceptance and reports newer drift separately.
+leaves the issue open for live acceptance. Newer Sparkle versions comment on the
+live issue while the pin is unchanged.
 No command here updates pins or enables a Desktop build.
 
 When a pin is behind Sparkle, keep the qualified `/Applications/ChatGPT.app` and
