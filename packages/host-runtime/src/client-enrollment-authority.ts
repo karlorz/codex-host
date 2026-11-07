@@ -39,6 +39,8 @@ export interface EnrollmentIssueRequest {
   clientId: string;
   executablePath: string;
   allowlist?: EnrollmentAllowlistEntry[];
+  /** Host-session attended approve (Karl GO). Skips the Desktop timeout stub. */
+  attendedHostApprove?: boolean;
 }
 
 export class EnrollmentAuthority {
@@ -130,11 +132,13 @@ export class EnrollmentAuthority {
       throw new DelegationControlError("INVALID_ARGUMENT", "executable path is required");
     }
     const requested = canonicalizeAllowlist(request.allowlist ?? []);
-    const decision = await this.#consent.decide({
-      clientId,
-      executablePath,
-      allowlist: requested,
-    });
+    const decision = request.attendedHostApprove
+      ? "approve"
+      : await this.#consent.decide({
+          clientId,
+          executablePath,
+          allowlist: requested,
+        });
     if (decision === "deny") {
       throw enrollmentError("ENROLLMENT_DENIED", "Enrollment was denied", "denied");
     }

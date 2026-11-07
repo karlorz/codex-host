@@ -167,7 +167,16 @@ export async function startDelegationControlServer(input: {
         return;
       }
       if (request.url === "/v1/enroll") {
-        if (!input.enrollment?.matchesBootstrap(request.headers.authorization)) {
+        if (!input.enrollment) {
+          writeJson(response, 401, {
+            error: { code: "RUNTIME_UNREACHABLE", message: "Runtime token is invalid" },
+          });
+          return;
+        }
+        const hostPrincipal =
+          input.enrollment.authenticate(request.headers.authorization)?.kind === "host";
+        const bootstrapOk = input.enrollment.matchesBootstrap(request.headers.authorization);
+        if (!hostPrincipal && !bootstrapOk) {
           writeJson(response, 401, {
             error: { code: "RUNTIME_UNREACHABLE", message: "Runtime token is invalid" },
           });
@@ -180,6 +189,7 @@ export async function startDelegationControlServer(input: {
           ...(Array.isArray(enrollBody.allowlist)
             ? { allowlist: enrollBody.allowlist as EnrollmentAllowlistEntry[] }
             : {}),
+          attendedHostApprove: hostPrincipal,
         });
         writeJson(response, 200, record);
         return;

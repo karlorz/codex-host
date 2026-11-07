@@ -260,6 +260,59 @@ describe("client enrollment store and Runtime", () => {
     }
   });
 
+  it("treats Host-session enroll as attended approve without Desktop timeout", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("timeout"),
+      bootstrapToken: "bootstrap-token",
+      createId: (() => {
+        let index = 0;
+        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
+      })(),
+      createToken: () => "enrolled-token",
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const server = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment,
+    });
+    try {
+      await enrollment.publishBootstrap(server.endpoint);
+      const output = new PassThrough();
+      expect(
+        await runDelegationCli({
+          arguments: [
+            "enroll",
+            "--client",
+            "grok-bot",
+            "--allow",
+            `${FIXTURE_PARENT_THREAD_ID}:read,watch`,
+            "--executable",
+            "/synthetic/grok-bot",
+          ],
+          environment: {
+            CODEXHOST_DATA_DIR: dataDir,
+            [DELEGATION_RUNTIME_ENDPOINT_ENV]: server.endpoint,
+            [DELEGATION_RUNTIME_TOKEN_ENV]: PARENT_TOKEN,
+          },
+          output,
+          now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+        }),
+      ).toBe(0);
+      const stored = JSON.parse(
+        await readFile(enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot"), "utf8"),
+      ) as EnrollmentRecord;
+      expect(stored.token).toBe("enrolled-token");
+      expect(stored.threadId).not.toBe(FIXTURE_PARENT_THREAD_ID);
+    } finally {
+      await enrollment.close();
+      await server.close();
+    }
+  });
+
   it("writes no store on deny or timeout", async () => {
     for (const decision of ["deny", "timeout"] as const) {
       const dataDir = await tempDataDir();

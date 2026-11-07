@@ -139,7 +139,23 @@ export async function runEnrollRequest(input: {
   const allowlist = parseAllowlistOption(option(input.parsed, "--allow"));
   const executable = option(input.parsed, "--executable") ?? process.argv[1] ?? process.execPath;
   const executablePath = path.isAbsolute(executable) ? executable : path.resolve(executable);
-  const bootstrap = await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
+  const hostEndpoint = input.environment[DELEGATION_RUNTIME_ENDPOINT_ENV];
+  const hostToken = input.environment[DELEGATION_RUNTIME_TOKEN_ENV];
+  const hostConnection =
+    typeof hostEndpoint === "string" &&
+    hostEndpoint.length > 0 &&
+    typeof hostToken === "string" &&
+    hostToken.length > 0
+      ? { endpoint: hostEndpoint, token: hostToken, source: "env" as const }
+      : undefined;
+  const bootstrap = hostConnection
+    ? undefined
+    : await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
+  const connection = hostConnection ?? {
+    endpoint: bootstrap!.endpoint,
+    token: bootstrap!.bootstrapToken,
+    source: "enrollment" as const,
+  };
   const issued = (await input.request(
     "/v1/enroll",
     {
@@ -147,17 +163,14 @@ export async function runEnrollRequest(input: {
       executablePath,
       allowlist,
     },
-    {
-      endpoint: bootstrap.endpoint,
-      token: bootstrap.bootstrapToken,
-      source: "enrollment",
-    },
+    connection,
   )) as EnrollmentRecord;
-  const parentToken = input.environment[DELEGATION_RUNTIME_TOKEN_ENV];
+  const parentToken = hostToken;
+  const bootstrapToken = bootstrap?.bootstrapToken;
   if (
     typeof issued !== "object" ||
     issued === null ||
-    issued.token === bootstrap.bootstrapToken ||
+    (bootstrapToken && issued.token === bootstrapToken) ||
     (parentToken && issued.token === parentToken) ||
     issued.enrollmentId === issued.threadId
   ) {
