@@ -59,6 +59,7 @@ function outputText(stream: PassThrough): string {
 function record(overrides: Partial<EnrollmentRecord> = {}): EnrollmentRecord {
   const threadId = overrides.threadId ?? "enrolled-thread";
   const allowlist = overrides.allowlist ?? issuedAllowlist(threadId, []);
+  const { allowlistDigest: digestOverride, ...rest } = overrides;
   return {
     schemaVersion: 1,
     enrollmentId: "enrollment-1",
@@ -70,9 +71,8 @@ function record(overrides: Partial<EnrollmentRecord> = {}): EnrollmentRecord {
     issuedAt: "2026-11-07T00:00:00.000Z",
     expiresAt: "2026-11-08T00:00:00.000Z",
     allowlist,
-    allowlistDigest: allowlistDigest(allowlist),
-    ...overrides,
-    allowlistDigest: overrides.allowlistDigest ?? allowlistDigest(overrides.allowlist ?? allowlist),
+    ...rest,
+    allowlistDigest: digestOverride ?? allowlistDigest(rest.allowlist ?? allowlist),
   };
 }
 
