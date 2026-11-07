@@ -107,7 +107,7 @@ describe("installed Harness composition", () => {
       copilot: [],
       codebuddy: ["/compact", "/cost"],
       workbuddy: ["/compact", "/init"],
-      "cursor-cli": ["/copy-request-id"],
+      "cursor-cli": ["/copy-request-id", "/goal"],
       pi: ["/compact"],
       "claude-code": ["/compact", "/init", "/recap"],
       "deepseek-harness": ["/compact", "/dsh-goal", "/plan"],
