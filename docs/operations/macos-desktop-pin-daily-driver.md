@@ -76,8 +76,9 @@ Sparkle versions comment and retitle that issue instead of opening a new pair.
 Matching pins add a recovery comment but leave issues open for live acceptance
 review.
 
-Microphone, playback, interruption, and spontaneous-close acceptance remain
-[#4](https://github.com/karlorz/codex-host/issues/4). Grok stays ◐ and Cursor
+Microphone-release, interruption/mute, and spontaneous-close checks stay
+opportunistic dogfood on [#4](https://github.com/karlorz/codex-host/issues/4);
+they are not a release gate. Grok stays ◐ and Cursor
 stays unverified (`?`) on the README Live voice chat row; those Harnesses use
 the generic external path (Host → configured gateway) on this daily driver.
 Installed Start-button acceptance is still required. A matching pin does not

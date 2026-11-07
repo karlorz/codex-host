@@ -32,8 +32,9 @@ Live pin-drift trackers are
 [#36](https://github.com/karlorz/codex-host/issues/36) (chat). Historical
 Sparkle snapshots [#25](https://github.com/karlorz/codex-host/issues/25)–[#33](https://github.com/karlorz/codex-host/issues/33)
 are closed as superseded.
-[#4](https://github.com/karlorz/codex-host/issues/4) is the attended
-microphone, playback, interruption and lifecycle tracker.
+[#4](https://github.com/karlorz/codex-host/issues/4) stays open as opportunistic
+dogfood for microphone release, interruption/mute, and spontaneous-close
+recovery. It is not a release gate for `v0.17.4-0`.
 
 ### Protect the dirty tree and authorize the merge
 
