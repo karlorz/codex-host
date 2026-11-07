@@ -160,14 +160,18 @@ export async function runEnrollRequest(input: {
     hostToken.length > 0
       ? { endpoint: hostEndpoint, token: hostToken, source: "env" as const }
       : undefined;
-  const bootstrap = hostConnection
-    ? undefined
-    : await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
-  const connection = hostConnection ?? {
-    endpoint: bootstrap!.endpoint,
-    token: bootstrap!.bootstrapToken,
-    source: "enrollment" as const,
-  };
+  let bootstrap: Awaited<ReturnType<typeof readEnrollmentBootstrap>> | undefined;
+  let connection: CliRuntimeConnection;
+  if (hostConnection) {
+    connection = hostConnection;
+  } else {
+    bootstrap = await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
+    connection = {
+      endpoint: bootstrap.endpoint,
+      token: bootstrap.bootstrapToken,
+      source: "enrollment",
+    };
+  }
   const issued = (await input.request(
     "/v1/enroll",
     {
