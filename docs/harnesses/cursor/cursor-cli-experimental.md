@@ -134,6 +134,17 @@ contract investigation before release acceptance.
   Grok; no attended Cursor microphone or call trial is documented.
   See the README Live voice chat row and
   [External Harness voice](../../operations/cpa-live-voice-desktop-hook.md#external-harness-voice-local-development-build).
+- Native `cursor/ask_question` is mapped to a Host Question when ACP sends it.
+  Single-choice groups (`allowOther` is always false) use Desktop
+  `item/tool/requestUserInput`; `allowMultiple` uses the shared checkbox card.
+  Installed CLI `2026.11.05-86047df` initialize only reads
+  `_meta.parameterizedModelPicker` and `subagents` / `_meta.subagents`. There is
+  no question client capability, so Host does not advertise one. ACP sessions
+  set `x-cursor-client-type: acp` and do not offer the AskQuestion model tool, so
+  the extension is not sent and no Desktop card appears. Cursor Ask mode is a
+  read-only execution mode, not a question card. If the tool later arrives, the
+  native handler first calls `cursor/ask_question`, then falls back to
+  `session/request_permission` for single-choice only.
 - Interactive `cursor-agent` advertises `/goal` as a TUI command that continues
   while idle and as a builtin skill that calls `CreateGoal`/`UpdateGoal`. Goal
   state lives in the conversation store. Idle continuation is TUI-only.
@@ -236,7 +247,8 @@ on macOS arm64 with Cursor `2026.09.15-d2fe57e`; Linux has not been tested live 
 ## Capability audit and native configuration
 
 The capability audit used macOS arm64 Cursor CLI `2026.09.10-fd3934a` and the
-[official ACP documentation](https://cursor.com/docs/cli/acp). The installed CLI's
+[official ACP documentation](https://cursor.com/docs/cli/acp). Native questions were
+rechecked on installed `2026.11.05-86047df`. The installed CLI's
 `src/acp/cursor-acp-agent.ts` and `src/acp/agent-session.ts` establish the additional
 parameterized configuration and command behavior below; these are version-sensitive
 native extensions, not fabricated RPC methods.
@@ -250,6 +262,7 @@ native extensions, not fabricated RPC methods.
 | Fork / edit previous message | ACP has no Fork or rollback operation. A native CLI `/fork` + conversation-only `/rewind` bridge supports historical Fork and edit previous message on macOS/Linux at available native anchors. |
 | Context compaction | The interactive CLI command is not part of the ACP slash-command handler; no native ACP compaction operation is implemented. Sending `/compact` as plain model text is not compaction. |
 | Native goals | Interactive CLI `/goal` (builtin skill, `CreateGoal`/`UpdateGoal`, TUI idle continuation). ACP has no goal method. Host exposes a curated `/goal` skill that forwards this Turn only. Desktop Goal mode is not a Host-exposed Cursor capability; the shared panel is hidden and `thread/goal/*` fails closed. |
+| Native questions | Documented blocking `cursor/ask_question` is implemented. Current ACP sessions do not offer AskQuestion, so the method is not emitted and Desktop cards do not appear. Host initialize keeps `_meta.parameterizedModelPicker` only; a fabricated question flag is not advertised. |
 
 The model catalog comes from native configuration, including each model's own
 Thinking parameter choices. Multiple `thought_level` parameters remain a complete

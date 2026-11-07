@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import readline from "node:readline";
 const scenario = process.argv[2];
 const sessionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -8,6 +9,8 @@ const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
+    if (process.env.CURSOR_ACP_INITIALIZE_DUMP)
+      writeFileSync(process.env.CURSOR_ACP_INITIALIZE_DUMP, JSON.stringify(message.params));
     if (scenario === "hang-startup") return;
     send({
       id: message.id,

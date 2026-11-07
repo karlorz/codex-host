@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +102,23 @@ it("reads history without waiting for a model catalog that never responds", asyn
   const replay = transport(500, false);
   expect(await replay.open("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toMatchObject({
     configOptions: [],
+  });
+});
+
+it("advertises only the native parameterized model-picker capability", async () => {
+  const environment = isolatedEnvironment();
+  const dump = path.join(environment.CURSOR_CONFIG_DIR, "initialize.json");
+  environment.CURSOR_ACP_INITIALIZE_DUMP = dump;
+  const native = transport(2_000, true, undefined, environment);
+  await native.open();
+  const initialize = JSON.parse(readFileSync(dump, "utf8"));
+  expect(initialize).toMatchObject({
+    protocolVersion: 1,
+    clientCapabilities: { _meta: { parameterizedModelPicker: true } },
+    clientInfo: { name: "codexhost", version: "0.6.2" },
+  });
+  expect(initialize.clientCapabilities).toEqual({
+    _meta: { parameterizedModelPicker: true },
   });
 });
 

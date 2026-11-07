@@ -18,11 +18,11 @@ re-pin or qualify a newer Desktop.
 
 At the 22 October 2026 baseline (`origin/main` at `10ba06b7`), Work and Chat
 pins were **26.1013.40934** against Sparkle **26.1016.61520**. As of fork
-`v0.17.3-0` (6 November 2026), Work and Chat remain pinned to
-**26.1027.61615**. Compat Daily on that release reported Sparkle latest
-**26.1103.31037** build **25241** ([#30](https://github.com/karlorz/codex-host/issues/30),
-[#31](https://github.com/karlorz/codex-host/issues/31)). Older feed snapshots
-remain in [#25](https://github.com/karlorz/codex-host/issues/25)–[#28](https://github.com/karlorz/codex-host/issues/28).
+`v0.17.4-0` (7 November 2026), Work and Chat remain pinned to
+**26.1027.61615**. Compat Daily on this release reports Sparkle latest
+**26.1103.41825** as pin-drift; do not re-pin or install that Desktop until
+it is qualified. Older feed snapshots remain in
+[#25](https://github.com/karlorz/codex-host/issues/25)–[#31](https://github.com/karlorz/codex-host/issues/31).
 [#4](https://github.com/karlorz/codex-host/issues/4) is the attended
 microphone, playback, interruption and lifecycle tracker.
 
@@ -196,6 +196,7 @@ Fork versions stay on the **upstream version that is currently held**, plus a nu
 | `0.13.2` | `v0.13.2-0` | `v0.13.2-1`, `v0.13.2-2`, `v0.13.2-3` |
 | `0.13.3` | `v0.13.3-0` | `v0.13.3-1`, `v0.13.3-2`, … |
 | `0.17.3` | `v0.17.3-0` | `v0.17.3-1`, `v0.17.3-2`, … |
+| `0.17.4` | `v0.17.4-0` | `v0.17.4-1`, `v0.17.4-2`, … |
 
 - Read upstream from `upstream/main` `package.json` and the upstream GitHub latest release. If they disagree, stop and report; do not guess.
 - First fork of an upstream version is `X.Y.Z-0`. Later fork-only releases while that upstream version is still held are `X.Y.Z-1`, `X.Y.Z-2`, …. The shipped `0.13.2` tags already use that single-counter form.
@@ -228,7 +229,7 @@ A fork tag is not shipped until both of these exist for that version:
 
 Numeric fork counters such as `0.13.3-0` and `0.13.3-1` are GitHub latest and npm `latest`. Named SemVer prereleases (`-rc.1`, `-beta.1`, `-test.1`, `-cpa.1`) stay on `next` / `test` and GitHub prerelease. `packages/repository-automation/src/release.mjs` treats a hyphen plus one or more digit groups (`0.13.3-0`, `0.13.3-1`) as latest, not as `next`. Do not `npm publish` `@codexhost/cli`. Local `npm run install:local` packs and installs tarballs without the registry.
 
-Shipped latest on this fork is `v0.17.3-0`: GitHub latest plus `@karlorz/codexhost-cli@0.17.3-0` on npm `latest`. Recurl the six platform packages after provenance; a `+` log line can still 404 until the staged version is visible. The next unused counter while upstream holds `0.17.3` is `0.17.3-1`.
+Shipped latest on this fork is `v0.17.4-0`: GitHub latest plus `@karlorz/codexhost-cli@0.17.4-0` on npm `latest`. Recurl the six platform packages after provenance; a `+` log line can still 404 until the staged version is visible. The next unused counter while upstream holds `0.17.4` is `0.17.4-1`.
 
 ## GitHub Actions secrets
 
@@ -262,15 +263,15 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.17.3-1` while upstream still holds `0.17.3`). Merge of an identity-lock PR is not a release.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.17.4-1` while upstream still holds `0.17.4`). Merge of an identity-lock PR is not a release.
 
 ## Next unused counter
 
 ```bash
 git fetch upstream --tags --prune
 git fetch origin --tags --prune
-# example when upstream holds 0.17.3:
-git ls-remote --tags origin 'refs/tags/v0.17.3-*'
+# example when upstream holds 0.17.4:
+git ls-remote --tags origin 'refs/tags/v0.17.4-*'
 ```
 
-Shipped tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, and `v0.17.3-0`. After upstream `0.17.3`, later fork tags on the same upstream are `0.17.3-1`, `0.17.3-2`, …. Then `npm run release:prepare -- 0.17.3-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Shipped tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, and `v0.17.4-0`. After upstream `0.17.4`, later fork tags on the same upstream are `0.17.4-1`, `0.17.4-2`, …. Then `npm run release:prepare -- 0.17.4-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
