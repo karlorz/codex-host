@@ -308,7 +308,7 @@ interface ActiveTurn {
   cancellationRequested: boolean;
   beforeNativeTurnKeys: Set<string>;
   historyStart: number;
-  backgroundPromptIndex?: number;
+  backgroundPromptIndex?: number | undefined;
   catalogCommand: boolean;
   completion: Promise<void>;
   resolveCompletion(): void;

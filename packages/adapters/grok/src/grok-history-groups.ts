@@ -35,7 +35,7 @@ export function grokForeignBackgroundEvent(event: GrokTransportEvent): boolean {
 
 export function grokBackgroundOwnedTurn(input: {
   turnId: string;
-  backgroundPromptIndex?: number;
+  backgroundPromptIndex?: number | undefined;
 }): boolean {
   return input.turnId.startsWith("grok-autonomous-") || input.backgroundPromptIndex !== undefined;
 }
@@ -45,7 +45,11 @@ export function selectGrokSettledTurn<
     nativeTurnRef: { nativeTurnKey: string };
     checkpoint?: { checkpointId: string } | null;
   },
->(created: readonly T[], expectedKey?: string, backgroundPromptIndex?: number): T | undefined {
+>(
+  created: readonly T[],
+  expectedKey?: string | undefined,
+  backgroundPromptIndex?: number | undefined,
+): T | undefined {
   if (expectedKey) {
     const matched = created.filter((turn) => turn.nativeTurnRef.nativeTurnKey === expectedKey);
     return matched.length === 1 ? matched[0] : undefined;
