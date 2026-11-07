@@ -127,7 +127,11 @@ contract investigation before release acceptance.
   Historical Fork/revision require the native CLI bridge described below.
   Inbound unattended delegation is a native Run Everything request, not an
   ACP-confirmed approval policy. Image/audio prompt inputs are outside the current Host
-  text contract.
+  text contract. Cursor Desktop voice is unverified (`?`). The generic Host
+  external-Harness `thread/realtime/*` path is the integration route; no
+  Cursor-specific voice trial or installed Start-button acceptance is documented.
+  See the README Live voice chat row and
+  [External Harness voice](../../operations/cpa-live-voice-desktop-hook.md#external-harness-voice-local-development-build).
 - Edit Diff is partial: it requires native ACP diff content. Delete/rename semantics,
   shell edits and missing historical diffs are not inferred. Other Cursor notification
   extensions are not all implemented.

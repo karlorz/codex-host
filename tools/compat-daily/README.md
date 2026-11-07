@@ -35,6 +35,10 @@ voice pin matches an open issue’s tracked Desktop target or Sparkle latest. It
 leaves the issue open for live acceptance and reports newer drift separately.
 No command here updates pins or enables a Desktop build.
 
+When a pin is behind Sparkle, keep the qualified `/Applications/ChatGPT.app` and
+qualify the newer build separately:
+[macos-desktop-pin-daily-driver.md](../../docs/operations/macos-desktop-pin-daily-driver.md).
+
 ## Audit and re-pin after an upstream sync
 
 Use the [fork upstream-sync runbook](../../docs/operations/fork-versioning.md#preserve-live-voice-when-syncing-upstream)

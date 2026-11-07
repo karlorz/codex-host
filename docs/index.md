@@ -146,6 +146,7 @@
 | [`architecture/renderer-settings-styling.md`](architecture/renderer-settings-styling.md) | 设置页 Tailwind CSS 使用边界、构建方式与编写规则；新增或改版设置页界面时阅读。 |
 | [`operations/codex-desktop-upgrade-diagnosis-playbook.md`](operations/codex-desktop-upgrade-diagnosis-playbook.md) | Desktop 更新后 Renderer、Bridge、Agent、Model、语言设置异常及输入性能的诊断流程，含 26.1027 主进程 Manager 路由；兼容性与交互性能回归时阅读。 |
 | [`operations/cpa-live-voice-desktop-hook.md`](operations/cpa-live-voice-desktop-hook.md) | Shared Desktop/console Voice settings, macOS 26.1027.61615 Work/Chat bindings and acceptance limits, external Harness routing, focused smoke tests, and daily Sparkle pin drift (`.github/workflows/compat-daily.yml`). |
+| [`operations/macos-desktop-pin-daily-driver.md`](operations/macos-desktop-pin-daily-driver.md) | Keep the qualified `/Applications/ChatGPT.app` when Compat Daily or Sparkle is ahead of Work/Chat pins; static vs live qualification of a newer Desktop. |
 | [`operations/browser-annotation-cursor.md`](operations/browser-annotation-cursor.md) | Built-in browser Annotate cursor recovery when page CSP blocks its stylesheet; scoped Host shim, persistence, ownership, and regression checks. |
 
 ## 平台、进程与远程运行
