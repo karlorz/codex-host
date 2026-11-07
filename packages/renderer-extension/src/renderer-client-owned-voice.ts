@@ -292,10 +292,7 @@ export function lastVoiceLaunchProductExperience(): string | undefined {
   return lastVoiceProductExperience;
 }
 
-export function isExternalHarnessComposer(owner: object = globalThis): boolean {
-  if (lastVoiceProductExperience === "chat") return false;
-  if (selectedComposerModel(owner).startsWith("codexhost/")) return true;
-  if (lastVoiceProductExperience !== "work") return false;
+function lastAgentIsExternalHarness(owner: object): boolean {
   const storage = (owner as { localStorage?: Storage }).localStorage;
   if (!storage) return false;
   try {
@@ -310,6 +307,14 @@ export function isExternalHarnessComposer(owner: object = globalThis): boolean {
   } catch {
     return false;
   }
+}
+
+export function isExternalHarnessComposer(owner: object = globalThis): boolean {
+  if (lastVoiceProductExperience === "chat") return false;
+  if (selectedComposerModel(owner).startsWith("codexhost/")) return true;
+  if (lastVoiceProductExperience === "codex") return false;
+  if (lastVoiceProductExperience !== "work" && !isWorkComposerSurface(owner)) return false;
+  return lastAgentIsExternalHarness(owner);
 }
 
 /** Only the audited native WebFetch voice bootstrap is forwarded. Other native

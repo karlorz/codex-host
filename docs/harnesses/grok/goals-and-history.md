@@ -44,6 +44,8 @@ Active goals prevent idle release between rounds. Goal pause/clear use the nativ
 
 ACP prompt replies can arrive before the persistence actor appends `turn_completed` to `updates.jsonl`. When the response supplies `promptId`, the Transport waits up to three seconds for a new occurrence of that exact terminal record before settling a successful Turn. This prevents one command's delayed history from being assigned to the next command. Rewind likewise waits for a new native rewind marker before projecting the retained history.
 
+A Host user Turn can share its settlement window with another durable native terminal, such as a Loop `subagent-completed-*` that has agent output or an ambient in-app-browser prompt. Settlement binds the Host Turn to the ACP `promptId` or live terminal key instead of requiring the snapshot to contain exactly one new Turn. Loop and task-completion notifications that arrive while a user Turn is active do not close that Turn; they remain in native history for later autonomous settlement or reopen backfill.
+
 ## Goal helper chats
 
 Native planner, skeptic and summarizer sessions are projected through the shared Subagent bridge. The Adapter retains child/session/attempt identity and binds each helper through `parent_prompt_id`, matching its owning worker's terminal key. Standalone helper events are buffered until that key is confirmed, then published before the owning Turn closes. They do not create a separate worker or fabricated parent Turn.

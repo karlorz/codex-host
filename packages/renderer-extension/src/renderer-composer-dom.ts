@@ -99,6 +99,7 @@ export interface ComposerAgentControl {
   nativePermissionModeControl: NativePermissionModeControlState | null;
   nativeContextUsageControl?: NativeControlState | null;
   nativeUsageBanner?: NativeControlState | null;
+  nativeGoalControl?: NativeControlState | null;
   nativePermissionModeControlVerified: boolean;
   credits: RendererCreditsControl;
   composerIndicators: RendererComposerIndicators;
@@ -377,6 +378,37 @@ export function nativeContextUsageControlForComposer(composer: Element): HTMLEle
   return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
+const NATIVE_GOAL_MODE_CLEAR_LABELS = new Set(["clear goal", "清除目标", "清除目標"]);
+
+/** Desktop Goal footer chip. Shown for Codex and Grok; hidden for other external Harnesses. */
+export function composerHidesNativeGoalControl(agent: RendererAgent, switching = false): boolean {
+  return switching || (agent !== "codex" && agent !== "grok");
+}
+
+export function isNativeGoalControlCandidate(element: Element): boolean {
+  if (
+    typeof element.hasAttribute !== "function" ||
+    typeof element.matches !== "function" ||
+    typeof element.getAttribute !== "function" ||
+    isOwnedRendererControl(element) ||
+    !element.matches("button")
+  ) {
+    return false;
+  }
+  const label = (element.getAttribute("aria-label") ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return NATIVE_GOAL_MODE_CLEAR_LABELS.has(label);
+}
+
+export function nativeGoalControlForComposer(composer: Element): HTMLElement | null {
+  const candidates = [...composer.querySelectorAll<HTMLElement>("button")].filter(
+    isNativeGoalControlCandidate,
+  );
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+}
+
 /**
  * Codex usage / upsell recovery banner above the Composer: an aside with a
  * title and CTA buttons. Some Desktop versions also mark it as a polite
@@ -495,6 +527,13 @@ function refreshNativeUsageBanner(control: ComposerAgentControl): void {
   if (candidate === control.nativeUsageBanner?.element) return;
   restoreNativeControl(control.nativeUsageBanner);
   control.nativeUsageBanner = captureNativeControl(candidate);
+}
+
+function refreshNativeGoalControl(control: ComposerAgentControl): void {
+  const candidate = nativeGoalControlForComposer(control.composer);
+  if (candidate === control.nativeGoalControl?.element) return;
+  restoreNativeControl(control.nativeGoalControl);
+  control.nativeGoalControl = captureNativeControl(candidate);
 }
 
 function refreshNativeModelControl(control: ComposerAgentControl): void {
@@ -660,6 +699,7 @@ function refreshNativePermissionModeControl(control: ComposerAgentControl): void
 function setNativeControlHidden(
   state: NativeControlState | null | undefined,
   hidden: boolean,
+  dismiss = false,
 ): void {
   if (!state) return;
   if (!hidden) {
@@ -675,6 +715,7 @@ function setNativeControlHidden(
   ) {
     (active as HTMLElement).blur();
   }
+  if (dismiss && typeof state.element.click === "function") state.element.click();
   if (state.element.getAttribute("aria-expanded") === "true") state.element.click();
   state.element.hidden = true;
   state.element.setAttribute("aria-hidden", "true");
@@ -684,6 +725,7 @@ export function reconcileComposerNativeControls(
   control: ComposerAgentControl,
   hideModel: boolean,
   hidePermissionMode: boolean,
+  hideGoal = false,
 ): void {
   refreshNativeContextUsageControl(control);
   refreshNativeModelControl(control);
@@ -692,6 +734,7 @@ export function reconcileComposerNativeControls(
   // location for it within this same pass.
   refreshNativePermissionModeControl(control);
   refreshNativeUsageBanner(control);
+  refreshNativeGoalControl(control);
   refreshTrailingClusterPlacement(control);
   refreshUsagePlacement(control);
   refreshCreditsPlacement(control);
@@ -706,6 +749,9 @@ export function reconcileComposerNativeControls(
   // visible when the external Model control is substituted.
   setNativeControlHidden(control.nativeContextUsageControl, false);
   setNativeControlHidden(control.nativePermissionModeControl, hidePermissionMode);
+  // Desktop Goal mode calls thread/goal/*. Clicking dismisses a local pending
+  // Goal draft before hiding, so unsupported Harnesses do not keep Goal mode.
+  setNativeControlHidden(control.nativeGoalControl, hideGoal, hideGoal);
   // Settings → Appearance, default on: hide the account-wide Codex usage
   // aside on every Composer, including Codex threads. The aside reports the
   // ChatGPT Account rate limit and upsell, not a per-thread notice.
@@ -744,6 +790,7 @@ export function mountComposerAgentControl(
     nativeContextUsageControlForComposer(composer),
   );
   const nativeUsageBanner = captureNativeControl(nativeUsageBannerForComposer(composer));
+  const nativeGoalControl = captureNativeControl(nativeGoalControlForComposer(composer));
   const semanticNativePermissionModeControl =
     semanticNativePermissionModeControlForComposer(composer);
   const nativePermissionModeControl = captureNativeControl(semanticNativePermissionModeControl);
@@ -820,6 +867,7 @@ export function mountComposerAgentControl(
     nativePermissionModeControl,
     nativeContextUsageControl,
     nativeUsageBanner,
+    nativeGoalControl,
     nativePermissionModeControlVerified,
     credits,
     composerIndicators,
@@ -916,6 +964,7 @@ export function renderComposerAgentControl(
     control,
     pickerView.nativeModelHidden,
     switching || state.agent !== "codex",
+    composerHidesNativeGoalControl(state.agent, switching),
   );
   renderRendererModelPicker(
     control.modelPicker,
@@ -961,6 +1010,7 @@ export function disposeComposerAgentControl(control: ComposerAgentControl): void
   restoreNativeControl(control.nativeModelControl);
   restoreNativeControl(control.nativeContextUsageControl);
   restoreNativeControl(control.nativeUsageBanner);
+  restoreNativeControl(control.nativeGoalControl);
   restoreNativeControl(control.nativePermissionModeControl);
   control.composerIndicators?.dispose();
   control.credits.dispose();

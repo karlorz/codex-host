@@ -62,7 +62,11 @@ import {
 import { CursorTurnOutput, cursorSnapshot } from "./projection.js";
 import { isCursorWritableIterableClosed } from "./stream-error.js";
 import { cursorThinking, cursorThinkingState } from "./thinking.js";
-import { CURSOR_COMMAND_CATALOG, cursorCommands, cursorCommandPrompt } from "./slash-commands.js";
+import {
+  CURSOR_COMMAND_CATALOG,
+  cursorCommandPrompt,
+  cursorSessionCatalog,
+} from "./slash-commands.js";
 import { CursorInteractions } from "./interactions.js";
 import { cursorExecutionPolicy, cursorNativeSessionRef } from "./session-ref.js";
 import { cursorTurnsStartWith, forkCursorSession, validateCursorFork } from "./fork.js";
@@ -483,10 +487,13 @@ export class CursorSession implements HarnessSession {
     list: async () =>
       this.#closed
         ? rejected("invalidState", "Cursor session is closed")
-        : { ok: true, value: cursorCommands(this.transport.availableCommands) },
+        : { ok: true, value: cursorSessionCatalog(this.transport.availableCommands) },
     execute: async (command) => {
       if (this.#closed) return rejected("invalidState", "Cursor session is closed");
-      const prompt = cursorCommandPrompt(command, cursorCommands(this.transport.availableCommands));
+      const prompt = cursorCommandPrompt(
+        command,
+        cursorSessionCatalog(this.transport.availableCommands),
+      );
       if (!prompt.ok) return prompt;
       return this.execute({
         type: "turn.start",

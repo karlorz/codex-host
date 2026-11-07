@@ -91,7 +91,7 @@ Live commands are filtered by a blocklist, never an allowlist. `COMMON_EXCLUDED_
 | Kiro CLI | ACP `available_commands_update` | `_meta.kiro.type: "skill"` | — |
 | OMP | RPC `available_commands_update` event | `source: "skill"` | `source: "builtin"` entries except the local `/context` text report; `/compact` uses dedicated handling |
 | CodeBuddy | ACP `available_commands_update` | `_meta.type: "skill"` | its own reviewed list |
-| Cursor CLI | ACP push | none (common list applies to every entry) | `update-cli-config` |
+| Cursor CLI | ACP push | none for live entries (common list applies to every ACP name). Curated built-in `/goal` is a skill | `update-cli-config` |
 | Qoder | SDK or ACP push | none (common list applies to every entry) | — |
 | Hermes | Gateway `slash.exec` / `session.compress` verified command set | none (common list applies to every entry) | — |
 

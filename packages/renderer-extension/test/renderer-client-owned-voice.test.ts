@@ -3,6 +3,7 @@ import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
 import {
   CLIENT_OWNED_VOICE_INITIAL_ASSET,
   CLIENT_OWNED_VOICE_SHARED_ASSET,
+  HOME_COMPOSER_MODE_STORAGE_KEY,
   installClientOwnedVoiceHook,
   isExternalHarnessComposer,
   isWorkComposerSurface,
@@ -10,6 +11,7 @@ import {
   wrapClientOwnedVoiceFetch,
   type NativeVoiceBridge,
 } from "../src/renderer-client-owned-voice.js";
+import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "../src/renderer-new-thread-preference.js";
 import { CPA_LIVE_VOICE_HOOK_GLOBAL } from "../src/renderer-cpa-live-voice-hook.js";
 import { wrapGatewayVoiceStarter } from "../src/renderer-voice-start-capability.js";
 import {
@@ -202,6 +204,24 @@ describe("client-owned voice gateway", () => {
       }),
     ).toBe(false);
   });
+  it.each(["grok", "cursor-cli"])(
+    "treats lastAgent %s as external on a Work composer before any voice launch",
+    (lastAgent) => {
+      rememberVoiceProductExperience({});
+      expect(
+        isExternalHarnessComposer({
+          localStorage: {
+            getItem: (key: string) =>
+              key === HOME_COMPOSER_MODE_STORAGE_KEY
+                ? "work"
+                : key === RENDERER_NEW_THREAD_PREFERENCE_KEY
+                  ? JSON.stringify({ version: 1, lastAgent, externalByAgent: {} })
+                  : null,
+          },
+        }),
+      ).toBe(true);
+    },
+  );
   it("sends external Harness voice through Host even when the Work gateway switch is off", async () => {
     const f = fixture();
     wrapClientOwnedVoiceFetch(

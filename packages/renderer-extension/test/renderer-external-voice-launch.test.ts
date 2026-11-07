@@ -1,4 +1,5 @@
 import type { RendererHostRouting } from "@codexhost/desktop-control/renderer-bindings";
+import { encodeHarnessPluginRoute, harnessPluginIdSchema } from "@codexhost/shared-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET,
@@ -140,6 +141,27 @@ describe("native new-voice selection", () => {
     expect(threadStart.model).toBe(carrier);
     expect(routeExternalVoiceLaunch(original, routing)).toBe(original);
   });
+
+  it.each(["grok", "cursor-cli"] as const)(
+    "stamps lastAgent %s when the Composer has no selected carrier yet",
+    (lastAgent) => {
+      const { routing, policy } = routingFixture();
+      policy.selectedModel.mockReturnValue(null);
+      const original = request();
+      const owner = {
+        localStorage: {
+          getItem: () => JSON.stringify({ version: 1, lastAgent, externalByAgent: {} }),
+        },
+      };
+      const routed = routeExternalVoiceLaunch(original, routing, owner) as ReturnType<
+        typeof request
+      >;
+      expect(routed.activeCollaborationMode.settings.model).toBe(
+        encodeHarnessPluginRoute({ harnessId: harnessPluginIdSchema.parse(lastAgent) }),
+      );
+      expect(original.activeCollaborationMode.settings.model).toBe("gpt-6.1-sol");
+    },
+  );
 
   it.each(["composer_button_existing_thread", "avatar", "global_hotkey"])(
     "preserves %s and its locator even with an external draft",

@@ -1,7 +1,11 @@
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bindings";
 import type { RendererHostRouting } from "@codexhost/desktop-control/renderer-bindings";
-import { CLIENT_OWNED_VOICE_ASSETS, isWorkComposerSurface } from "./renderer-client-owned-voice.js";
+import {
+  CLIENT_OWNED_VOICE_ASSETS,
+  isExternalHarnessComposer,
+  isWorkComposerSurface,
+} from "./renderer-client-owned-voice.js";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-hook.js";
 import {
   chatLiveVoicePreferenceAllowsOverride,
@@ -405,7 +409,7 @@ export function installVoiceCapabilityProjection(
   };
   const external = () => {
     try {
-      return currentRoute()?.policy.selectedModel()?.startsWith("codexhost/") === true;
+      return isExternalHarnessComposer(target);
     } catch {
       return false;
     }

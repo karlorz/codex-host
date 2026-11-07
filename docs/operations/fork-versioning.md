@@ -126,7 +126,10 @@ fetches only the public Sparkle appcast, reads the local pins and exits nonzero
 on drift; it neither updates pins nor qualifies Desktop behavior. Follow
 [the compat-daily audit procedure](../../tools/compat-daily/README.md) to inspect
 the exact assets/exports and change pins only with matching qualification
-evidence. Keep Work and Chat qualification separate. Deferred Chat may continue
+evidence. Keep the qualified daily `/Applications/ChatGPT.app` until that
+evidence exists; see
+[macos-desktop-pin-daily-driver.md](macos-desktop-pin-daily-driver.md).
+Keep Work and Chat qualification separate. Deferred Chat may continue
 to report drift; record that limitation rather than changing its pin to make
 the check green.
 

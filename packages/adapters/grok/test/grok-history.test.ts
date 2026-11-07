@@ -10,6 +10,7 @@ import {
   resolveGrokLastTurnPromptIndex,
   resolveGrokTargetPromptIndex,
 } from "../src/grok-history.js";
+import { selectGrokSettledTurn } from "../src/grok-history-groups.js";
 
 const grokHarnessId = harnessIdSchema.parse("grok");
 
@@ -635,5 +636,33 @@ describe("Grok history generated images", () => {
     } finally {
       await rm(sessionDirectory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Grok settlement turn selection", () => {
+  const turn = (key: string, checkpointId: string) => ({
+    nativeTurnRef: { nativeTurnKey: key },
+    checkpoint: { checkpointId },
+  });
+
+  it("binds the expected key when extra durable Turns exist", () => {
+    expect(
+      selectGrokSettledTurn(
+        [turn("prompt-user", "0"), turn("subagent-completed-loop-1", "1")],
+        "prompt-user",
+      )?.nativeTurnRef.nativeTurnKey,
+    ).toBe("prompt-user");
+  });
+
+  it("does not guess when the expected key is missing", () => {
+    expect(
+      selectGrokSettledTurn(
+        [turn("prompt-user", "0"), turn("subagent-completed-loop-1", "1")],
+        "missing",
+      ),
+    ).toBeUndefined();
+    expect(
+      selectGrokSettledTurn([turn("prompt-user", "0"), turn("subagent-completed-loop-1", "1")]),
+    ).toBeUndefined();
   });
 });

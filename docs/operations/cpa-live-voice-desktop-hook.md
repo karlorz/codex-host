@@ -41,7 +41,7 @@ Harness composers) project only that composer’s `voice.realtime` /
 
 The unaudited-Desktop asset gate still fail-closes. `~/.codex/config.toml` realtime keys stay manual.
 
-Daily CI (`npm run compat:daily`, `.github/workflows/compat-daily.yml`) compares the static public Sparkle appcast to the Work/gateway and Chat voice pins. It does not download ChatGPT.app or query Desktop's per-installation updater offer. A public release can be newer than the version offered by Check for Updates on a particular Mac. A pin behind the public-feed release opens or comments on a `compat-broken` issue on this repository; it does not establish a failed voice call.
+Daily CI (`npm run compat:daily`, `.github/workflows/compat-daily.yml`) compares the static public Sparkle appcast to the Work/gateway and Chat voice pins. It does not download ChatGPT.app or query Desktop's per-installation updater offer. A public release can be newer than the version offered by Check for Updates on a particular Mac. A pin behind the public-feed release opens or comments on a `compat-broken` issue on this repository; it does not establish a failed voice call. Operator handling of that alert, including keeping the qualified `/Applications/ChatGPT.app` and qualifying a newer build without replacing it first, is in [macos-desktop-pin-daily-driver.md](macos-desktop-pin-daily-driver.md).
 
 First-start official-backend recovery is covered by `packages/host-runtime/test/native-account-host.test.ts` (failed first generation, delayed second generation, no `unhandledRejection`). Manual cold-start UAT: fully quit ChatGPT and CodexHost, start **CodexHost 0.13.3** from the menu bar, wait ~15s. Pass: no 无法载入组织设定, console 总览 stays 启动成功, Work + Grok still shows Start voice. Fail: org-settings dialog on first launch only, then OK after 重试 — that is the remaining Host-wait gap, not Chat voice.
 
@@ -105,6 +105,20 @@ current bindings, not a complete vendor-bundle diff. Microphone release,
 audible playback, interruption and spontaneous-close recovery remain attended
 acceptance under [issue #4](https://github.com/karlorz/codex-host/issues/4).
 Pin-drift alerts #16–20 do not establish those behaviors.
+
+## Desktop 26.1103.32239 mapping
+
+Public Sparkle **26.1103.32239** build **25471** is not a Work/Chat pin.
+Named `app-initial-*`, `app-shared-*`, `start-voice-*`, and
+`avatar-overlay-native-page-*` assets are absent. `webview/index.html` loads
+numeric rspack chunks `782259.7a3e865ee5.js`, `727403.da6b00f04b.js`,
+`158624.0baba19172.js`, and `348410.792d1c9584.js`. The native
+`requestRealtimeStart`, `registerRealtimeStarter`, and `realtimeVoiceRuntime`
+strings still exist, including in `webview/assets/async/366057.8dff3ed0b6.js`
+and `webview/assets/async/884655.2edb304734.js`. Those async chunks are not the
+pinned ESM service records (`Vct`, `LRt`, overlay page export). Unknown assets
+fail closed. Do not re-pin until those exports and a Host-attached scratch
+Desktop are qualified. Production Work/Chat pins remain **26.1027.61615**.
 
 ## Desktop 26.1027.30824 Work qualification
 
@@ -1182,10 +1196,11 @@ they are present and waits up to 60 seconds for the native services record.
 Existing-Thread launches, avatar/global launches, official Codex selection,
 ambiguous Composers and mismatched/disconnected Host owners pass through.
 Selection is captured before launch, so changing the draft later cannot retarget
-an in-flight voice chat. This is generic to the selected Harness, not Grok-specific.
-The new-chat correction has focused routing/forwarding tests; installed native
-button acceptance is still required. Earlier installed acceptance exposed the
-missing new-chat selection handoff despite successful isolated transport trials.
+an in-flight voice chat. This is generic to the selected Harness, including Grok and Cursor CLI.
+A Work composer whose lastAgent is an external plugin qualifies Start and the
+new-chat model stamp even when Codex Work uses Desktop default and the Host
+carrier is not selected yet. Chat launches stay native. Installed native
+button acceptance is still required for the README Live voice row.
 
 External `thread/start`, `thread/resume`, and `thread/fork` report
 `sandbox: { type: "externalSandbox", networkAccess: "enabled" }`. Codex does not

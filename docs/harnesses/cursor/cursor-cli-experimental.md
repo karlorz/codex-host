@@ -42,7 +42,8 @@ integration. [CLI ACP](https://cursor.com/docs/cli/acp) is the selected interfac
   thinking on/off plus effort); unrelated context/fast parameters stay in Model refs.
 - Native advertised slash commands and skills through ACP `available_commands_update`.
   Custom commands keep normal Turn identity; `/copy-request-id` can complete without
-  creating a native user Turn.
+  creating a native user Turn. A curated `/goal` skill forwards `/goal <objective>`
+  for the current Turn; it is not Desktop Goal mode and not idle continuation.
 - Outbound cross-Harness delegation through the Host `codexhost-delegation` skill
   and CLI from Cursor's native shell, using the Host-provided environment.
 - Native Agent, Plan and Ask configuration, confirmed by the ACP response before
@@ -127,7 +128,26 @@ contract investigation before release acceptance.
   Historical Fork/revision require the native CLI bridge described below.
   Inbound unattended delegation is a native Run Everything request, not an
   ACP-confirmed approval policy. Image/audio prompt inputs are outside the current Host
-  text contract.
+  text contract. Cursor Desktop voice is unverified (`?`). The generic Host
+  external-Harness `thread/realtime/*` path is the integration route. A Work
+  composer with lastAgent `cursor-cli` uses that same Start/launch path as
+  Grok; no attended Cursor microphone or call trial is documented.
+  See the README Live voice chat row and
+  [External Harness voice](../../operations/cpa-live-voice-desktop-hook.md#external-harness-voice-local-development-build).
+- Interactive `cursor-agent` advertises `/goal` as a TUI command that continues
+  while idle and as a builtin skill that calls `CreateGoal`/`UpdateGoal`. Goal
+  state lives in the conversation store. Idle continuation is TUI-only.
+  `cursor-agent acp` has no goal RPC: a `/goal` prompt is ordinary model input
+  plus selected skills, `handlePrompt` returns `end_turn` after one prompt, and
+  only `/copy-request-id` is handled locally. Host classifies every ACP
+  `available_commands` entry as a command, so a live `goal` name is excluded.
+  The Cursor plugin instead exposes a curated `/goal` skill that forwards
+  `/goal <objective>` for the current Turn. That is not Desktop Goal mode and
+  not TUI idle continuation. Whether ACP actually offers `CreateGoal`/`UpdateGoal`
+  to the model is unverified. `HarnessSession.goals` is not implemented. Desktop
+  Goal mode calls `thread/goal/set` and Host returns `-32076`. The native Goal
+  footer chip is hidden on Cursor composers. There is no Host-managed goal
+  scheduler. See [Native goal bridge](../../architecture/harness-goals.md).
 - Edit Diff is partial: it requires native ACP diff content. Delete/rename semantics,
   shell edits and missing historical diffs are not inferred. Other Cursor notification
   extensions are not all implemented.
@@ -229,6 +249,7 @@ native extensions, not fabricated RPC methods.
 | Usage | The native ACP agent emits neither usage updates nor prompt usage; remains unknown. Shared SDK schemas alone are not evidence that Cursor emits these fields. |
 | Fork / edit previous message | ACP has no Fork or rollback operation. A native CLI `/fork` + conversation-only `/rewind` bridge supports historical Fork and edit previous message on macOS/Linux at available native anchors. |
 | Context compaction | The interactive CLI command is not part of the ACP slash-command handler; no native ACP compaction operation is implemented. Sending `/compact` as plain model text is not compaction. |
+| Native goals | Interactive CLI `/goal` (builtin skill, `CreateGoal`/`UpdateGoal`, TUI idle continuation). ACP has no goal method. Host exposes a curated `/goal` skill that forwards this Turn only. Desktop Goal mode is not a Host-exposed Cursor capability; the shared panel is hidden and `thread/goal/*` fails closed. |
 
 The model catalog comes from native configuration, including each model's own
 Thinking parameter choices. Multiple `thought_level` parameters remain a complete

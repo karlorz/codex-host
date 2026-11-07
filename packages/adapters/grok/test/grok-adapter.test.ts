@@ -1511,6 +1511,110 @@ describe("Grok Adapter ACP projection", () => {
     await resumed.adapter.close();
   });
 
+  it("binds the matching prompt when a Loop subagent Turn also persisted", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    const turnId = hostTurnIdSchema.parse("turn-with-loop");
+    await session.execute({
+      type: "turn.start",
+      turnId,
+      input: [{ type: "text", text: "send the packet" }],
+    });
+    expect((await nextEvent(iterator)).type).toBe("turn.started");
+    transport.event({ type: "agent.text", text: "Sent to eggbot.", messageId: "agent-1" });
+    transport.replay.push(
+      {
+        type: "user.text",
+        text: "send the packet",
+        metadata: { eventId: "user-1", promptIndex: 0 },
+      },
+      { type: "agent.text", text: "Sent to eggbot.", messageId: "agent-1" },
+      { type: "turn.completed", nativeTurnKey: "prompt-user", stopReason: "end_turn" },
+      {
+        type: "user.text",
+        text: "<system-reminder> While you were idle, 1 background subagent completed: - [general-purpose] loop</system-reminder>",
+        metadata: { promptIndex: 1, hideFromScrollback: true },
+      },
+      { type: "agent.text", text: "Loop aligned live=stamp=e82e4d0" },
+      {
+        type: "turn.completed",
+        nativeTurnKey: "subagent-completed-loop-1",
+        stopReason: "end_turn",
+      },
+    );
+    transport.finishWithoutHistory({
+      stopReason: "end_turn",
+      _meta: { promptId: "prompt-user" },
+    });
+    let completed: HostEvent | undefined;
+    for (;;) {
+      const event = await nextEvent(iterator);
+      if (event.type === "turn.completed") {
+        completed = event;
+        break;
+      }
+    }
+    expect(completed).toMatchObject({
+      nativeTurnRef: { nativeTurnKey: "prompt-user" },
+      outcome: { status: "succeeded" },
+    });
+    await expect(session.readSnapshot()).resolves.toMatchObject({
+      ok: true,
+      value: {
+        turns: [
+          { nativeTurnRef: { nativeTurnKey: "prompt-user" } },
+          { nativeTurnRef: { nativeTurnKey: "subagent-completed-loop-1" } },
+        ],
+      },
+    });
+    await adapter.close();
+  });
+
+  it("does not close a user Turn from a Loop completion notification", async () => {
+    const transport = new FakeGrokTransport();
+    const { adapter, session } = await openedSession(transport);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+    const turnId = hostTurnIdSchema.parse("turn-loop-notify");
+    await session.execute({
+      type: "turn.start",
+      turnId,
+      input: [{ type: "text", text: "send the packet" }],
+    });
+    expect((await nextEvent(iterator)).type).toBe("turn.started");
+    transport.backgroundEvent({
+      type: "user.text",
+      text: "<system-reminder> While you were idle, 1 background subagent completed: - [general-purpose] loop</system-reminder>",
+      metadata: { promptIndex: 1, hideFromScrollback: true },
+    });
+    transport.backgroundEvent({
+      type: "agent.text",
+      text: "Loop aligned live=stamp=e82e4d0",
+      metadata: { promptId: "subagent-completed-loop-1" },
+    });
+    transport.backgroundEvent({
+      type: "turn.completed",
+      nativeTurnKey: "subagent-completed-loop-1",
+      stopReason: "end_turn",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    transport.event({ type: "agent.text", text: "Sent to eggbot.", messageId: "agent-1" });
+    transport.finish({ stopReason: "end_turn", _meta: { promptId: "grok-prompt-1" } });
+    let completed: HostEvent | undefined;
+    for (;;) {
+      const event = await nextEvent(iterator);
+      if (event.type === "turn.completed") {
+        completed = event;
+        break;
+      }
+    }
+    expect(completed).toMatchObject({
+      nativeTurnRef: { nativeTurnKey: "grok-prompt-1" },
+      outcome: { status: "succeeded" },
+    });
+    await adapter.close();
+  });
+
   it.each([
     { withMessageIds: true, withTool: false },
     { withMessageIds: true, withTool: true },
