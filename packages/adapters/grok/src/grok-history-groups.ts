@@ -15,6 +15,50 @@ export function grokHostTurn(event: GrokTransportEvent): boolean {
   return event.metadata?.hostTurn === true || event.metadata?.host_turn === true;
 }
 
+const GROK_SIBLING_TERMINAL = /^(?:subagent-completed-|task-completed-)/u;
+
+export function grokSiblingTerminalKey(key: string): boolean {
+  return GROK_SIBLING_TERMINAL.test(key);
+}
+
+/** Loop/task terminals that must not close a user Host Turn. */
+export function grokForeignBackgroundEvent(event: GrokTransportEvent): boolean {
+  if (event.type === "turn.completed") return grokSiblingTerminalKey(event.nativeTurnKey);
+  if (event.type === "user.text") {
+    return (
+      grokHiddenInput(event) && /background subagent completed|Background task/iu.test(event.text)
+    );
+  }
+  const promptId = event.metadata?.promptId ?? event.metadata?.prompt_id;
+  return typeof promptId === "string" && grokSiblingTerminalKey(promptId);
+}
+
+export function grokBackgroundOwnedTurn(input: {
+  turnId: string;
+  backgroundPromptIndex?: number;
+}): boolean {
+  return input.turnId.startsWith("grok-autonomous-") || input.backgroundPromptIndex !== undefined;
+}
+
+export function selectGrokSettledTurn<
+  T extends {
+    nativeTurnRef: { nativeTurnKey: string };
+    checkpoint?: { checkpointId: string } | null;
+  },
+>(created: readonly T[], expectedKey?: string, backgroundPromptIndex?: number): T | undefined {
+  if (expectedKey) {
+    const matched = created.filter((turn) => turn.nativeTurnRef.nativeTurnKey === expectedKey);
+    return matched.length === 1 ? matched[0] : undefined;
+  }
+  if (backgroundPromptIndex !== undefined) {
+    const matched = created.filter(
+      (turn) => Number(turn.checkpoint?.checkpointId) === backgroundPromptIndex,
+    );
+    return matched.length === 1 ? matched[0] : undefined;
+  }
+  return created.length === 1 ? created[0] : undefined;
+}
+
 export interface GrokHistoryGroup {
   user?: Extract<GrokTransportEvent, { type: "user.text" }>;
   terminal: Extract<GrokTransportEvent, { type: "turn.completed" }>;

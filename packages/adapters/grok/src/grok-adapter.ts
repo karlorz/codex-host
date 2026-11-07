@@ -143,8 +143,11 @@ import { forkGrokSession } from "./grok-fork.js";
 import { mapGrokReplay } from "./grok-history.js";
 import {
   classifyGrokHistory,
+  grokBackgroundOwnedTurn,
+  grokForeignBackgroundEvent,
   grokPromptIndex,
   GrokNativeIdentityReuseError,
+  selectGrokSettledTurn,
 } from "./grok-history-groups.js";
 import { rewindGrokSession } from "./grok-rewind.js";
 import {
@@ -1198,8 +1201,14 @@ class GrokHarnessSession implements HarnessSession {
     }
     const active = this.#active;
     if (!active) return;
+    const backgroundOwned = grokBackgroundOwnedTurn({
+      turnId: active.command.turnId,
+      backgroundPromptIndex: active.backgroundPromptIndex,
+    });
+    if (!backgroundOwned && grokForeignBackgroundEvent(event)) return;
     this.#handleEvent(active, event);
     if (event.type === "turn.completed") {
+      if (!backgroundOwned) return;
       const deadline = Date.now() + 3_000;
       while (Date.now() < deadline && this.#phase === "open") {
         const history = await this.#transport.getHistory();
@@ -2457,6 +2466,7 @@ class GrokHarnessSession implements HarnessSession {
       const created = this.#snapshot.turns.filter(
         (turn) => !active.beforeNativeTurnKeys.has(turn.nativeTurnRef.nativeTurnKey),
       );
+      const settled = selectGrokSettledTurn(created, expectedKey, active.backgroundPromptIndex);
       const lastUser = history.findLast((event) => event.type === "user.text");
       ephemeral =
         (terminalKey !== undefined && group?.disposition === "ephemeral" && created.length === 0) ||
@@ -2468,7 +2478,7 @@ class GrokHarnessSession implements HarnessSession {
           lastUser?.type === "user.text" &&
           lastUser.text === active.command.input.map(({ text }) => text).join("\n") &&
           (lastUser?.metadata?.hostTurn === true || lastUser?.metadata?.host_turn === true));
-      if (created.length !== 1 && !ephemeral) {
+      if (!settled && !ephemeral) {
         throw new Error(
           `Grok Turn persisted ${created.length} new Native Turns; exactly one is required`,
         );
@@ -2476,14 +2486,13 @@ class GrokHarnessSession implements HarnessSession {
       if (
         !ephemeral &&
         expectedKey &&
-        (created[0]?.nativeTurnRef.nativeTurnKey !== expectedKey || (terminalKey && !group))
+        (settled?.nativeTurnRef.nativeTurnKey !== expectedKey || (terminalKey && !group))
       )
         throw new Error("Grok persisted terminal does not match the live Turn occurrence");
-      nativeTurnRef = created[0]?.nativeTurnRef;
-      checkpoint = created[0]?.checkpoint;
+      nativeTurnRef = settled?.nativeTurnRef;
+      checkpoint = settled?.checkpoint;
       if (nativeTurnRef) this.#publishGoalHelpers(active, nativeTurnRef.nativeTurnKey);
-      if (active.backgroundPromptIndex !== undefined && !ephemeral)
-        persistedItems = created[0]?.items;
+      if (active.backgroundPromptIndex !== undefined && !ephemeral) persistedItems = settled?.items;
     } catch (error) {
       if (outcome.status === "succeeded" || error instanceof GrokNativeIdentityReuseError) {
         outcome = { status: "failed", error: normalizeError(error, "protocolError") };
