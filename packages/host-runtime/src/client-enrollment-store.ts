@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  allowlistDigest,
+  assertEnrollmentBindings,
   assertLoopbackHttpUrl,
   assertNotParentIdentity,
   enrollmentError,
@@ -131,18 +131,7 @@ export async function writeRuntimeEnrollmentRecords(
   filePath: string,
   records: readonly EnrollmentRecord[],
 ): Promise<void> {
-  for (const record of records) {
-    const digest = allowlistDigest(record.allowlist);
-    if (digest !== record.allowlistDigest) {
-      throw enrollmentError(
-        "ENROLLMENT_INVALID",
-        "Enrollment allowlist no longer matches its consent digest",
-        "allowlist_tamper",
-      );
-    }
-    assertNotParentIdentity(record.threadId);
-    assertLoopbackHttpUrl(record.endpoint);
-  }
+  for (const record of records) assertEnrollmentBindings(record);
   await writePrivateJsonFile(filePath, { schemaVersion: 1, records });
 }
 
@@ -184,16 +173,7 @@ export async function writeEnrollmentStore(
   filePath: string,
   record: EnrollmentRecord,
 ): Promise<void> {
-  const digest = allowlistDigest(record.allowlist);
-  if (digest !== record.allowlistDigest) {
-    throw enrollmentError(
-      "ENROLLMENT_INVALID",
-      "Enrollment allowlist no longer matches its consent digest",
-      "allowlist_tamper",
-    );
-  }
-  assertNotParentIdentity(record.threadId);
-  assertLoopbackHttpUrl(record.endpoint);
+  assertEnrollmentBindings(record);
   await writePrivateJsonFile(filePath, record);
 }
 

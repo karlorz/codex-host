@@ -151,7 +151,7 @@ export function allowlistDigest(allowlist: readonly EnrollmentAllowlistEntry[]):
 }
 
 export function ownThreadAllowlist(threadId: string): EnrollmentAllowlistEntry {
-  return { threadId, verbs: ["read", "watch", "send"] };
+  return { threadId, verbs: [...ENROLLMENT_VERBS] };
 }
 
 export function issuedAllowlist(
@@ -200,10 +200,7 @@ export function assertNotParentIdentity(threadId: string): void {
   }
 }
 
-export function verifyEnrollmentRecord(
-  record: EnrollmentRecord,
-  nowMs: number,
-): asserts record is EnrollmentRecord {
+export function assertEnrollmentBindings(record: EnrollmentRecord): void {
   assertNotParentIdentity(record.threadId);
   assertLoopbackHttpUrl(record.endpoint);
   if (allowlistDigest(record.allowlist) !== record.allowlistDigest) {
@@ -214,6 +211,13 @@ export function verifyEnrollmentRecord(
       { enrollmentId: record.enrollmentId },
     );
   }
+}
+
+export function verifyEnrollmentRecord(
+  record: EnrollmentRecord,
+  nowMs: number,
+): asserts record is EnrollmentRecord {
+  assertEnrollmentBindings(record);
   if (record.revokedAt) {
     throw enrollmentError("ENROLLMENT_INVALID", "Enrollment has been revoked", "revoked", {
       enrollmentId: record.enrollmentId,

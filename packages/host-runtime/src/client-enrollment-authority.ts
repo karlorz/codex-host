@@ -107,9 +107,6 @@ export class EnrollmentAuthority {
     this.#endpoint = endpoint;
     this.#bootstrapPath = enrollmentBootstrapPath({ CODEXHOST_DATA_DIR: this.#dataDirectory });
     await this.#restoreRecords();
-    for (const [token, record] of this.#byToken) {
-      this.#byToken.set(token, { ...record, endpoint });
-    }
     await this.#saveRecords();
     await writeEnrollmentBootstrap(this.#bootstrapPath, this.bootstrapDescriptor());
     return this.#bootstrapPath;
@@ -159,9 +156,6 @@ export class EnrollmentAuthority {
     const executablePath = path.isAbsolute(request.executablePath)
       ? request.executablePath
       : path.resolve(request.executablePath);
-    if (!executablePath) {
-      throw new DelegationControlError("INVALID_ARGUMENT", "executable path is required");
-    }
     const requested = canonicalizeAllowlist(request.allowlist ?? []);
     const decision = request.attendedHostApprove
       ? "approve"

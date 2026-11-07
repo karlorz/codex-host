@@ -103,24 +103,29 @@ export async function resolveCliRuntimeConnection(input: {
       input.environment.CODEXHOST_ENROLL_CLIENT ??
       DEFAULT_ENROLLMENT_CLIENT_ID,
   );
-  const record = await readEnrollmentStore(
-    enrollmentStorePath(input.environment, clientId),
-    input.nowMs,
-  );
+  const [record, liveEndpoint] = await Promise.all([
+    readEnrollmentStore(enrollmentStorePath(input.environment, clientId), input.nowMs),
+    readLiveEnrollmentEndpoint(input.environment),
+  ]);
   if (!record) throw missingRuntimeEnvironmentError(undefined, undefined);
-  let liveEndpoint = record.endpoint;
-  try {
-    const bootstrap = await readEnrollmentBootstrap(enrollmentBootstrapPath(input.environment));
-    if (bootstrap.endpoint) liveEndpoint = bootstrap.endpoint;
-  } catch {
-    // Runtime is down or bootstrap unpublished; fall back to the stored endpoint.
-  }
   return {
-    endpoint: liveEndpoint,
+    endpoint: liveEndpoint ?? record.endpoint,
     token: record.token,
     callerThreadId: record.threadId,
     source: "enrollment",
   };
+}
+
+/** Live Runtime listen port from bootstrap; undefined if Runtime is down or unpublished. */
+async function readLiveEnrollmentEndpoint(
+  environment: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  try {
+    const bootstrap = await readEnrollmentBootstrap(enrollmentBootstrapPath(environment));
+    return bootstrap.endpoint;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runEnrollRequest(input: {
@@ -232,7 +237,10 @@ export async function runEnrollRevoke(input: {
     option(input.parsed, "--client") ?? DEFAULT_ENROLLMENT_CLIENT_ID,
   );
   const storePath = enrollmentStorePath(input.environment, clientId);
-  const record = await readEnrollmentStore(storePath, input.nowMs);
+  const [record, liveEndpoint] = await Promise.all([
+    readEnrollmentStore(storePath, input.nowMs),
+    readLiveEnrollmentEndpoint(input.environment),
+  ]);
   if (!record) {
     throw new DelegationControlError("ENROLLMENT_INVALID", "No enrollment store is present", {
       reason: "revoked",
@@ -242,7 +250,7 @@ export async function runEnrollRevoke(input: {
     "/v1/enroll/revoke",
     {},
     {
-      endpoint: record.endpoint,
+      endpoint: liveEndpoint ?? record.endpoint,
       token: record.token,
       source: "enrollment",
       callerThreadId: record.threadId,
