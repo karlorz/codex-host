@@ -42,6 +42,8 @@ lines.on("line", (line) => {
       },
     });
   } else if (message.method === "cursor/list_available_models") {
+    if (process.env.CURSOR_ACP_MODELS_DUMP)
+      writeFileSync(process.env.CURSOR_ACP_MODELS_DUMP, "called");
     if (scenario === "hang-models" || scenario === "cached-models") return;
     send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   } else if (message.method === "session/set_config_option") {

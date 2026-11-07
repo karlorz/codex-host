@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -99,10 +99,14 @@ describe("Cursor ACP process boundary", () => {
 
 it("reads history without waiting for a model catalog that never responds", async () => {
   state.scenario = "hang-models";
-  const replay = transport(500, false);
+  const environment = isolatedEnvironment();
+  const dump = path.join(environment.CURSOR_CONFIG_DIR, "models-requested");
+  environment.CURSOR_ACP_MODELS_DUMP = dump;
+  const replay = transport(2_000, false, undefined, environment);
   expect(await replay.open("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toMatchObject({
     configOptions: [],
   });
+  expect(existsSync(dump)).toBe(false);
 });
 
 it("advertises only the native parameterized model-picker capability", async () => {
