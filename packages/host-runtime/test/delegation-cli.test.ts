@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
@@ -550,38 +553,43 @@ describe("delegation CLI", () => {
   });
 
   it("fails with structured Runtime errors and does not discover a fallback", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-cli-"));
     const diagnosticOutput = new PassThrough();
-    await expect(
-      runDelegationCli({
-        arguments: ["thread", "read", "thread-1"],
-        environment: { PATH: "/synthetic" },
-        diagnosticOutput,
-      }),
-    ).resolves.toBe(1);
-    expect(JSON.parse(outputText(diagnosticOutput))).toEqual({
-      error: {
-        code: "RUNTIME_UNREACHABLE",
-        message:
-          'CODEXHOST_RUNTIME_ENDPOINT and CODEXHOST_RUNTIME_TOKEN are required. If this command runs inside native Codex, shell_environment_policy may have filtered the Host-provided CODEXHOST_* variables. Prefer inherit = "all" with ignore_default_excludes = true and a narrow include_only allowlist that contains "CODEXHOST_RUNTIME_ENDPOINT" and "CODEXHOST_RUNTIME_TOKEN" plus the variables required by the platform and invoked tools; do not use unconstrained inherit = "all".',
-        details: {
-          reason: "missing_runtime_environment",
-          missingEnvironmentVariables: [
-            DELEGATION_RUNTIME_ENDPOINT_ENV,
-            DELEGATION_RUNTIME_TOKEN_ENV,
-          ],
-          nativeCodexRecovery: {
-            recommendedPolicy: {
-              inherit: "all",
-              ignoreDefaultExcludes: true,
-              includeOnlyMustContain: [
-                DELEGATION_RUNTIME_ENDPOINT_ENV,
-                DELEGATION_RUNTIME_TOKEN_ENV,
-              ],
+    try {
+      await expect(
+        runDelegationCli({
+          arguments: ["thread", "read", "thread-1"],
+          environment: { PATH: "/synthetic", CODEXHOST_DATA_DIR: dataDir },
+          diagnosticOutput,
+        }),
+      ).resolves.toBe(1);
+      expect(JSON.parse(outputText(diagnosticOutput))).toEqual({
+        error: {
+          code: "RUNTIME_UNREACHABLE",
+          message:
+            'CODEXHOST_RUNTIME_ENDPOINT and CODEXHOST_RUNTIME_TOKEN are required. If this command runs inside native Codex, shell_environment_policy may have filtered the Host-provided CODEXHOST_* variables. Prefer inherit = "all" with ignore_default_excludes = true and a narrow include_only allowlist that contains "CODEXHOST_RUNTIME_ENDPOINT" and "CODEXHOST_RUNTIME_TOKEN" plus the variables required by the platform and invoked tools; do not use unconstrained inherit = "all".',
+          details: {
+            reason: "missing_runtime_environment",
+            missingEnvironmentVariables: [
+              DELEGATION_RUNTIME_ENDPOINT_ENV,
+              DELEGATION_RUNTIME_TOKEN_ENV,
+            ],
+            nativeCodexRecovery: {
+              recommendedPolicy: {
+                inherit: "all",
+                ignoreDefaultExcludes: true,
+                includeOnlyMustContain: [
+                  DELEGATION_RUNTIME_ENDPOINT_ENV,
+                  DELEGATION_RUNTIME_TOKEN_ENV,
+                ],
+              },
             },
           },
         },
-      },
-    });
+      });
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("reports only the Host Runtime variables that are missing", async () => {
