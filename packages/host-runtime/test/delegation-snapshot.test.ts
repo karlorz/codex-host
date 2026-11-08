@@ -267,4 +267,78 @@ describe("delegation snapshot", () => {
       progress: [{ text: "Still checking." }],
     });
   });
+
+  it("keeps the last completed Turn's result when a newer Turn is running", () => {
+    const snapshot = projectDelegationThreadSnapshot({
+      threadId: "thread-1",
+      harnessId: "pi",
+      thread: { status: { type: "active" } },
+      turns: [
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [{ id: "final-1", type: "agentMessage", phase: "final", text: "First answer." }],
+        },
+        {
+          id: "turn-2",
+          status: "inProgress",
+          items: [
+            {
+              id: "progress-2",
+              type: "agentMessage",
+              phase: "commentary",
+              text: "Working on follow-up.",
+            },
+          ],
+        },
+      ],
+      running: true,
+      view: "result",
+    });
+    expect(snapshot).toMatchObject({
+      status: "running",
+      turn: { turnId: "turn-2", status: "running" },
+      turnIndex: 2,
+      result: { availability: "pending" },
+      lastCompleted: {
+        turnId: "turn-1",
+        status: "completed",
+        result: { availability: "available", text: "First answer." },
+      },
+    });
+  });
+
+  it("exposes the structured Turn error instead of only a generic stop message", () => {
+    const snapshot = projectDelegationThreadSnapshot({
+      threadId: "thread-1",
+      harnessId: "grok",
+      thread: { status: { type: "idle" } },
+      turns: [
+        {
+          id: "turn-1",
+          status: "failed",
+          items: [],
+          error: {
+            message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+            code: "nativeFailure",
+            diagnostic: '{"message":"model grok-4.6 is not usable"}',
+          },
+        },
+      ],
+      running: false,
+      view: "result",
+    });
+    expect(snapshot).toMatchObject({
+      status: "failed",
+      result: {
+        availability: "unavailable",
+        message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+        error: {
+          message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+          code: "nativeFailure",
+          diagnostic: '{"message":"model grok-4.6 is not usable"}',
+        },
+      },
+    });
+  });
 });

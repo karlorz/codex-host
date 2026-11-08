@@ -152,4 +152,64 @@ describe("compact delegation output", () => {
       nextCursor: null,
     });
   });
+
+  it("includes lastCompleted when a newer Turn is still running", () => {
+    expect(
+      compactDelegationOutput("thread read", {
+        threadId: "thread",
+        harnessId: "pi",
+        status: "running",
+        result: { availability: "pending" },
+        turn: { turnId: "turn-2", status: "running" },
+        progress: [],
+        nextCursor: "bookmark",
+        lastCompleted: {
+          turnId: "turn-1",
+          status: "completed",
+          result: { availability: "available", text: "First answer." },
+        },
+      }),
+    ).toEqual({
+      thread: "codex://threads/thread",
+      harnessId: "pi",
+      status: "running",
+      result: { availability: "pending" },
+      lastCompleted: {
+        turnId: "turn-1",
+        status: "completed",
+        result: { availability: "available", text: "First answer." },
+      },
+    });
+  });
+
+  it("includes turn index and status on compact watch listings", () => {
+    expect(
+      compactDelegationOutput("thread watches", {
+        watches: [
+          {
+            threadId: "child",
+            notifyThreadId: "parent",
+            state: "pendingDelivery",
+            outcome: "completed",
+            turnId: "turn-2",
+            turnIndex: 2,
+            turnStatus: "completed",
+            registeredAt: "timestamp",
+          },
+        ],
+      }),
+    ).toEqual({
+      watches: [
+        {
+          thread: "codex://threads/child",
+          notify: "codex://threads/parent",
+          state: "pendingDelivery",
+          outcome: "completed",
+          turnId: "turn-2",
+          turnIndex: 2,
+          turnStatus: "completed",
+        },
+      ],
+    });
+  });
 });

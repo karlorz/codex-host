@@ -36,7 +36,7 @@ async function watchFixture() {
       }),
       send: (input) => send(input),
     },
-    { pollIntervalMs: 10 },
+    { pollIntervalMs: 10, quietMs: 0 },
   );
   await service.watch({ threadId: "child", notifyThreadId: "native-parent", timeoutMs: 60_000 });
   status = "completed";

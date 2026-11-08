@@ -46,6 +46,7 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
     options: {
       diagnose?: (error: unknown) => void;
       remoteRead?: (input: ThreadReadInput) => ReturnType<DelegationControlApi["read"]>;
+      quietMs?: number;
     } = {},
   ) {
     this.#remoteRead = options.remoteRead;

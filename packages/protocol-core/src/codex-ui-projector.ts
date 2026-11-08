@@ -651,14 +651,18 @@ function turnStatus(
   return "failed";
 }
 
+function projectedTurnError(error: HarnessError): JsonObject {
+  return {
+    message: error.message,
+    codexErrorInfo: "other",
+    additionalDetails: error.diagnostic ?? null,
+    ...(error.code ? { code: error.code } : {}),
+    ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+  };
+}
+
 function turnError(outcome: TurnCompletedEvent["outcome"]): JsonObject | null {
-  return outcome.status === "failed"
-    ? {
-        message: outcome.error.message,
-        codexErrorInfo: "other",
-        additionalDetails: null,
-      }
-    : null;
+  return outcome.status === "failed" ? projectedTurnError(outcome.error) : null;
 }
 
 function historicalStatus(outcome: HistoricalTurnOutcome): "completed" | "interrupted" | "failed" {
@@ -680,13 +684,7 @@ export function projectHistoricalTurn(input: HistoricalTurnProjectionInput): Jso
     startedAtMs >= 0 &&
     completedAtMs >= startedAtMs;
   const error =
-    snapshot.outcome.status === "failed"
-      ? {
-          message: snapshot.outcome.error.message,
-          codexErrorInfo: "other",
-          additionalDetails: null,
-        }
-      : null;
+    snapshot.outcome.status === "failed" ? projectedTurnError(snapshot.outcome.error) : null;
   const projectEntry = ({ item, outcome }: HostItemSnapshot): JsonObject[] => {
     if (itemFileChanges(item) !== null) {
       return files?.itemId === item.itemId

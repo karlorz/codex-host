@@ -204,7 +204,7 @@ describe("DelegationControlRegistry", () => {
   it("watches a Thread in one session and notifies a Thread in another", async () => {
     vi.useFakeTimers();
     try {
-      const registry = new DelegationControlRegistry();
+      const registry = new DelegationControlRegistry({ quietMs: 0 });
       const watched = registration("child");
       const subscriber = registration("parent");
       registry.register(watched);

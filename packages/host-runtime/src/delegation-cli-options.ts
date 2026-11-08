@@ -2,6 +2,8 @@ import { DelegationControlError } from "./delegation-types.js";
 
 /** Options whose value is user text: the next argument is taken verbatim, even empty or dash-leading. */
 const FREE_TEXT_OPTIONS: ReadonlySet<string> = new Set(["--task", "--task-name", "--message"]);
+/** Presence flags; a following `true`/`false` is consumed, otherwise the flag is true. */
+const FLAG_OPTIONS: ReadonlySet<string> = new Set(["--fallback-default"]);
 
 export interface DelegationCliArguments {
   positionals: string[];
@@ -16,6 +18,7 @@ export interface DelegationCliArguments {
 export function consumesNextArgument(argument: string, next: string | undefined): boolean {
   if (!argument.startsWith("--") || argument.includes("=")) return false;
   if (FREE_TEXT_OPTIONS.has(argument)) return true;
+  if (FLAG_OPTIONS.has(argument)) return next === "true" || next === "false";
   return next !== undefined && !next.startsWith("--");
 }
 
@@ -40,8 +43,15 @@ export function parseDelegationArguments(arguments_: readonly string[]): Delegat
       optionValue = arguments_[index + 1];
       index += 1;
     }
+    if (optionValue === undefined && FLAG_OPTIONS.has(name)) {
+      parsed.set(name, "true");
+      continue;
+    }
     if (optionValue === undefined || (optionValue === "" && !FREE_TEXT_OPTIONS.has(name)))
       throw new DelegationControlError("INVALID_ARGUMENT", `${name} requires a value`);
+    if (FLAG_OPTIONS.has(name) && optionValue !== "true" && optionValue !== "false") {
+      throw new DelegationControlError("INVALID_ARGUMENT", `${name} must be true or false`);
+    }
     parsed.set(name, optionValue);
   }
   return { positionals, options: parsed };

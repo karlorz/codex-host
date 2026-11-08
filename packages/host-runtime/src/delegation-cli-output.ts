@@ -83,10 +83,20 @@ function snapshotOutput(
     };
   }
   const progress = snapshot.progress.filter(({ text }) => text.trim()).at(-1)?.text;
+  const lastCompleted = snapshot.lastCompleted;
   return {
     ...common,
     result: snapshot.result,
     ...(snapshot.status === "running" && progress ? { progress } : {}),
+    ...(lastCompleted
+      ? {
+          lastCompleted: {
+            turnId: lastCompleted.turnId,
+            status: lastCompleted.status,
+            result: lastCompleted.result,
+          },
+        }
+      : {}),
   };
 }
 
@@ -150,13 +160,27 @@ export function compactDelegationOutput(
     case "thread watches": {
       const result = body as ThreadWatchListResult;
       return {
-        watches: result.watches.map(({ threadId, notifyThreadId, state, outcome, reason }) => ({
-          thread: threadLink(threadId),
-          notify: threadLink(notifyThreadId),
-          state,
-          ...(outcome ? { outcome } : {}),
-          ...(reason ? { reason } : {}),
-        })),
+        watches: result.watches.map(
+          ({
+            threadId,
+            notifyThreadId,
+            state,
+            outcome,
+            reason,
+            turnId,
+            turnIndex,
+            turnStatus,
+          }) => ({
+            thread: threadLink(threadId),
+            notify: threadLink(notifyThreadId),
+            state,
+            ...(outcome ? { outcome } : {}),
+            ...(turnId ? { turnId } : {}),
+            ...(turnIndex !== undefined ? { turnIndex } : {}),
+            ...(turnStatus ? { turnStatus } : {}),
+            ...(reason ? { reason } : {}),
+          }),
+        ),
       };
     }
     case "thread list": {

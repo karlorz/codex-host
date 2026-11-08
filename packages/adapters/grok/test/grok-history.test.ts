@@ -144,6 +144,31 @@ describe("Grok history Fork mapping", () => {
     },
   );
 
+  it("surfaces native stop metadata on a failed historical Turn", () => {
+    const snapshot = mapGrokReplay(
+      [
+        { type: "user.text", text: "ask", metadata: { promptIndex: 0 } },
+        {
+          type: "turn.completed",
+          nativeTurnKey: "prompt-1",
+          stopReason: "error",
+          metadata: { message: "model grok-4.6 is not usable" },
+        },
+      ],
+      grokHarnessId,
+      "session-1",
+      "/workspace",
+    );
+    expect(snapshot.turns[0]?.outcome).toMatchObject({
+      status: "failed",
+      error: {
+        code: "nativeFailure",
+        message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+        diagnostic: expect.stringContaining("model grok-4.6 is not usable"),
+      },
+    });
+  });
+
   it("assigns Native Prompt Index Checkpoints and skips synthetic user runs", () => {
     const snapshot = mapGrokReplay(
       [

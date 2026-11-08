@@ -3,6 +3,7 @@ import { createGrokUsageStatistics } from "./usage-statistics.js";
 import { grokCommandCatalog, grokGoalPrompt } from "./grok-commands.js";
 import { randomUUID } from "node:crypto";
 import { grokTextItemId } from "./grok-text-item-id.js";
+import { grokPromptStopError } from "./grok-stop-diagnostic.js";
 import { settledGrokAgentMessages } from "./grok-agent-messages.js";
 import { readGrokCredentials } from "./grok-credential-export.js";
 import path from "node:path";
@@ -48,6 +49,7 @@ import {
   type HostThreadSnapshot,
   type HostUsage,
   type InspectHarnessInput,
+  type HarnessModelUsability,
   type InteractionRespondAccepted,
   type InteractionRespondCommand,
   type ModelSelectCommand,
@@ -403,12 +405,7 @@ function terminalOutcome(response: PromptResponse, cancelled: boolean): TurnOutc
   if (response.stopReason === "end_turn") return { status: "succeeded" };
   return {
     status: "failed",
-    error: {
-      code: "nativeFailure",
-      message: `Grok stopped the Turn: ${response.stopReason}`,
-      retryable:
-        response.stopReason === "max_tokens" || response.stopReason === "max_turn_requests",
-    },
+    error: grokPromptStopError(response),
   };
 }
 
@@ -2775,6 +2772,18 @@ export class GrokAdapter implements HarnessAdapter {
     const credits = { ...account.credits };
     delete credits.productUsage;
     return { ...account, credits };
+  }
+
+  async isModelUsable(_input: {
+    model: HarnessModelRef;
+    cwd?: string;
+  }): Promise<HarnessModelUsability> {
+    return {
+      usable: true,
+      checked: false,
+      reason:
+        "Grok does not expose per-model entitlement before spawn; catalog membership is necessary, not sufficient.",
+    };
   }
 
   credits(): GrokCreditsSnapshot | null {

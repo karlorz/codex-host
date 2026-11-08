@@ -736,7 +736,22 @@ export interface HarnessAdapter {
    */
   inspectAccounts?(): Promise<readonly HarnessAccountSnapshot[]>;
 
+  /**
+   * Best-effort entitlement check for a catalog Model. Must not start a Turn.
+   * Catalog membership is necessary, not sufficient. Omit or return
+   * `checked: false` when the Harness cannot answer before spawn.
+   */
+  isModelUsable?(input: { model: HarnessModelRef; cwd?: string }): Promise<HarnessModelUsability>;
+
   inspect(input?: InspectHarnessInput): Promise<HarnessInspection>;
   open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>>;
   close(): Promise<void>;
+}
+
+export interface HarnessModelUsability {
+  /** False when the Harness can prove the Model cannot run now. */
+  usable: boolean;
+  /** False when the listed Model's entitlement cannot be confirmed without a Turn. */
+  checked: boolean;
+  reason?: string;
 }

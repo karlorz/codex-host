@@ -27,6 +27,7 @@ import {
 } from "./grok-history-groups.js";
 import { placeGrokGoalHelpers } from "./grok-goal-helpers.js";
 import { grokTextItemId } from "./grok-text-item-id.js";
+import { grokTurnStopError } from "./grok-stop-diagnostic.js";
 import { grokEventTimestamp } from "./grok-goal-history.js";
 import { projectGrokFileChanges } from "./grok-file-change.js";
 import {
@@ -65,16 +66,12 @@ function stableId(
   return hostItemIdSchema.parse(`grok-history-${kind}-${turn}-${index}`);
 }
 
-function terminalOutcome(stopReason: string): HistoricalTurnOutcome {
+function terminalOutcome(stopReason: string, source?: unknown): HistoricalTurnOutcome {
   if (stopReason === "end_turn") return { status: "succeeded" };
   if (stopReason === "cancelled") return { status: "cancelled", reason: "Cancelled by user" };
   return {
     status: "failed",
-    error: {
-      code: "nativeFailure",
-      message: `Grok stopped the Turn: ${stopReason}`,
-      retryable: stopReason === "max_tokens" || stopReason === "max_turn_requests",
-    },
+    error: grokTurnStopError(stopReason, source),
   };
 }
 
@@ -481,7 +478,7 @@ export function mapGrokReplay(
     if (input.length === 0) continue;
     if (event.type === "turn.completed") {
       completeTurn(
-        terminalOutcome(event.stopReason),
+        terminalOutcome(event.stopReason, event.metadata),
         event.nativeTurnKey,
         grokEventTimestamp(event),
       );

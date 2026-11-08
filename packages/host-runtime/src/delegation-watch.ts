@@ -1,8 +1,10 @@
 import {
+  DEFAULT_WATCH_QUIET_MS,
   DEFAULT_WATCH_TIMEOUT_MS,
   DelegationControlError,
   type DelegationControlApi,
   type DelegationThreadSnapshot,
+  type DelegationThreadStatus,
   type ThreadWatchEntry,
   type ThreadWatchInput,
   type ThreadWatchListResult,
@@ -24,6 +26,16 @@ interface Watch extends ThreadWatchEntry {
   deliveryDeadline?: number;
   unreadableSince?: number;
   lastReadError?: string;
+  /** Earliest time a `completed` outcome may fire after the quiet period. */
+  quietUntil?: number;
+  quietTurnId?: string;
+}
+
+interface ObservedWatch {
+  outcome: ThreadWatchOutcome;
+  turnId?: string;
+  turnIndex?: number;
+  turnStatus?: DelegationThreadStatus;
 }
 
 function terminal(status: DelegationThreadSnapshot["status"]): boolean {
@@ -72,7 +84,11 @@ function describe(watch: Watch): string {
     default:
       // The Turn tells a re-registered watch's notifications apart.
       return watch.turnId
-        ? `${link}: ${watch.outcome} (Turn ${watch.turnId}).`
+        ? `${link}: ${watch.outcome} (Turn ${watch.turnId}).${
+            watch.turnIndex !== undefined || watch.turnStatus
+              ? ` Turn index ${watch.turnIndex ?? "?"}, status ${watch.turnStatus ?? "unknown"}.`
+              : ""
+          }`
         : `${link}: ${watch.outcome}.`;
   }
 }
@@ -93,6 +109,7 @@ function notification(watches: readonly Watch[]): string {
 export class DelegationWatchService {
   readonly #api: Pick<DelegationControlApi, "read" | "send">;
   readonly #pollIntervalMs: number;
+  readonly #quietMs: number;
   readonly #diagnose: (error: unknown) => void;
   readonly #watches: Watch[] = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -100,10 +117,15 @@ export class DelegationWatchService {
 
   constructor(
     api: Pick<DelegationControlApi, "read" | "send">,
-    options: { pollIntervalMs?: number; diagnose?: (error: unknown) => void } = {},
+    options: {
+      pollIntervalMs?: number;
+      quietMs?: number;
+      diagnose?: (error: unknown) => void;
+    } = {},
   ) {
     this.#api = api;
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.#quietMs = options.quietMs ?? DEFAULT_WATCH_QUIET_MS;
     this.#diagnose = options.diagnose ?? (() => undefined);
   }
 
@@ -154,12 +176,24 @@ export class DelegationWatchService {
   async watches(): Promise<ThreadWatchListResult> {
     return {
       watches: this.#watches.map(
-        ({ threadId, notifyThreadId, state, outcome, turnId, reason, registeredAt }) => ({
+        ({
+          threadId,
+          notifyThreadId,
+          state,
+          outcome,
+          turnId,
+          turnIndex,
+          turnStatus,
+          reason,
+          registeredAt,
+        }) => ({
           threadId,
           notifyThreadId,
           state,
           ...(outcome ? { outcome } : {}),
           ...(turnId ? { turnId } : {}),
+          ...(turnIndex !== undefined ? { turnIndex } : {}),
+          ...(turnStatus ? { turnStatus } : {}),
           ...(reason ? { reason } : {}),
           registeredAt,
         }),
@@ -195,10 +229,12 @@ export class DelegationWatchService {
       if (watch.state !== "watching") continue;
       const observed = await this.#observe(watch);
       if (!observed) continue;
-      const { outcome, turnId } = observed;
+      const { outcome, turnId, turnIndex, turnStatus } = observed;
       watch.state = "pendingDelivery";
       watch.outcome = outcome;
       if (turnId) watch.turnId = turnId;
+      if (turnIndex !== undefined) watch.turnIndex = turnIndex;
+      if (turnStatus) watch.turnStatus = turnStatus;
       watch.deliveryDeadline = Date.now() + DELIVERY_WINDOW_MS;
     }
     const subscribers = new Set(
@@ -212,16 +248,42 @@ export class DelegationWatchService {
     }
   }
 
-  async #observe(
-    watch: Watch,
-  ): Promise<{ outcome: ThreadWatchOutcome; turnId?: string } | undefined> {
+  async #observe(watch: Watch): Promise<ObservedWatch | undefined> {
     try {
       const snapshot = await this.#api.read({ threadId: watch.threadId, view: "result" });
+      if (snapshot.status === "running") {
+        delete watch.quietUntil;
+        delete watch.quietTurnId;
+        delete watch.unreadableSince;
+        return Date.now() >= watch.deadline ? { outcome: "timedOut" } : undefined;
+      }
       if (terminal(snapshot.status)) {
-        return {
+        delete watch.unreadableSince;
+        const detail: ObservedWatch = {
           outcome: snapshot.status as ThreadWatchOutcome,
-          ...(snapshot.turn ? { turnId: snapshot.turn.turnId } : {}),
+          ...(snapshot.turn
+            ? { turnId: snapshot.turn.turnId, turnStatus: snapshot.turn.status }
+            : {}),
+          ...(snapshot.turnIndex !== undefined ? { turnIndex: snapshot.turnIndex } : {}),
         };
+        if (snapshot.status !== "completed" || this.#quietMs <= 0) {
+          delete watch.quietUntil;
+          delete watch.quietTurnId;
+          return detail;
+        }
+        const now = Date.now();
+        const turnId = snapshot.turn?.turnId;
+        if (watch.quietUntil === undefined || watch.quietTurnId !== turnId) {
+          watch.quietUntil = now + this.#quietMs;
+          if (turnId) watch.quietTurnId = turnId;
+          else delete watch.quietTurnId;
+        }
+        if (now >= watch.quietUntil || now >= watch.deadline) {
+          delete watch.quietUntil;
+          delete watch.quietTurnId;
+          return detail;
+        }
+        return undefined;
       }
       delete watch.unreadableSince;
     } catch (error) {

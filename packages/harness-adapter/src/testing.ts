@@ -31,6 +31,7 @@ import type {
   HarnessAdapter,
   HarnessCommandCapability,
   HarnessError,
+  HarnessModelUsability,
   HarnessOutput,
   HarnessResult,
   HarnessSession,
@@ -1092,6 +1093,10 @@ export class FakeHarnessAdapter implements HarnessAdapter {
   supportsSteer = false;
   readonly permissionModeScope: HarnessPermissionModeScope;
   inspectionCalls = 0;
+  /** Models that `isModelUsable` reports as unusable when `modelUsabilityChecked` is true. */
+  unusableModelIds = new Set<string>();
+  /** False when this Fake cannot confirm entitlement before spawn. */
+  modelUsabilityChecked = true;
   #closePromise: Promise<void> | null = null;
   #sessionOrdinal = 0;
   #sessionsByNativeId = new Map<string, FakeHarnessSession>();
@@ -1114,6 +1119,21 @@ export class FakeHarnessAdapter implements HarnessAdapter {
     this.supportsForkAcrossCwd = supportsForkAcrossCwd;
     this.supportsRollbackLastTurn = supportsRollbackLastTurn;
     this.permissionModeScope = permissionModeScope;
+  }
+
+  async isModelUsable(input: {
+    model: HarnessModelRef;
+    cwd?: string;
+  }): Promise<HarnessModelUsability> {
+    void input.cwd;
+    if (this.unusableModelIds.has(input.model.id)) {
+      return {
+        usable: false,
+        checked: this.modelUsabilityChecked,
+        reason: `Fake Harness Model '${input.model.id}' is not usable`,
+      };
+    }
+    return { usable: true, checked: this.modelUsabilityChecked };
   }
 
   async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {

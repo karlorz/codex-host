@@ -341,6 +341,7 @@ class FakeGrokTransport implements GrokAcpTransportLike {
           nativeTurnKey: `grok-prompt-${ordinal}`,
           stopReason: response.stopReason,
           ...(historyUsage !== undefined ? { usage: historyUsage } : {}),
+          ...(response._meta ? { metadata: response._meta as Record<string, unknown> } : {}),
         },
       );
     }

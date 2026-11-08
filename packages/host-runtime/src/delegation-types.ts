@@ -19,6 +19,8 @@ export const DELEGATION_THREAD_ID_ENV = "CODEXHOST_THREAD_ID";
 export const NATIVE_CODEX_THREAD_ID_ENV = "CODEX_THREAD_ID";
 /** Default watch expiry; callers adjust it with --timeout-ms. */
 export const DEFAULT_WATCH_TIMEOUT_MS = 29 * 60_000;
+/** Quiet period before a `completed` watch fires, so a follow-up Turn can start. */
+export const DEFAULT_WATCH_QUIET_MS = 8_000;
 
 export type DelegationThreadStatus =
   "creating" | "running" | "completed" | "failed" | "interrupted";
@@ -39,6 +41,13 @@ export interface DelegationProgress {
   text: string;
 }
 
+export interface DelegationThreadResult {
+  availability: DelegationResultAvailability;
+  text?: string;
+  message?: string;
+  error?: DelegationTurnError;
+}
+
 export interface DelegationThreadSnapshot {
   hostId?: string;
   threadId: string;
@@ -46,14 +55,27 @@ export interface DelegationThreadSnapshot {
   status: DelegationThreadStatus;
   turn: { turnId: string; status: DelegationThreadStatus } | null;
   progress: DelegationProgress[];
-  result: {
-    availability: DelegationResultAvailability;
-    text?: string;
-    message?: string;
+  result: DelegationThreadResult;
+  /** 1-based index of `turn` among visible Turns. */
+  turnIndex?: number;
+  /**
+   * Latest terminal Turn that is not the current Turn. Present in compact and
+   * JSON when a newer Turn is running so its result is not hidden.
+   */
+  lastCompleted?: {
+    turnId: string;
+    status: DelegationThreadStatus;
+    result: DelegationThreadResult;
   };
   messages?: DelegationMessage[];
   hasMore?: boolean;
   nextCursor: string | null;
+}
+
+export interface DelegationTurnError {
+  message: string;
+  code?: string;
+  diagnostic?: string;
 }
 
 export interface DelegationStartInput {
@@ -66,6 +88,11 @@ export interface DelegationStartInput {
   requestId?: string;
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;
+  /**
+   * When true, an unavailable requested Model/Thinking is replaced with the
+   * Harness native default instead of rejected. Off by default.
+   */
+  fallbackDefault?: boolean;
 }
 
 export interface HarnessInspectInput {
@@ -83,12 +110,19 @@ export interface HarnessListResult {
   harnesses: RoutedHarnessId[];
 }
 
+export type DelegationModelResolutionDecision =
+  "requested" | "harness-default" | "fallback-default";
+
 export interface DelegationConfigurationResult {
   requested?: { model?: HarnessModelRef; thinkingOptionId?: HarnessThinkingOptionId };
   effective?: Pick<
     HarnessSessionState,
     "effectiveModel" | "resolvedModelLabel" | "effectiveThinkingOptionId"
   >;
+  modelResolution?: {
+    decision: DelegationModelResolutionDecision;
+    fallbackDefault: boolean;
+  };
 }
 
 export interface DelegationStartResult {
@@ -211,6 +245,10 @@ export interface ThreadWatchEntry {
   outcome?: ThreadWatchOutcome;
   /** Turn that reached the terminal outcome, when the Thread reported one. */
   turnId?: string;
+  /** 1-based index of that Turn, when the snapshot reported one. */
+  turnIndex?: number;
+  /** Status of that Turn, distinct from the Thread-level outcome. */
+  turnStatus?: DelegationThreadStatus;
   /** Present for `undeliverable`. */
   reason?: string;
   registeredAt: string;
@@ -259,6 +297,11 @@ export type DelegationControlErrorCode =
   | "ENROLLMENT_DENIED"
   | "ENROLLMENT_INVALID"
   | "DELEGATION_FAILED"
+  | "MODEL_NOT_IN_CATALOG"
+  | "MODEL_NOT_USABLE"
+  | "THINKING_NOT_AVAILABLE"
+  | "MODEL_SELECTION_UNSUPPORTED"
+  | "THINKING_SELECTION_UNSUPPORTED"
   | "INTERNAL_ERROR";
 
 export class DelegationControlError extends Error {

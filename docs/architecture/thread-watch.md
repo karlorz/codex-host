@@ -7,9 +7,9 @@
 ## 模型
 
 - 只有两个 Thread：被观察的 Thread 和被通知的 Thread。与委派的父子关系无关，任意两个不同的 Thread 都可以。
-- 一次性。被观察 Thread 停下，或 watch 到期，哪个先到就通知一次，随后 watch 消失。换了一个仍在运行的 Turn 不会通知。没有取消或退订；想继续等就再注册一次。
+- 一次性。被观察 Thread 停下，或 watch 到期，哪个先到就通知一次，随后 watch 消失。`completed` 会再等一段静默期（默认 8 秒，`DEFAULT_WATCH_QUIET_MS`），期间若又开始了新 Turn 则继续观察，避免把任务中途的 Turn 边界报成任务完成。`failed` 与 `interrupted` 立即通知。注册时已是终态仍返回 `alreadyTerminal`，不做静默等待。没有取消或退订；想继续等就再注册一次。
 - 每次注册各自兑现。同一对 Thread 仍在观察中时重复注册，返回已有的 watch；该 watch 已停下、通知仍在待送达时再次注册（例如 Thread 又开始了新一轮），会新建一个 watch 观察下一次停下，旧通知照常送达，不会被替换或丢弃。
-- 通知只报告执行状态：Thread 链接和结果；终态结果注明来自哪个 Turn，以便区分同一 Thread 不同轮次的通知。通知不包含会话正文或摘要，也不代表工作被验收。接收方应自行 `thread read`。
+- 通知只报告执行状态：Thread 链接和结果；终态结果注明来自哪个 Turn，并附带 turn index 与 turnStatus（若快照提供），以便区分同一 Thread 不同轮次的通知。通知不包含会话正文或摘要，也不代表工作被验收。接收方应自行 `thread read`。
 
 入口：
 

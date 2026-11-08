@@ -74,6 +74,35 @@ describe("delegation CLI option values", () => {
     ).resolves.toMatchObject({ task: "work", taskName: "" });
   });
 
+  it("treats bare --fallback-default as true and accepts explicit booleans", async () => {
+    await expect(
+      sentBody(["delegate", "start", "--harness", "pi", "--task", "work", "--fallback-default"]),
+    ).resolves.toMatchObject({ fallbackDefault: true });
+    await expect(
+      sentBody([
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "work",
+        "--fallback-default",
+        "false",
+      ]),
+    ).resolves.toMatchObject({ fallbackDefault: false });
+    await expect(
+      sentBody([
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "work",
+        "--fallback-default=true",
+      ]),
+    ).resolves.toMatchObject({ fallbackDefault: true });
+  });
+
   it("accepts the --name=value form for every option", async () => {
     await expect(
       sentBody([

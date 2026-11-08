@@ -11,6 +11,8 @@ import type { ExternalHarnessId } from "@codexhost/protocol-core";
 import {
   harnessIdSchema,
   harnessModelCatalogSchema,
+  harnessModelRefSchema,
+  harnessThinkingOptionIdSchema,
   hostThreadIdSchema,
   hostTurnIdSchema,
 } from "@codexhost/shared-contracts";
@@ -40,6 +42,7 @@ async function fixture(
   const registered: ReturnType<ExternalThreadRuntime["register"]>[] = [];
   const notifications: unknown[] = [];
   const delivered: string[] = [];
+  const logs: string[] = [];
   const runtime = new ExternalThreadRuntime({
     adapters,
     environment,
@@ -83,10 +86,12 @@ async function fixture(
     },
     activeOfficialParents: () => [],
     externalThreadBusy,
+    log: (message) => logs.push(message),
   });
   return {
     adapter,
     coordinator,
+    logs,
     directory,
     delivered,
     notifications,
@@ -277,6 +282,11 @@ describe("HarnessDelegationCoordinator", () => {
         harnesses: ["codex", "pi"],
       });
       expect(inspect).not.toHaveBeenCalled();
+      expect(value.logs.some((line) => line.includes("native default"))).toBe(true);
+      expect(result.configuration?.modelResolution).toEqual({
+        decision: "harness-default",
+        fallbackDefault: false,
+      });
       expect(value.registered).toHaveLength(1);
       expect(value.notifications).toHaveLength(1);
       expect(value.adapter.sessions).toHaveLength(1);
@@ -447,6 +457,11 @@ describe("HarnessDelegationCoordinator", () => {
       });
       expect(adapter.openInputs[0]).toMatchObject({ model, thinkingOptionId });
       expect(result.configuration?.requested).toEqual({ model, thinkingOptionId });
+      expect(result.configuration?.modelResolution).toEqual({
+        decision: "requested",
+        fallbackDefault: false,
+      });
+      expect(value.logs.some((line) => line.includes("no fallback"))).toBe(true);
       expect((await value.repository.list())[0]?.transportModelId).not.toBe("codexhost/pi-native");
     } finally {
       await value.close();
@@ -759,6 +774,120 @@ describe("HarnessDelegationCoordinator", () => {
       await expect(
         value.repository.getDelegationByChild(hostThreadIdSchema.parse(started.threadId)),
       ).resolves.toMatchObject({ status: "running" });
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("rejects a Model that is not in the Harness catalog", async () => {
+    const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.start({
+          harnessId: "pi",
+          task: "review",
+          cwd: "/synthetic",
+          parentThreadId: "parent-thread",
+          model: harnessModelRefSchema.parse({ id: "grok-4.6" }),
+        }),
+      ).rejects.toMatchObject({
+        code: "MODEL_NOT_IN_CATALOG",
+        message: "MODEL_NOT_IN_CATALOG: model 'grok-4.6' is not in the catalog for harness 'pi'",
+      });
+      expect(adapter.openInputs).toHaveLength(0);
+      expect(value.adapter.sessions).toHaveLength(0);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("rejects a catalog Model the Harness reports as unusable", async () => {
+    const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
+    adapter.unusableModelIds.add("fake-model-v1.primary");
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.start({
+          harnessId: "pi",
+          task: "review",
+          cwd: "/synthetic",
+          parentThreadId: "parent-thread",
+          model: harnessModelRefSchema.parse({ id: "fake-model-v1.primary" }),
+        }),
+      ).rejects.toMatchObject({
+        code: "MODEL_NOT_USABLE",
+        message: "MODEL_NOT_USABLE: model 'fake-model-v1.primary' is not usable on harness 'pi'",
+      });
+      expect(adapter.openInputs).toHaveLength(0);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("falls back to the Harness default only when --fallback-default is set", async () => {
+    const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
+    adapter.unusableModelIds.add("fake-model-v1.secondary");
+    const value = await fixture(adapter);
+    try {
+      const result = await value.coordinator.start({
+        harnessId: "pi",
+        task: "review",
+        cwd: "/synthetic",
+        parentThreadId: "parent-thread",
+        model: harnessModelRefSchema.parse({ id: "fake-model-v1.secondary" }),
+        fallbackDefault: true,
+      });
+      expect(adapter.openInputs[0]).toMatchObject({ model: { id: "fake-model-v1.primary" } });
+      expect(result.configuration).toMatchObject({
+        requested: { model: { id: "fake-model-v1.secondary" } },
+        modelResolution: { decision: "fallback-default", fallbackDefault: true },
+      });
+      expect(value.logs.some((line) => line.includes("falling back"))).toBe(true);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("still spawns when entitlement cannot be checked before spawn", async () => {
+    const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
+    adapter.modelUsabilityChecked = false;
+    adapter.unusableModelIds.add("fake-model-v1.primary");
+    const value = await fixture(adapter);
+    try {
+      const result = await value.coordinator.start({
+        harnessId: "pi",
+        task: "review",
+        cwd: "/synthetic",
+        parentThreadId: "parent-thread",
+        model: harnessModelRefSchema.parse({ id: "fake-model-v1.primary" }),
+      });
+      expect(adapter.openInputs[0]).toMatchObject({ model: { id: "fake-model-v1.primary" } });
+      expect(result.configuration?.modelResolution?.decision).toBe("requested");
+      expect(value.logs.some((line) => line.includes("cannot be checked before spawn"))).toBe(true);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("rejects Thinking that the selected Model does not advertise", async () => {
+    const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.start({
+          harnessId: "pi",
+          task: "review",
+          cwd: "/synthetic",
+          parentThreadId: "parent-thread",
+          model: harnessModelRefSchema.parse({ id: "fake-model-v1.primary" }),
+          thinkingOptionId: harnessThinkingOptionIdSchema.parse("low"),
+        }),
+      ).rejects.toMatchObject({
+        code: "THINKING_NOT_AVAILABLE",
+        message: expect.stringContaining("THINKING_NOT_AVAILABLE: thinking 'low'"),
+      });
+      expect(adapter.openInputs).toHaveLength(0);
     } finally {
       await value.close();
     }

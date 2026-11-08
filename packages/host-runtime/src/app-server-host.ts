@@ -254,6 +254,7 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
 } from "./delegation-types.js";
+import { resolveDelegationStartConfiguration } from "./delegation-model-validation.js";
 import { HarnessDelegationCoordinator } from "./harness-delegation-coordinator.js";
 import { loadHarnessPlugins } from "./harness-plugin-loader.js";
 import type { HarnessPluginRegistry } from "./harness-plugin-registry.js";
@@ -917,6 +918,7 @@ export class AppServerHost {
       officialThreadMetadata: (threadId) => this.#readOfficialThreadMetadata(threadId),
       activeOfficialParents: () => [...this.#activeOfficialTurns.keys()],
       externalThreadBusy: (thread) => this.#externalThreadBusy(thread),
+      log: (message) => this.#diagnose(message),
     });
     const maintenanceOperation = <T>(run: () => Promise<T>): Promise<T> =>
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
@@ -2793,7 +2795,8 @@ export class AppServerHost {
     } catch {
       throw new DelegationControlError("INVALID_ARGUMENT", "Official Model Ref is invalid");
     }
-    const nativeModelId = requestedModel ? decodeOfficialCodexModelRef(requestedModel) : undefined;
+    let nativeModelId = requestedModel ? decodeOfficialCodexModelRef(requestedModel) : undefined;
+    let spawnThinking = input.thinkingOptionId;
     const digest = createHash("sha256")
       .update(
         JSON.stringify({
@@ -2801,6 +2804,7 @@ export class AppServerHost {
           cwd: input.cwd,
           modelId: requestedModel?.id ?? null,
           thinkingOptionId: input.thinkingOptionId ?? null,
+          fallbackDefault: input.fallbackDefault === true,
         }),
       )
       .digest("hex");
@@ -2837,44 +2841,23 @@ export class AppServerHost {
         },
       };
     }
-    if (requestedModel || input.thinkingOptionId) {
-      const inspected = await this.#inspectOfficialDelegationTarget({
-        harnessId: "codex",
-        cwd: input.cwd,
-      });
-      if (inspected.inspection.status !== "ready") {
-        throw new DelegationControlError(
-          "DELEGATION_FAILED",
-          "Official Model catalog is unavailable",
-        );
-      }
-      if (
-        requestedModel &&
-        !inspected.inspection.catalog.models.some(
-          (candidate) => candidate.ref.id === requestedModel.id,
-        )
-      ) {
-        throw new DelegationControlError("INVALID_ARGUMENT", "Official Model is unavailable", {
-          validModelIds: inspected.inspection.catalog.models.map((candidate) => candidate.ref.id),
-        });
-      }
-      if (input.thinkingOptionId) {
-        const selectedModel = requestedModel ?? inspected.inspection.catalog.defaultModel;
-        const selectedEntry = selectedModel
-          ? inspected.inspection.catalog.models.find(
-              (candidate) => candidate.ref.id === selectedModel.id,
-            )
-          : undefined;
-        const validThinkingOptionIds = selectedEntry?.supportedThinkingOptionIds ?? [];
-        if (!validThinkingOptionIds.includes(input.thinkingOptionId)) {
-          throw new DelegationControlError(
-            "INVALID_ARGUMENT",
-            "Official Thinking option is unavailable for the selected Model",
-            { validThinkingOptionIds },
-          );
-        }
-      }
-    }
+    const inspected =
+      requestedModel || input.thinkingOptionId
+        ? await this.#inspectOfficialDelegationTarget({
+            harnessId: "codex",
+            cwd: input.cwd,
+          })
+        : undefined;
+    const resolved = resolveDelegationStartConfiguration({
+      harnessId: "codex",
+      ...(inspected ? { inspection: inspected.inspection } : {}),
+      ...(requestedModel ? { model: requestedModel } : {}),
+      ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
+      fallbackDefault: input.fallbackDefault === true,
+    });
+    this.#diagnose(resolved.log);
+    nativeModelId = resolved.model ? decodeOfficialCodexModelRef(resolved.model) : undefined;
+    spawnThinking = resolved.thinkingOptionId;
     const started = await this.#officialRuntime.request("thread/start", {
       cwd: input.cwd,
       ...(nativeModelId ? { model: nativeModelId } : {}),
@@ -2898,7 +2881,7 @@ export class AppServerHost {
         threadId,
         input: [{ type: "text", text: input.task }],
         ...(nativeModelId ? { model: nativeModelId } : {}),
-        ...(input.thinkingOptionId ? { effort: input.thinkingOptionId } : {}),
+        ...(spawnThinking ? { effort: spawnThinking } : {}),
       });
       const turnResult = isRecord(turn.result) ? turn.result : null;
       const turnValue = turnResult && isRecord(turnResult.turn) ? turnResult.turn : null;
@@ -2934,21 +2917,21 @@ export class AppServerHost {
         deepLink: `codex://threads/${threadId}`,
         status: pendingTerminal ?? "running",
         cwd: thread && typeof thread.cwd === "string" ? thread.cwd : input.cwd,
-        ...(requestedModel || input.thinkingOptionId
-          ? {
-              configuration: {
-                requested: {
-                  ...(requestedModel ? { model: requestedModel } : {}),
-                  ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
-                },
-                effective: {
-                  ...(startedResult && typeof startedResult.model === "string"
-                    ? { effectiveModel: encodeOfficialCodexModelRef(startedResult.model) }
-                    : {}),
-                },
-              },
-            }
-          : {}),
+        configuration: {
+          requested: {
+            ...(requestedModel ? { model: requestedModel } : {}),
+            ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
+          },
+          effective: {
+            ...(startedResult && typeof startedResult.model === "string"
+              ? { effectiveModel: encodeOfficialCodexModelRef(startedResult.model) }
+              : {}),
+          },
+          modelResolution: {
+            decision: resolved.decision,
+            fallbackDefault: input.fallbackDefault === true,
+          },
+        },
         next: {
           read: `codexhost thread read ${threadId}`,
           wait: `codexhost thread wait ${threadId} --timeout-ms 30000`,

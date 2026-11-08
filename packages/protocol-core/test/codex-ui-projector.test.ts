@@ -1809,6 +1809,7 @@ describe("Codex UI projector", () => {
       message,
       codexErrorInfo: "other",
       additionalDetails: null,
+      code: "nativeFailure",
     };
     expect(completed.messages).toEqual([
       {
@@ -1824,6 +1825,32 @@ describe("Codex UI projector", () => {
         },
       },
     ]);
+    expect(completed.completedTurn).toMatchObject({ status: "failed", error });
+  });
+
+  it("copies Harness diagnostic detail onto the projected Turn error", () => {
+    const value = projector();
+    value.project({ type: "turn.started", turnId });
+    const completed = value.project({
+      type: "turn.completed",
+      turnId,
+      outcome: {
+        status: "failed",
+        error: {
+          code: "nativeFailure",
+          message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+          retryable: false,
+          diagnostic: '{"message":"model grok-4.6 is not usable"}',
+        },
+      },
+    });
+    const error = {
+      message: "Grok stopped the Turn: error: model grok-4.6 is not usable",
+      codexErrorInfo: "other",
+      additionalDetails: '{"message":"model grok-4.6 is not usable"}',
+      code: "nativeFailure",
+      diagnostic: '{"message":"model grok-4.6 is not usable"}',
+    };
     expect(completed.completedTurn).toMatchObject({ status: "failed", error });
   });
 

@@ -27,6 +27,7 @@ function runtime(threads: Record<string, { status: DelegationThreadStatus; turnI
       turn: { turnId, status: thread.status },
       progress: [],
       result: { availability: "pending" },
+      turnIndex: 1,
       nextCursor: null,
     } as DelegationThreadSnapshot;
   });
@@ -61,7 +62,7 @@ describe("DelegationWatchService", () => {
     "notifies the subscriber once when the watched Turn is %s",
     async (status) => {
       const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-      const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+      const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
       await expect(
         service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 }),
       ).resolves.toMatchObject({ state: "watching", status: "running" });
@@ -88,7 +89,7 @@ describe("DelegationWatchService", () => {
 
   it("keeps a notification pending while the subscriber is busy", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "running" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
     fake.sendFailures.push(busy(), busy());
@@ -106,7 +107,7 @@ describe("DelegationWatchService", () => {
 
   it("does not register a watch for a Thread that is not running", async () => {
     const fake = runtime({ child: { status: "failed" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await expect(
       service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 }),
     ).resolves.toMatchObject({ state: "alreadyTerminal", status: "failed" });
@@ -117,7 +118,7 @@ describe("DelegationWatchService", () => {
 
   it("reports timedOut when the Thread never reaches a terminal state", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 29 * 60_000 });
 
     await vi.advanceTimersByTimeAsync(28 * 60_000);
@@ -129,7 +130,7 @@ describe("DelegationWatchService", () => {
 
   it("states a timeout shorter than a minute in seconds", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 15_000 });
 
     await vi.advanceTimersByTimeAsync(15_000 + POLL_MS);
@@ -141,7 +142,7 @@ describe("DelegationWatchService", () => {
       child: { status: "running", turnId: "turn-1" },
       parent: { status: "completed" },
     });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { turnId: "turn-2" });
     await vi.advanceTimersByTimeAsync(POLL_MS);
@@ -158,7 +159,7 @@ describe("DelegationWatchService", () => {
       child: { status: "running", turnId: "turn-1" },
       parent: { status: "completed" },
     });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { turnId: "turn-2" });
     await expect(
@@ -182,7 +183,7 @@ describe("DelegationWatchService", () => {
       b: { status: "running" },
       parent: { status: "completed" },
     });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "a", notifyThreadId: "parent", timeoutMs: 60_000 });
     await service.watch({ threadId: "b", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("a", { status: "completed" });
@@ -195,7 +196,7 @@ describe("DelegationWatchService", () => {
 
   it("treats a repeated registration as the same watch", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     await expect(
       service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 5_000 }),
@@ -211,7 +212,7 @@ describe("DelegationWatchService", () => {
       child: { status: "running", turnId: "turn-1" },
       parent: { status: "running" },
     });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "failed" });
     fake.sendFailures.push(busy());
@@ -245,7 +246,7 @@ describe("DelegationWatchService", () => {
 
   it("rejects a watch whose target or subscriber does not exist", async () => {
     const fake = runtime({ child: { status: "running" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await expect(
       service.watch({ threadId: "missing", notifyThreadId: "child", timeoutMs: 60_000 }),
     ).rejects.toMatchObject({ code: "THREAD_NOT_FOUND" });
@@ -269,7 +270,7 @@ describe("DelegationWatchService", () => {
 
   it("keeps an undeliverable notification visible instead of reporting delivery", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
     fake.sendFailures.push(
@@ -286,7 +287,7 @@ describe("DelegationWatchService", () => {
 
   it("reports a watched Thread that was deleted", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     delete fake.threads.child;
     await vi.advanceTimersByTimeAsync(POLL_MS);
@@ -295,7 +296,7 @@ describe("DelegationWatchService", () => {
 
   it("reports unreadable only after reads keep failing", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 29 * 60_000 });
 
     // A short outage is not reported.
@@ -316,7 +317,7 @@ describe("DelegationWatchService", () => {
 
   it("retries a send the Host rejected before starting a Turn", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
     fake.sendFailures.push(
@@ -335,7 +336,7 @@ describe("DelegationWatchService", () => {
 
   it("does not retry a structured failure that does not prove the Turn never started", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
     // An adapter start whose acknowledgement timed out is wrapped like this.
@@ -354,7 +355,7 @@ describe("DelegationWatchService", () => {
 
   it("does not retry a send whose outcome is unknown", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
     fake.send.mockImplementationOnce(async () => {
@@ -371,7 +372,7 @@ describe("DelegationWatchService", () => {
 
   it("stops all work when closed", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     service.close();
     fake.update("child", { status: "completed" });
@@ -381,5 +382,47 @@ describe("DelegationWatchService", () => {
     await expect(
       service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 }),
     ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it("waits the quiet period before notifying a completed Thread", async () => {
+    const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 2_000 });
+    await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
+    fake.update("child", { status: "completed" });
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(fake.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.sent[0]?.message).toContain("codex://threads/child: completed (Turn turn-child).");
+    expect(fake.sent[0]?.message).toContain("Turn index 1, status completed.");
+  });
+
+  it("cancels a completed quiet period when a new Turn starts", async () => {
+    const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 2_000 });
+    await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
+    fake.update("child", { status: "completed", turnId: "turn-1" });
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(fake.sent).toEqual([]);
+    fake.update("child", { status: "running", turnId: "turn-2" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fake.sent).toEqual([]);
+    fake.update("child", { status: "completed", turnId: "turn-2" });
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(fake.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.sent[0]?.message).toContain("(Turn turn-2).");
+  });
+
+  it("notifies failed immediately even when a completed quiet period is configured", async () => {
+    const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 8_000 });
+    await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
+    fake.update("child", { status: "failed" });
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.sent[0]?.message).toContain("codex://threads/child: failed (Turn turn-child).");
+    expect(fake.sent[0]?.message).toContain("Turn index 1, status failed.");
   });
 });

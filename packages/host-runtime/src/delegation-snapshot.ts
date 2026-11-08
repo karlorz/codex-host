@@ -6,8 +6,10 @@ import type { RoutedHarnessId } from "@codexhost/protocol-core";
 import {
   DelegationControlError,
   type DelegationMessage,
+  type DelegationThreadResult,
   type DelegationThreadSnapshot,
   type DelegationThreadStatus,
+  type DelegationTurnError,
   type ThreadReadInput,
 } from "./delegation-types.js";
 
@@ -45,6 +47,52 @@ function turnStatus(value: unknown): DelegationThreadStatus {
   if (value === "failed") return "failed";
   if (value === "interrupted" || value === "cancelled") return "interrupted";
   return "completed";
+}
+
+function turnErrorPayload(turn: JsonObject | null): DelegationTurnError | undefined {
+  if (!isRecord(turn?.error)) return undefined;
+  const error = turn.error;
+  const message = typeof error.message === "string" && error.message ? error.message : undefined;
+  const diagnostic =
+    typeof error.diagnostic === "string" && error.diagnostic
+      ? error.diagnostic
+      : typeof error.additionalDetails === "string" && error.additionalDetails
+        ? error.additionalDetails
+        : undefined;
+  const code = typeof error.code === "string" && error.code ? error.code : undefined;
+  if (!message && !diagnostic) return undefined;
+  return {
+    message: message ?? diagnostic ?? "Turn failed",
+    ...(code ? { code } : {}),
+    ...(diagnostic && diagnostic !== message ? { diagnostic } : {}),
+  };
+}
+
+function agentMessagesForTurn(
+  visible: readonly DelegationMessage[],
+  turnId: string | null,
+): DelegationMessage[] {
+  return turnId
+    ? visible.filter((message) => message.turnId === turnId && message.role === "agent")
+    : [];
+}
+
+function resultForTurn(
+  turn: JsonObject | null,
+  messages: readonly DelegationMessage[],
+  running: boolean,
+): DelegationThreadResult {
+  const final = messages
+    .filter((message) => message.phase === "final" && message.text.trim())
+    .at(-1);
+  const error = turnErrorPayload(turn);
+  if (running)
+    return { availability: "pending", ...(error ? { error, message: error.message } : {}) };
+  if (final) return { availability: "available", text: final.text };
+  return {
+    availability: "unavailable",
+    ...(error ? { message: error.message, error } : {}),
+  };
 }
 
 function allVisibleMessages(turns: readonly JsonObject[]): DelegationMessage[] {
@@ -151,7 +199,7 @@ export function projectDelegationThreadSnapshot(input: {
     ...(input.limit !== undefined ? { limit: input.limit } : {}),
   });
   const visible = allVisibleMessages(input.turns);
-  const latestTurn = input.turns.at(-1) ?? null;
+  const latestTurn = (input.turns.at(-1) as JsonObject | undefined) ?? null;
   const latestTurnId = latestTurn ? stringValue(latestTurn.id) : null;
   const latestTurnStatus = latestTurn ? turnStatus(latestTurn.status) : null;
   const status = input.running
@@ -159,25 +207,34 @@ export function projectDelegationThreadSnapshot(input: {
     : latestTurnStatus === "failed" || latestTurnStatus === "interrupted"
       ? latestTurnStatus
       : threadStatus(input.thread.status, input.running);
-  const latestTurnMessages = latestTurnId
-    ? visible.filter((message) => message.turnId === latestTurnId && message.role === "agent")
-    : [];
-  const final = latestTurnMessages
-    .filter((message) => message.phase === "final" && message.text.trim())
-    .at(-1);
+  const latestTurnMessages = agentMessagesForTurn(visible, latestTurnId);
   const progress = latestTurnMessages
     .filter((message) => message.phase !== "final" && message.text.trim())
     .map(({ id, turnId, text }) => ({ id, turnId, text }));
-  const result = input.running
-    ? ({ availability: "pending" } as const)
-    : final
-      ? ({ availability: "available", text: final.text } as const)
-      : ({
-          availability: "unavailable",
-          ...(isRecord(latestTurn?.error) && typeof latestTurn.error.message === "string"
-            ? { message: latestTurn.error.message }
-            : {}),
-        } as const);
+  const result = resultForTurn(latestTurn, latestTurnMessages, input.running);
+  const completedTurns = input.turns.filter((turn) => {
+    if (!isRecord(turn)) return false;
+    const candidateStatus = turnStatus(turn.status);
+    return (
+      candidateStatus === "completed" ||
+      candidateStatus === "failed" ||
+      candidateStatus === "interrupted"
+    );
+  });
+  const lastCompletedTurn = (completedTurns.at(-1) as JsonObject | undefined) ?? null;
+  const lastCompletedTurnId = lastCompletedTurn ? stringValue(lastCompletedTurn.id) : null;
+  const lastCompleted =
+    lastCompletedTurn && lastCompletedTurnId && lastCompletedTurnId !== latestTurnId
+      ? {
+          turnId: lastCompletedTurnId,
+          status: turnStatus(lastCompletedTurn.status),
+          result: resultForTurn(
+            lastCompletedTurn,
+            agentMessagesForTurn(visible, lastCompletedTurnId),
+            false,
+          ),
+        }
+      : undefined;
 
   const offset =
     options.view === "messages" ? decodeCursor(input.threadId, options.cursor) : visible.length;
@@ -197,8 +254,10 @@ export function projectDelegationThreadSnapshot(input: {
     status,
     turn:
       latestTurnId && latestTurnStatus ? { turnId: latestTurnId, status: latestTurnStatus } : null,
+    ...(input.turns.length > 0 ? { turnIndex: input.turns.length } : {}),
     progress,
     result,
+    ...(lastCompleted ? { lastCompleted } : {}),
     ...(page
       ? {
           messages: page,

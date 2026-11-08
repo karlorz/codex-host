@@ -36,6 +36,7 @@ export type {
   HarnessInspection,
   HarnessModel,
   HarnessModelCatalog,
+  HarnessModelUsability,
   HarnessModelRef,
   HarnessPermissionMode,
   HarnessPermissionModeCatalog,

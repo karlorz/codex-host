@@ -647,7 +647,7 @@ describe("AppServerHost HarnessAdapter projection", () => {
               : api.read(input),
           send: (input) => api.send(input),
         },
-        { pollIntervalMs: 10 },
+        { pollIntervalMs: 10, quietMs: 0 },
       );
       await service.watch({
         threadId: "watched",
