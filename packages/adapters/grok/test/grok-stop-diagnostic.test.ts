@@ -32,7 +32,7 @@ describe("grok stop diagnostics", () => {
       grokPromptStopError({
         stopReason: "error",
         _meta: { error: { message: "no entitlement for grok-4.6" } },
-      } as PromptResponse),
+      } as unknown as PromptResponse),
     ).toMatchObject({
       message: "Grok stopped the Turn: error: no entitlement for grok-4.6",
       diagnostic: expect.stringContaining("no entitlement for grok-4.6"),

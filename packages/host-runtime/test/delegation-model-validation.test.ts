@@ -1,5 +1,5 @@
 import type { HarnessInspection } from "@codexhost/harness-adapter";
-import { harnessModelCatalogSchema } from "@codexhost/shared-contracts";
+import { harnessModelCatalogSchema, harnessModelRefSchema } from "@codexhost/shared-contracts";
 import { describe, expect, it } from "vitest";
 
 import { resolveDelegationStartConfiguration } from "../src/delegation-model-validation.js";
@@ -48,7 +48,7 @@ describe("resolveDelegationStartConfiguration", () => {
       resolveDelegationStartConfiguration({
         harnessId: "grok",
         inspection: ready,
-        model: { id: "grok-4.6" },
+        model: harnessModelRefSchema.parse({ id: "grok-4.6" }),
       }),
     ).toThrow("MODEL_NOT_IN_CATALOG: model 'grok-4.6' is not in the catalog for harness 'grok'");
   });
@@ -58,7 +58,7 @@ describe("resolveDelegationStartConfiguration", () => {
       resolveDelegationStartConfiguration({
         harnessId: "grok",
         inspection: ready,
-        model: { id: "listed" },
+        model: harnessModelRefSchema.parse({ id: "listed" }),
         usability: { usable: false, checked: true, reason: "no entitlement" },
       }),
     ).toThrow("MODEL_NOT_USABLE: model 'listed' is not usable on harness 'grok'");
@@ -69,13 +69,13 @@ describe("resolveDelegationStartConfiguration", () => {
       resolveDelegationStartConfiguration({
         harnessId: "grok",
         inspection: ready,
-        model: { id: "missing" },
+        model: harnessModelRefSchema.parse({ id: "missing" }),
       });
     expect(withoutFlag).toThrow(/MODEL_NOT_IN_CATALOG/);
     const resolved = resolveDelegationStartConfiguration({
       harnessId: "grok",
       inspection: ready,
-      model: { id: "missing" },
+      model: harnessModelRefSchema.parse({ id: "missing" }),
       fallbackDefault: true,
     });
     expect(resolved.model).toEqual({ id: "listed" });
@@ -88,7 +88,7 @@ describe("resolveDelegationStartConfiguration", () => {
     const resolved = resolveDelegationStartConfiguration({
       harnessId: "grok",
       inspection: ready,
-      model: { id: "listed" },
+      model: harnessModelRefSchema.parse({ id: "listed" }),
       usability: {
         usable: true,
         checked: false,
