@@ -2,6 +2,7 @@ import {
   DEFAULT_WATCH_QUIET_MS,
   DEFAULT_WATCH_TIMEOUT_MS,
   DelegationControlError,
+  isTerminalDelegationStatus,
   type DelegationControlApi,
   type DelegationThreadSnapshot,
   type DelegationThreadStatus,
@@ -39,7 +40,7 @@ interface ObservedWatch {
 }
 
 function terminal(status: DelegationThreadSnapshot["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "interrupted";
+  return isTerminalDelegationStatus(status);
 }
 
 function errorCode(error: unknown): string | undefined {

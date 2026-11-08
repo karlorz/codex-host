@@ -2795,8 +2795,6 @@ export class AppServerHost {
     } catch {
       throw new DelegationControlError("INVALID_ARGUMENT", "Official Model Ref is invalid");
     }
-    let nativeModelId = requestedModel ? decodeOfficialCodexModelRef(requestedModel) : undefined;
-    let spawnThinking = input.thinkingOptionId;
     const digest = createHash("sha256")
       .update(
         JSON.stringify({
@@ -2856,8 +2854,8 @@ export class AppServerHost {
       fallbackDefault: input.fallbackDefault === true,
     });
     this.#diagnose(resolved.log);
-    nativeModelId = resolved.model ? decodeOfficialCodexModelRef(resolved.model) : undefined;
-    spawnThinking = resolved.thinkingOptionId;
+    const nativeModelId = resolved.model ? decodeOfficialCodexModelRef(resolved.model) : undefined;
+    const spawnThinking = resolved.thinkingOptionId;
     const started = await this.#officialRuntime.request("thread/start", {
       cwd: input.cwd,
       ...(nativeModelId ? { model: nativeModelId } : {}),

@@ -24,6 +24,7 @@ import { resolveDelegationStartConfiguration } from "./delegation-model-validati
 import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
+  isTerminalDelegationStatus,
   type DelegationConfigurationResult,
   type DelegationStartInput,
   type DelegationStartResult,
@@ -72,7 +73,7 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function terminal(status: DelegationThreadSnapshot["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "interrupted";
+  return isTerminalDelegationStatus(status);
 }
 
 function taskDigest(
@@ -669,10 +670,17 @@ export class HarnessDelegationCoordinator {
     let inspection: HarnessInspection | undefined;
     let usability: HarnessModelUsability | undefined;
     if (input.model || input.thinkingOptionId) {
-      inspection = (await this.inspect({ harnessId: input.harnessId, cwd: input.cwd })).inspection;
-      if (input.model && adapter.isModelUsable) {
-        usability = await adapter.isModelUsable({ model: input.model, cwd: input.cwd });
-      }
+      const inspectPromise = this.inspect({ harnessId: input.harnessId, cwd: input.cwd });
+      const usabilityPromise =
+        input.model && adapter.isModelUsable
+          ? adapter.isModelUsable({ model: input.model, cwd: input.cwd })
+          : undefined;
+      const [inspected, probed] = await Promise.all([
+        inspectPromise,
+        usabilityPromise ?? Promise.resolve(undefined),
+      ]);
+      inspection = inspected.inspection;
+      usability = probed;
     }
     const resolved = resolveDelegationStartConfiguration({
       harnessId: input.harnessId,
@@ -744,12 +752,7 @@ export class HarnessDelegationCoordinator {
       harnessId,
       deepLink: `codex://threads/${threadId}`,
       status,
-      ...(configuration &&
-      (Object.keys(configuration.requested ?? {}).length > 0 ||
-        Object.keys(configuration.effective ?? {}).length > 0 ||
-        configuration.modelResolution !== undefined)
-        ? { configuration }
-        : {}),
+      ...(configuration ? { configuration } : {}),
       next: {
         read: `codexhost thread read ${threadId}`,
         wait: `codexhost thread wait ${threadId} --timeout-ms 30000`,

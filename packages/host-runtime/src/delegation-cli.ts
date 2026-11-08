@@ -310,15 +310,6 @@ export async function runDelegationCli(input: {
       if (watch !== undefined && watch !== "true" && watch !== "false")
         throw new DelegationControlError("INVALID_ARGUMENT", "--watch must be true or false");
       const fallbackDefault = value(parsed, "--fallback-default");
-      if (
-        fallbackDefault !== undefined &&
-        fallbackDefault !== "true" &&
-        fallbackDefault !== "false"
-      )
-        throw new DelegationControlError(
-          "INVALID_ARGUMENT",
-          "--fallback-default must be true or false",
-        );
       if (watch !== "true" && value(parsed, "--watch-timeout-ms"))
         throw new DelegationControlError(
           "INVALID_ARGUMENT",

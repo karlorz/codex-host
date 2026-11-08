@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_WATCH_QUIET_MS,
   DelegationControlError,
   type DelegationThreadSnapshot,
   type DelegationThreadStatus,
@@ -417,7 +418,10 @@ describe("DelegationWatchService", () => {
 
   it("notifies failed immediately even when a completed quiet period is configured", async () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 8_000 });
+    const service = new DelegationWatchService(fake, {
+      pollIntervalMs: POLL_MS,
+      quietMs: DEFAULT_WATCH_QUIET_MS,
+    });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "failed" });
     await vi.advanceTimersByTimeAsync(POLL_MS);

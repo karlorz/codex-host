@@ -25,6 +25,12 @@ export const DEFAULT_WATCH_QUIET_MS = 8_000;
 export type DelegationThreadStatus =
   "creating" | "running" | "completed" | "failed" | "interrupted";
 
+export function isTerminalDelegationStatus(
+  status: DelegationThreadStatus,
+): status is "completed" | "failed" | "interrupted" {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
 export type DelegationResultAvailability = "pending" | "available" | "unavailable";
 
 export interface DelegationMessage {

@@ -5,6 +5,7 @@ import type { RoutedHarnessId } from "@codexhost/protocol-core";
 
 import {
   DelegationControlError,
+  isTerminalDelegationStatus,
   type DelegationMessage,
   type DelegationThreadResult,
   type DelegationThreadSnapshot,
@@ -75,6 +76,27 @@ function agentMessagesForTurn(
   return turnId
     ? visible.filter((message) => message.turnId === turnId && message.role === "agent")
     : [];
+}
+
+function lastCompletedForRunningTurns(
+  turns: readonly JsonObject[],
+  latestTurnId: string | null,
+  visible: readonly DelegationMessage[],
+): DelegationThreadSnapshot["lastCompleted"] {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (!isRecord(turn)) continue;
+    const turnId = stringValue(turn.id);
+    if (!turnId || turnId === latestTurnId) continue;
+    const status = turnStatus(turn.status);
+    if (!isTerminalDelegationStatus(status)) continue;
+    return {
+      turnId,
+      status,
+      result: resultForTurn(turn, agentMessagesForTurn(visible, turnId), false),
+    };
+  }
+  return undefined;
 }
 
 function resultForTurn(
@@ -212,28 +234,9 @@ export function projectDelegationThreadSnapshot(input: {
     .filter((message) => message.phase !== "final" && message.text.trim())
     .map(({ id, turnId, text }) => ({ id, turnId, text }));
   const result = resultForTurn(latestTurn, latestTurnMessages, input.running);
-  const completedTurns = input.turns.filter((turn) => {
-    if (!isRecord(turn)) return false;
-    const candidateStatus = turnStatus(turn.status);
-    return (
-      candidateStatus === "completed" ||
-      candidateStatus === "failed" ||
-      candidateStatus === "interrupted"
-    );
-  });
-  const lastCompletedTurn = (completedTurns.at(-1) as JsonObject | undefined) ?? null;
-  const lastCompletedTurnId = lastCompletedTurn ? stringValue(lastCompletedTurn.id) : null;
   const lastCompleted =
-    lastCompletedTurn && lastCompletedTurnId && lastCompletedTurnId !== latestTurnId
-      ? {
-          turnId: lastCompletedTurnId,
-          status: turnStatus(lastCompletedTurn.status),
-          result: resultForTurn(
-            lastCompletedTurn,
-            agentMessagesForTurn(visible, lastCompletedTurnId),
-            false,
-          ),
-        }
+    input.running && input.turns.length >= 2
+      ? lastCompletedForRunningTurns(input.turns, latestTurnId, visible)
       : undefined;
 
   const offset =

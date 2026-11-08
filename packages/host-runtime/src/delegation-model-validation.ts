@@ -63,6 +63,23 @@ function fallbackLog(
   return `MODEL_RESOLUTION: falling back to harness '${harnessId}' default model '${fallbackId}' because ${reason}; requested '${requested}' (--fallback-default)`;
 }
 
+function fallbackOrThrow(
+  fallbackDefault: boolean,
+  defaultModel: HarnessModelRef | undefined,
+  harnessId: string,
+  requested: HarnessModelRef,
+  reason: string,
+  error: () => DelegationControlError,
+): { model: HarnessModelRef; log: string } {
+  if (fallbackDefault && defaultModel) {
+    return {
+      model: defaultModel,
+      log: fallbackLog(harnessId, requested.id, defaultModel.id, reason),
+    };
+  }
+  throw error();
+}
+
 /**
  * Validate `--model`/`--thinking` against the inspected catalog and optional
  * entitlement probe. Does not start a Turn. `fallbackDefault` is the only way
@@ -93,47 +110,52 @@ export function resolveDelegationStartConfiguration(input: {
   const logs: string[] = [];
 
   if (model) {
+    const requested = model;
     if (!inspection.capabilities.configuration.selectModel) {
       throw namedError(
         "MODEL_SELECTION_UNSUPPORTED",
         `harness '${harnessId}' does not support Model selection`,
       );
     }
-    const listed = catalogModelForRef(catalog, model);
+    const listed = catalogModelForRef(catalog, requested);
     const defaultModel = catalog.defaultModel;
     if (!listed) {
-      if (fallbackDefault && defaultModel) {
-        logs.push(fallbackLog(harnessId, model.id, defaultModel.id, `model is not in the catalog`));
-        model = defaultModel;
-        decision = "fallback-default";
-      } else {
-        throw namedError(
-          "MODEL_NOT_IN_CATALOG",
-          `model '${model.id}' is not in the catalog for harness '${harnessId}'`,
-          { validModelIds: catalogModelIds(catalog) },
-        );
-      }
-    } else if (input.usability?.checked === true && input.usability.usable === false) {
-      if (fallbackDefault && defaultModel) {
-        logs.push(
-          fallbackLog(
-            harnessId,
-            model.id,
-            defaultModel.id,
-            input.usability.reason ?? "model is not usable",
+      const fallback = fallbackOrThrow(
+        fallbackDefault,
+        defaultModel,
+        harnessId,
+        requested,
+        "model is not in the catalog",
+        () =>
+          namedError(
+            "MODEL_NOT_IN_CATALOG",
+            `model '${requested.id}' is not in the catalog for harness '${harnessId}'`,
+            { validModelIds: catalogModelIds(catalog) },
           ),
-        );
-        model = defaultModel;
-        decision = "fallback-default";
-      } else {
-        throw namedError(
-          "MODEL_NOT_USABLE",
-          `model '${model.id}' is not usable on harness '${harnessId}'`,
-          {
-            ...(input.usability.reason ? { reason: input.usability.reason } : {}),
-          },
-        );
-      }
+      );
+      logs.push(fallback.log);
+      model = fallback.model;
+      decision = "fallback-default";
+    } else if (input.usability?.checked === true && input.usability.usable === false) {
+      const usability = input.usability;
+      const fallback = fallbackOrThrow(
+        fallbackDefault,
+        defaultModel,
+        harnessId,
+        requested,
+        usability.reason ?? "model is not usable",
+        () =>
+          namedError(
+            "MODEL_NOT_USABLE",
+            `model '${requested.id}' is not usable on harness '${harnessId}'`,
+            {
+              ...(usability.reason ? { reason: usability.reason } : {}),
+            },
+          ),
+      );
+      logs.push(fallback.log);
+      model = fallback.model;
+      decision = "fallback-default";
     } else if (input.usability?.checked === false) {
       logs.push(
         `MODEL_RESOLUTION: using requested model '${model.id}' on harness '${harnessId}'; entitlement cannot be checked before spawn${input.usability.reason ? ` (${input.usability.reason})` : ""}`,
@@ -174,12 +196,6 @@ export function resolveDelegationStartConfiguration(input: {
         );
       }
     }
-  }
-
-  if (logs.length === 0) {
-    logs.push(
-      `MODEL_RESOLUTION: using harness '${harnessId}' native default (fallback-default=${fallbackDefault})`,
-    );
   }
 
   return {

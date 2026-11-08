@@ -88,15 +88,7 @@ function snapshotOutput(
     ...common,
     result: snapshot.result,
     ...(snapshot.status === "running" && progress ? { progress } : {}),
-    ...(lastCompleted
-      ? {
-          lastCompleted: {
-            turnId: lastCompleted.turnId,
-            status: lastCompleted.status,
-            result: lastCompleted.result,
-          },
-        }
-      : {}),
+    ...(lastCompleted ? { lastCompleted } : {}),
   };
 }
 
