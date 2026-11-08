@@ -2774,10 +2774,11 @@ export class GrokAdapter implements HarnessAdapter {
     return { ...account, credits };
   }
 
-  async isModelUsable(_input: {
+  async isModelUsable(input: {
     model: HarnessModelRef;
     cwd?: string;
   }): Promise<HarnessModelUsability> {
+    void input;
     return {
       usable: true,
       checked: false,
