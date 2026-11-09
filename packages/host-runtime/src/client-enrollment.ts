@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIPv4 } from "node:net";
 
 import { DelegationControlError } from "./delegation-types.js";
 import type { DelegationThreadListResult, ThreadWatchListResult } from "./delegation-types.js";
@@ -10,8 +11,10 @@ export const ENROLLMENT_VERBS = ["read", "watch", "send"] as const;
 export type EnrollmentVerb = (typeof ENROLLMENT_VERBS)[number];
 
 export const DEFAULT_ENROLLMENT_TTL_MS = 24 * 60 * 60 * 1000;
+export const MACHINE_ENROLLMENT_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 export const ENROLLMENT_CLOCK_SKEW_MS = 5 * 60 * 1000;
 export const DEFAULT_ENROLLMENT_CLIENT_ID = "grok-bot";
+export type EnrollmentPairing = "session" | "machine";
 
 const CLIENT_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
 const VERB_SET: ReadonlySet<string> = new Set(ENROLLMENT_VERBS);
@@ -27,6 +30,10 @@ export interface EnrollmentRecord {
   threadId: string;
   token: string;
   endpoint: string;
+  /** Client-side transport override; Runtime records remain loopback. */
+  networkScope?: "tailnet";
+  /** `machine` is revoke-only and idempotent for the same client and allowlist. */
+  pairing?: EnrollmentPairing;
   clientId: string;
   executablePath: string;
   issuedAt: string;
@@ -43,6 +50,7 @@ export type EnrollmentFailureReason =
   | "expired"
   | "clock_skew"
   | "allowlist_tamper"
+  | "pairing_mismatch"
   | "foreign_pid_environ"
   | "parent_env_file"
   | "impersonating_parent_thread"
@@ -79,6 +87,29 @@ export function parseEnrollmentClientId(value: string): string {
     );
   }
   return value;
+}
+
+export function parseEnrollmentPairing(value: unknown): EnrollmentPairing {
+  if (value === undefined || value === "machine") return "machine";
+  if (value === "session") return "session";
+  throw enrollmentError(
+    "ENROLLMENT_INVALID",
+    "Enrollment pairing must be session or machine",
+    "allowlist_tamper",
+  );
+}
+
+export function enrollPairingFromOptions(options: ReadonlyMap<string, string>): EnrollmentPairing {
+  const machine = options.get("--machine");
+  const session = options.get("--session");
+  if (machine === "true" && session === "true") {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "--machine and --session cannot both be set",
+    );
+  }
+  if (session === "true") return "session";
+  return "machine";
 }
 
 export function parseEnrollmentVerbs(values: readonly string[]): EnrollmentVerb[] {
@@ -161,6 +192,10 @@ export function issuedAllowlist(
   return canonicalizeAllowlist([ownThreadAllowlist(threadId), ...requested]);
 }
 
+export function isDecoratedHttpOrigin(url: URL): boolean {
+  return Boolean(url.username || url.password || url.pathname !== "/" || url.search || url.hash);
+}
+
 export function assertLoopbackHttpUrl(value: string): URL {
   let url: URL;
   try {
@@ -200,9 +235,47 @@ export function assertNotParentIdentity(threadId: string): void {
   }
 }
 
+export function assertTailnetHttpUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Invalid tailnet endpoint",
+      "non_loopback_endpoint",
+    );
+  }
+  const octets = url.hostname.split(".").map(Number);
+  const secondOctet = octets[1] ?? -1;
+  if (
+    url.protocol !== "http:" ||
+    !isIPv4(url.hostname) ||
+    octets[0] !== 100 ||
+    secondOctet < 64 ||
+    secondOctet > 127 ||
+    isDecoratedHttpOrigin(url)
+  ) {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Tailnet endpoint must be a root HTTP URL on an explicit Tailscale IPv4 address (100.64.0.0/10)",
+      "non_loopback_endpoint",
+    );
+  }
+  return url;
+}
+
 export function assertEnrollmentBindings(record: EnrollmentRecord): void {
   assertNotParentIdentity(record.threadId);
-  assertLoopbackHttpUrl(record.endpoint);
+  if (record.pairing !== undefined) parseEnrollmentPairing(record.pairing);
+  if (record.networkScope === "tailnet") assertTailnetHttpUrl(record.endpoint);
+  else if (record.networkScope !== undefined) {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Invalid enrollment network scope",
+      "non_loopback_endpoint",
+    );
+  } else assertLoopbackHttpUrl(record.endpoint);
   if (allowlistDigest(record.allowlist) !== record.allowlistDigest) {
     throw enrollmentError(
       "ENROLLMENT_INVALID",
@@ -339,6 +412,7 @@ export function publicEnrollmentView(record: EnrollmentRecord): {
   clientId: string;
   endpoint: string;
   expiresAt: string;
+  pairing: EnrollmentPairing;
   allowlist: EnrollmentAllowlistEntry[];
 } {
   return {
@@ -347,6 +421,7 @@ export function publicEnrollmentView(record: EnrollmentRecord): {
     clientId: record.clientId,
     endpoint: record.endpoint,
     expiresAt: record.expiresAt,
+    pairing: record.pairing ?? "session",
     allowlist: record.allowlist,
   };
 }

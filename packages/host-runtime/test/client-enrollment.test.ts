@@ -6,11 +6,15 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_ENROLLMENT_TTL_MS,
   FIXTURE_PARENT_THREAD_ID,
+  MACHINE_ENROLLMENT_TTL_MS,
   allowlistDigest,
   authorizeEnrollment,
   issuedAllowlist,
   parseAllowlistOption,
+  enrollPairingFromOptions,
+  parseEnrollmentPairing,
   verifyEnrollmentRecord,
   type EnrollmentRecord,
 } from "../src/client-enrollment.js";
@@ -115,6 +119,25 @@ function controlApi(overrides: Partial<DelegationControlApi> = {}): DelegationCo
 }
 
 describe("client enrollment domain", () => {
+  it("parses session and machine pairing", () => {
+    expect(parseEnrollmentPairing(undefined)).toBe("machine");
+    expect(parseEnrollmentPairing("session")).toBe("session");
+    expect(parseEnrollmentPairing("machine")).toBe("machine");
+    expect(() => parseEnrollmentPairing("ssh")).toThrow(/pairing/u);
+    expect(enrollPairingFromOptions(new Map())).toBe("machine");
+    expect(enrollPairingFromOptions(new Map([["--machine", "true"]]))).toBe("machine");
+    expect(enrollPairingFromOptions(new Map([["--machine", "false"]]))).toBe("machine");
+    expect(enrollPairingFromOptions(new Map([["--session", "true"]]))).toBe("session");
+    expect(() =>
+      enrollPairingFromOptions(
+        new Map([
+          ["--machine", "true"],
+          ["--session", "true"],
+        ]),
+      ),
+    ).toThrow(/cannot both be set/u);
+  });
+
   it("parses allowlists and keeps the parent fixture read/watch only unless send is listed", () => {
     expect(parseAllowlistOption(undefined)).toEqual([]);
     expect(parseAllowlistOption(`${FIXTURE_PARENT_THREAD_ID}:read,watch`)).toEqual([
@@ -394,6 +417,232 @@ describe("client enrollment store and Runtime", () => {
       await enrollment.close();
       await server.close();
     }
+  });
+
+  it("reuses a machine pairing for the same client and allowlist without a second consent", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("timeout"),
+      bootstrapToken: "bootstrap-token",
+      createId: (() => {
+        let index = 0;
+        return () => {
+          const id = ["enroll-a", "thread-a", "enroll-b", "thread-b"][index++];
+          if (!id) throw new Error("unexpected new enrollment ids");
+          return id;
+        };
+      })(),
+      createToken: (() => {
+        let index = 0;
+        return () => {
+          const token = ["machine-token", "replacement-token"][index++];
+          if (!token) throw new Error("unexpected new enrollment token");
+          return token;
+        };
+      })(),
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const server = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment,
+    });
+    try {
+      await enrollment.publishBootstrap(server.endpoint);
+      const first = await enrollment.enroll({
+        clientId: "cursor-box-grok",
+        executablePath: "/synthetic/grok",
+        allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send"] }],
+        pairing: "machine",
+        attendedHostApprove: true,
+      });
+      expect(first.pairing).toBe("machine");
+      expect(Date.parse(first.expiresAt) - Date.parse(first.issuedAt)).toBe(
+        MACHINE_ENROLLMENT_TTL_MS,
+      );
+      await expect(
+        enrollment.enroll({
+          clientId: "cursor-box-grok",
+          executablePath: "/synthetic/stolen",
+          allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send"] }],
+          pairing: "machine",
+        }),
+      ).rejects.toThrow(/timed out/u);
+      expect(enrollment.status("Bearer machine-token").enrollmentId).toBe("enroll-a");
+      const output = new PassThrough();
+      expect(
+        await runDelegationCli({
+          arguments: [
+            "enroll",
+            "--machine",
+            "--client",
+            "cursor-box-grok",
+            "--allow",
+            `${FIXTURE_PARENT_THREAD_ID}:read,send`,
+            "--executable",
+            "/synthetic/cli-grok",
+          ],
+          environment: {
+            CODEXHOST_DATA_DIR: dataDir,
+            [DELEGATION_RUNTIME_ENDPOINT_ENV]: server.endpoint,
+            [DELEGATION_RUNTIME_TOKEN_ENV]: PARENT_TOKEN,
+          },
+          output,
+          now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+        }),
+      ).toBe(0);
+      const view = JSON.parse(outputText(output)) as { pairing?: string; enrollmentId: string };
+      expect(view.pairing).toBe("machine");
+      expect(view.enrollmentId).toBe("enroll-a");
+      const stored = JSON.parse(
+        await readFile(
+          enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "cursor-box-grok"),
+          "utf8",
+        ),
+      ) as EnrollmentRecord;
+      expect(stored.token).toBe("machine-token");
+      const replaced = await enrollment.enroll({
+        clientId: "cursor-box-grok",
+        executablePath: "/synthetic/grok",
+        allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read"] }],
+        pairing: "machine",
+        attendedHostApprove: true,
+      });
+      expect(replaced.token).toBe("replacement-token");
+      expect(replaced.enrollmentId).toBe("enroll-b");
+      expect(enrollment.authenticate("Bearer machine-token")?.kind).toBe("enrollment");
+      expect(() => enrollment.status("Bearer machine-token")).toThrow(/revoked/u);
+      expect(enrollment.status("Bearer replacement-token").pairing).toBe("machine");
+    } finally {
+      await enrollment.close();
+      await server.close();
+    }
+  });
+
+  it("does not reuse a machine pairing for a bootstrap caller", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("timeout"),
+      bootstrapToken: "bootstrap-token",
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const server = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment,
+    });
+    try {
+      await enrollment.publishBootstrap(server.endpoint);
+      const first = await enrollment.enroll({
+        clientId: "cursor-box-grok",
+        executablePath: "/synthetic/grok",
+        allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send"] }],
+        pairing: "machine",
+        attendedHostApprove: true,
+      });
+      const response = await fetch(new URL("/v1/enroll", server.endpoint), {
+        method: "POST",
+        headers: {
+          authorization: "Bearer bootstrap-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId: "cursor-box-grok",
+          executablePath: "/synthetic/stolen",
+          allowlist: [{ threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send"] }],
+          pairing: "machine",
+        }),
+      });
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { error?: { code?: string }; token?: string };
+      expect(body.error?.code).toBe("ENROLLMENT_DENIED");
+      expect(body.token).toBeUndefined();
+      expect(enrollment.status(`Bearer ${first.token}`).enrollmentId).toBe(first.enrollmentId);
+    } finally {
+      await enrollment.close();
+      await server.close();
+    }
+  });
+
+  it("defaults enrollment to revoke-only machine pairing", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("approve"),
+      bootstrapToken: "bootstrap-token",
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    const server = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment,
+    });
+    try {
+      await enrollment.publishBootstrap(server.endpoint);
+      const issued = await enrollment.enroll({
+        clientId: "grok-bot",
+        executablePath: "/synthetic/grok-bot",
+        attendedHostApprove: true,
+      });
+      expect(issued.pairing).toBe("machine");
+      expect(Date.parse(issued.expiresAt) - Date.parse(issued.issuedAt)).toBe(
+        MACHINE_ENROLLMENT_TTL_MS,
+      );
+      const session = await enrollment.enroll({
+        clientId: "grok-bot-session",
+        executablePath: "/synthetic/grok-bot",
+        pairing: "session",
+        attendedHostApprove: true,
+      });
+      expect(session.pairing).toBe("session");
+      expect(Date.parse(session.expiresAt) - Date.parse(session.issuedAt)).toBe(
+        DEFAULT_ENROLLMENT_TTL_MS,
+      );
+    } finally {
+      await enrollment.close();
+      await server.close();
+    }
+  });
+
+  it("does not store an enrollment when Runtime ignores the requested pairing", async () => {
+    const dataDir = await tempDataDir();
+    const diagnosticOutput = new PassThrough();
+    const issued = record();
+    expect(issued.pairing).toBeUndefined();
+    expect(
+      await runDelegationCli({
+        arguments: [
+          "enroll",
+          "--machine",
+          "--client",
+          "grok-bot",
+          "--executable",
+          "/synthetic/grok-bot",
+        ],
+        environment: {
+          CODEXHOST_DATA_DIR: dataDir,
+          [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:9",
+          [DELEGATION_RUNTIME_TOKEN_ENV]: PARENT_TOKEN,
+        },
+        output: new PassThrough(),
+        diagnosticOutput,
+        fetchImpl: vi.fn(async () => new Response(JSON.stringify(issued), { status: 200 })),
+        now: () => Date.parse("2026-11-07T12:00:00.000Z"),
+      }),
+    ).toBe(1);
+    expect(JSON.parse(outputText(diagnosticOutput)).error).toMatchObject({
+      code: "ENROLLMENT_INVALID",
+      message: "Host issued a different enrollment pairing",
+      details: { reason: "pairing_mismatch" },
+    });
+    await expect(
+      readFile(enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot")),
+    ).rejects.toThrow();
   });
 
   it("writes no store on deny or timeout", async () => {
@@ -717,6 +966,11 @@ describe("client enrollment store and Runtime", () => {
     expect(DELEGATION_HELP).toContain("codexhost enroll --client <id>");
     expect(DELEGATION_HELP).toContain("codexhost enroll status");
     expect(DELEGATION_HELP).toContain("codexhost enroll revoke");
+    const enrollHelp = new PassThrough();
+    expect(await runDelegationCli({ arguments: ["enroll", "--help"], output: enrollHelp })).toBe(0);
+    const enrollHelpText = outputText(enrollHelp);
+    expect(enrollHelpText).toContain("--machine");
+    expect(enrollHelpText).toContain("--session");
     for (const arguments_ of [
       ["enroll", "--help"],
       ["enroll", "status", "--help"],

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   DEFAULT_ENROLLMENT_TTL_MS,
+  MACHINE_ENROLLMENT_TTL_MS,
   allowlistDigest,
   authorizeEnrollment,
   canonicalizeAllowlist,
@@ -12,9 +13,11 @@ import {
   filterEnrollmentWatches,
   issuedAllowlist,
   parseEnrollmentClientId,
+  parseEnrollmentPairing,
   publicEnrollmentView,
   verifyEnrollmentRecord,
   type EnrollmentAllowlistEntry,
+  type EnrollmentPairing,
   type EnrollmentRecord,
   type EnrollmentRequestAction,
 } from "./client-enrollment.js";
@@ -42,7 +45,8 @@ export interface EnrollmentIssueRequest {
   clientId: string;
   executablePath: string;
   allowlist?: EnrollmentAllowlistEntry[];
-  /** Host-session attended approve (Karl GO). Skips the Desktop timeout stub. */
+  pairing?: EnrollmentPairing;
+  /** Host-authenticated calling session; required to reuse a machine pairing. */
   attendedHostApprove?: boolean;
 }
 
@@ -54,7 +58,6 @@ export class EnrollmentAuthority {
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #createToken: () => string;
-  readonly #tokenTtlMs: number;
   readonly #pid: number;
   readonly #byToken = new Map<string, EnrollmentRecord>();
   #endpoint: string | undefined;
@@ -67,7 +70,6 @@ export class EnrollmentAuthority {
     now?: () => number;
     createId?: () => string;
     createToken?: () => string;
-    tokenTtlMs?: number;
     pid?: number;
     bootstrapToken?: string;
   }) {
@@ -82,7 +84,6 @@ export class EnrollmentAuthority {
     this.#now = input.now ?? Date.now;
     this.#createId = input.createId ?? randomUUID;
     this.#createToken = input.createToken ?? (() => randomBytes(32).toString("hex"));
-    this.#tokenTtlMs = input.tokenTtlMs ?? DEFAULT_ENROLLMENT_TTL_MS;
     this.#pid = input.pid ?? process.pid;
   }
 
@@ -118,13 +119,18 @@ export class EnrollmentAuthority {
     );
     this.#byToken.clear();
     for (const record of records) {
-      const next = { ...record, endpoint: this.#endpoint ?? record.endpoint };
-      try {
-        verifyEnrollmentRecord(next, this.#now());
-      } catch {
-        continue;
-      }
-      this.#byToken.set(next.token, next);
+      const next = this.#verified({ ...record, endpoint: this.#endpoint ?? record.endpoint });
+      if (next) this.#byToken.set(next.token, next);
+    }
+  }
+
+  #verified(record: EnrollmentRecord): EnrollmentRecord | undefined {
+    try {
+      verifyEnrollmentRecord(record, this.#now());
+      return record;
+    } catch (error) {
+      if (!(error instanceof DelegationControlError)) throw error;
+      return undefined;
     }
   }
 
@@ -151,12 +157,48 @@ export class EnrollmentAuthority {
     return undefined;
   }
 
+  #activeMachineRecord(clientId: string): EnrollmentRecord | undefined {
+    for (const record of this.#byToken.values()) {
+      if (record.clientId !== clientId || record.pairing !== "machine") continue;
+      if (this.#verified(record)) return record;
+    }
+    return undefined;
+  }
+
+  #revokeActiveForClient(clientId: string): void {
+    const revokedAt = new Date(this.#now()).toISOString();
+    for (const [token, record] of this.#byToken) {
+      if (record.clientId !== clientId || record.revokedAt) continue;
+      this.#byToken.set(token, { ...record, revokedAt });
+    }
+  }
+
   async enroll(request: EnrollmentIssueRequest): Promise<EnrollmentRecord> {
     const clientId = parseEnrollmentClientId(request.clientId);
     const executablePath = path.isAbsolute(request.executablePath)
       ? request.executablePath
       : path.resolve(request.executablePath);
     const requested = canonicalizeAllowlist(request.allowlist ?? []);
+    const pairing = parseEnrollmentPairing(request.pairing);
+    if (!this.#endpoint) {
+      throw new DelegationControlError("INTERNAL_ERROR", "Enrollment bootstrap is not published");
+    }
+    if (pairing === "machine" && request.attendedHostApprove) {
+      const existing = this.#activeMachineRecord(clientId);
+      if (
+        existing &&
+        allowlistDigest(issuedAllowlist(existing.threadId, requested)) === existing.allowlistDigest
+      ) {
+        const refreshed: EnrollmentRecord = {
+          ...existing,
+          endpoint: this.#endpoint,
+          executablePath,
+        };
+        this.#byToken.set(refreshed.token, refreshed);
+        await this.#saveRecords();
+        return refreshed;
+      }
+    }
     const decision = request.attendedHostApprove
       ? "approve"
       : await this.#consent.decide({
@@ -170,9 +212,7 @@ export class EnrollmentAuthority {
     if (decision !== "approve") {
       throw enrollmentError("ENROLLMENT_DENIED", "Enrollment timed out", "timeout");
     }
-    if (!this.#endpoint) {
-      throw new DelegationControlError("INTERNAL_ERROR", "Enrollment bootstrap is not published");
-    }
+    if (pairing === "machine") this.#revokeActiveForClient(clientId);
     const enrollmentId = this.#createId();
     const threadId = this.#createId();
     if (threadId === enrollmentId) {
@@ -187,6 +227,8 @@ export class EnrollmentAuthority {
       );
     }
     const issuedAtMs = this.#now();
+    const tokenTtlMs =
+      pairing === "machine" ? MACHINE_ENROLLMENT_TTL_MS : DEFAULT_ENROLLMENT_TTL_MS;
     const allowlist = issuedAllowlist(threadId, requested);
     const record: EnrollmentRecord = {
       schemaVersion: 1,
@@ -197,9 +239,10 @@ export class EnrollmentAuthority {
       clientId,
       executablePath,
       issuedAt: new Date(issuedAtMs).toISOString(),
-      expiresAt: new Date(issuedAtMs + this.#tokenTtlMs).toISOString(),
+      expiresAt: new Date(issuedAtMs + tokenTtlMs).toISOString(),
       allowlist,
       allowlistDigest: allowlistDigest(allowlist),
+      pairing,
     };
     this.#byToken.set(token, record);
     await this.#saveRecords();

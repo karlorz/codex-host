@@ -2,7 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 
 import type { EnrollmentAuthority, EnrollmentPrincipal } from "./client-enrollment-authority.js";
-import type { EnrollmentAllowlistEntry, EnrollmentRequestAction } from "./client-enrollment.js";
+import {
+  parseEnrollmentPairing,
+  type EnrollmentAllowlistEntry,
+  type EnrollmentRequestAction,
+} from "./client-enrollment.js";
 import {
   DelegationControlError,
   type DelegationControlApi,
@@ -183,12 +187,14 @@ export async function startDelegationControlServer(input: {
           return;
         }
         const enrollBody = await jsonBody(request);
+        const pairing = parseEnrollmentPairing(enrollBody.pairing);
         const record = await input.enrollment.enroll({
           clientId: String(enrollBody.clientId ?? ""),
           executablePath: String(enrollBody.executablePath ?? ""),
           ...(Array.isArray(enrollBody.allowlist)
             ? { allowlist: enrollBody.allowlist as EnrollmentAllowlistEntry[] }
             : {}),
+          pairing,
           attendedHostApprove: hostPrincipal,
         });
         writeJson(response, 200, record);

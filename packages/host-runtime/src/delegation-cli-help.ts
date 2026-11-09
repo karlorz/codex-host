@@ -51,16 +51,23 @@ Find existing Threads by workspace, or use --parent to list a Thread's delegated
 Workspace listing defaults to the caller process cwd. Default limit 25 (maximum 100), sorted created-desc.
 --parent uses Delegation relationships. A null nextCursor ends the list.
 Compact output keeps task links, Harness, status, title, and workspace.`,
-  enroll: `codexhost enroll --client <id> [--allow <threadId:verb[,verb][;...]>] [--executable <path>] [--format json|compact]
+  enroll: `codexhost enroll --client <id> [--allow <threadId:verb[,verb][;...]>] [--executable <path>] [--machine] [--session] [--format json|compact]
 Request attended Host enrollment for a local client such as grok-bot.
 Desktop shows the client, executable path, Thread allowlist, and verbs for Approve/Deny.
-On Approve, Host issues a distinct enrollment_id, Thread id, and expiring token, and the CLI writes a user-private mode-600 store.
+On Approve, Host issues a distinct enrollment_id, Thread id, and token, and the CLI writes a user-private mode-600 store.
 The allowlist defaults to empty besides the new Thread (read/watch/send). Parent Thread access requires an explicit allowlist entry.
+Enrollment defaults to machine pairing until revoke, like an SSH authorized key: a Host-authenticated session reuses the same client and allowlist without a new consent. Unmanaged bootstrap still times out. Changing the allowlist is a new trust step. enroll revoke removes the key. --session issues a 24-hour token.
 Does not copy another process's Runtime environment, a Runtime descriptor, or a parent env file.`,
   "enroll status": `codexhost enroll status [--client <id>] [--format json|compact]
 Show the local enrollment store for this login without printing the token.`,
   "enroll revoke": `codexhost enroll revoke [--client <id>] [--format json|compact]
 Revoke the enrollment at the Host Runtime and delete the local store. Later commands fail closed.`,
+  "enroll serve": `codexhost enroll serve --client <id> --listen <tailscale-ipv4> [--port 4398] --export-file <absolute-path>
+Serve one existing local enrollment over Tailscale without restarting Desktop.
+Accepts only that client's token and forwards read/send/status/revoke to the live loopback Runtime from the local enroll bootstrap when present.
+Writes a new mode-600 handoff record in a user-owned mode-700 directory; refuses existing files.
+Transfer only this client's record over SSH into its remote enrollment store. Set CODEXHOST_ENROLL_CLIENT to select it.
+Runs until SIGINT/SIGTERM. Session pairing also stops the listener at token expiry. Machine pairing stays until revoke.`,
 } as const;
 
 export type DelegationCliCommand = keyof typeof COMMAND_HELP;
@@ -86,6 +93,7 @@ export const DELEGATION_HELP = `usage:
   codexhost enroll --client <id>
   codexhost enroll status
   codexhost enroll revoke
+  codexhost enroll serve --client <id> --listen <tailscale-ipv4> --export-file <path>
 
 Use <command> --help for its options. Use harness list to discover targets.
 ${COMMON_HELP}
@@ -114,7 +122,13 @@ export function delegationCliHelp(arguments_: readonly string[]): string | undef
     if (group === "delegate") return DELEGATION_HELP;
     if (group === "harness" || group === "thread" || group === "enroll") return groupHelp(group);
   }
-  if (group === "enroll" && command && command !== "status" && command !== "revoke") {
+  if (
+    group === "enroll" &&
+    command &&
+    command !== "status" &&
+    command !== "revoke" &&
+    command !== "serve"
+  ) {
     if (hasHelpOption([command, ...rest])) return groupHelp("enroll");
   }
   if (hasHelpOption(rest)) {

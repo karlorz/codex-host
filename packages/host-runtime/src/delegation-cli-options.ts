@@ -3,7 +3,7 @@ import { DelegationControlError } from "./delegation-types.js";
 /** Options whose value is user text: the next argument is taken verbatim, even empty or dash-leading. */
 const FREE_TEXT_OPTIONS: ReadonlySet<string> = new Set(["--task", "--task-name", "--message"]);
 /** Presence flags; a following `true`/`false` is consumed, otherwise the flag is true. */
-const FLAG_OPTIONS: ReadonlySet<string> = new Set(["--fallback-default"]);
+const FLAG_OPTIONS: ReadonlySet<string> = new Set(["--fallback-default", "--machine", "--session"]);
 
 export interface DelegationCliArguments {
   positionals: string[];

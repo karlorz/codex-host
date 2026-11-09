@@ -2,6 +2,8 @@ import path from "node:path";
 
 import {
   DEFAULT_ENROLLMENT_CLIENT_ID,
+  enrollPairingFromOptions,
+  enrollmentError,
   parseAllowlistOption,
   parseEnrollmentClientId,
   publicEnrollmentView,
@@ -109,15 +111,22 @@ export async function resolveCliRuntimeConnection(input: {
   ]);
   if (!record) throw missingRuntimeEnvironmentError(undefined, undefined);
   return {
-    endpoint: liveEndpoint ?? record.endpoint,
+    endpoint: enrollmentClientEndpoint(record, liveEndpoint),
     token: record.token,
     callerThreadId: record.threadId,
     source: "enrollment",
   };
 }
 
+function enrollmentClientEndpoint(
+  record: EnrollmentRecord,
+  liveEndpoint: string | undefined,
+): string {
+  return record.networkScope === "tailnet" ? record.endpoint : (liveEndpoint ?? record.endpoint);
+}
+
 /** Live Runtime listen port from bootstrap; undefined if Runtime is down or unpublished. */
-async function readLiveEnrollmentEndpoint(
+export async function readLiveEnrollmentEndpoint(
   environment: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   try {
@@ -172,12 +181,14 @@ export async function runEnrollRequest(input: {
       source: "enrollment",
     };
   }
+  const pairing = enrollPairingFromOptions(input.parsed.options);
   const issued = (await input.request(
     "/v1/enroll",
     {
       clientId,
       executablePath,
       allowlist,
+      pairing,
     },
     connection,
   )) as EnrollmentRecord;
@@ -195,6 +206,13 @@ export async function runEnrollRequest(input: {
     });
   }
   verifyEnrollmentRecord(issued, input.nowMs);
+  if ((issued.pairing ?? "session") !== pairing) {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Host issued a different enrollment pairing",
+      "pairing_mismatch",
+    );
+  }
   const storePath = enrollmentStorePath(input.environment, clientId);
   await writeEnrollmentStore(storePath, issued);
   return {
@@ -254,7 +272,7 @@ export async function runEnrollRevoke(input: {
     "/v1/enroll/revoke",
     {},
     {
-      endpoint: liveEndpoint ?? record.endpoint,
+      endpoint: enrollmentClientEndpoint(record, liveEndpoint),
       token: record.token,
       source: "enrollment",
       callerThreadId: record.threadId,

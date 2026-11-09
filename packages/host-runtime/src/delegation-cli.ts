@@ -4,6 +4,7 @@ import type { Writable } from "node:stream";
 import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-help.js";
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
+import { runEnrollmentTailnetServe } from "./client-enrollment-tailnet.js";
 import {
   resolveCliRuntimeConnection,
   runEnrollRequest,
@@ -177,6 +178,22 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "enroll") {
+      if (command === "serve") {
+        const parsed = parseDelegationArguments(rest);
+        rejectUnknown(parsed, ["--client", "--listen", "--port", "--export-file"]);
+        if (parsed.positionals.length > 0) {
+          throw new DelegationControlError(
+            "INVALID_ARGUMENT",
+            "enroll serve accepts no positional arguments",
+          );
+        }
+        await runEnrollmentTailnetServe({
+          environment,
+          parsed,
+          output,
+        });
+        return 0;
+      }
       const subcommand = command === "status" || command === "revoke" ? command : undefined;
       const enrollRest = subcommand ? rest : [...(command ? [command] : []), ...rest];
       const parsed = parseDelegationArguments(enrollRest);
@@ -188,7 +205,16 @@ export async function runDelegationCli(input: {
         writeJson(output, format === "json" ? body : compactDelegationOutput(name, body));
       const enrollOptions =
         subcommand === undefined
-          ? ["--client", "--allow", "--executable", "--from-pid", "--from-env-file", "--as-thread"]
+          ? [
+              "--client",
+              "--allow",
+              "--executable",
+              "--machine",
+              "--session",
+              "--from-pid",
+              "--from-env-file",
+              "--as-thread",
+            ]
           : ["--client", "--from-pid", "--from-env-file", "--as-thread"];
       rejectUnknown(parsed, enrollOptions);
       if (parsed.positionals.length > 0) {
