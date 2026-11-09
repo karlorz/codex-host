@@ -410,7 +410,9 @@ export function publicEnrollmentView(record: EnrollmentRecord): {
   enrollmentId: string;
   threadId: string;
   clientId: string;
+  executablePath: string;
   endpoint: string;
+  issuedAt: string;
   expiresAt: string;
   pairing: EnrollmentPairing;
   allowlist: EnrollmentAllowlistEntry[];
@@ -419,7 +421,9 @@ export function publicEnrollmentView(record: EnrollmentRecord): {
     enrollmentId: record.enrollmentId,
     threadId: record.threadId,
     clientId: record.clientId,
+    executablePath: record.executablePath,
     endpoint: record.endpoint,
+    issuedAt: record.issuedAt,
     expiresAt: record.expiresAt,
     pairing: record.pairing ?? "session",
     allowlist: record.allowlist,

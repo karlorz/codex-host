@@ -3,7 +3,7 @@
 控制台是一个本地网页，不依赖 Codex Desktop 启动成功。左侧导航分为：
 
 - **总览**：当前状态与下一步操作、codexhost 版本 / Codex Desktop 版本 / 安装方式三个信息框、最近一次启动的结果；失败时说明卡在哪一步和错误原文，内部阶段时间线折叠在“详细信息”中；注入持续失败时显示原因。成功时不展示时间线，不显示启动历史表格。原启动诊断页已合并，旧的 `#diagnostics` 和 `?view=diagnostics` 链接显示总览。日志不在页面中展示，通过“导出诊断包（含日志）”获取。安装包上的 **codexhost 版本** 来自 `app/codexhost-distribution.json`。`release:prepare` 只同步 `package.json` / lock / Cargo；distribution 文件由随后的 `release:package` 或 `release:npm` 写出。本 fork 上该数字必须等于当前 fork 标签，例如已发 `v0.13.2-3` 时显示 `0.13.2-3`，见 [fork-versioning.md](fork-versioning.md)。热装现有 app 时需重打包或直接改写已安装的 `codexhost-distribution.json`。
-- **设置**：连接、远程连接、账号、会话导入、语音、更新。连接、远程连接、账号、会话导入与 Codex 设置页使用同一套页面和 Host 接口。**语音**与 Desktop 的独立语音页共享路由选择和注入设置，使用明确的应用与重启操作。连接页支持通过运行中的本地 Host 安装 Harness CLI、检查版本和更新，复用安装进度、错误提示及安装后检测；不支持远程 Host 安装。WorkBuddy 仍通过官网手动下载安装桌面应用。Host 不可用时不提供一键安装。
+- **设置**：连接、远程连接、客户端登记、账号、会话导入、语音、更新。连接、远程连接、客户端登记、账号、会话导入与 Codex 设置页使用同一套页面和 Host 接口。客户端登记只列出/撤销已签发记录，不显示令牌，也不启动 `enroll serve`。**语音**与 Desktop 的独立语音页共享路由选择和注入设置，使用明确的应用与重启操作。连接页支持通过运行中的本地 Host 安装 Harness CLI、检查版本和更新，复用安装进度、错误提示及安装后检测；不支持远程 Host 安装。WorkBuddy 仍通过官网手动下载安装桌面应用。Host 不可用时不提供一键安装。
 - **其他**：关于。
 
 Appearance settings (thinking text, usage warnings and idle release) remain Desktop-only. **Voice** is shared between Desktop and the console on this Mac. Chat selects ChatGPT or Codex; Codex connection selects Desktop default or configured gateway. Codex Work independently selects Desktop default or gateway; external Harness voice stays on Host → gateway. Existing saved choices migrate once without replacing a newer shared edit.
@@ -102,7 +102,7 @@ Desktop Controller 在注入失败时仍会让 Codex 正常运行并在后台重
 
 Launcher 启动的本地 Host Runtime 在 `127.0.0.1` 的随机端口开放控制通道，把端口与随机令牌写入 `<数据目录>/console/hosts/host-<进程号>.json`（`0600`），退出时删除。控制台读取该文件，把设置请求转发给 Host，由 Host 按 Codex 设置页相同的逻辑处理；只接受 `CONSOLE_HOST_METHODS` 列出的设置方法，不接受 Thread 或 Turn 操作。
 
-- codexhost 未运行：连接页显示离线的插件列表并可修改安装路径；远程连接、账号、会话导入提示先启动 codexhost。
+- codexhost 未运行：连接页显示离线的插件列表并可修改安装路径；远程连接、客户端登记、账号、会话导入提示先启动 codexhost。
 - codexhost 运行但控制通道不可用（例如旧版本）：提示重新启动 codexhost。
 - Web 会话导入成功后显示“导入成功，请在 Codex 中查看”，不尝试导航，也不提供“重试打开”；导入失败仍显示实际错误。Codex 内置设置页保留导入后打开会话的行为。
 

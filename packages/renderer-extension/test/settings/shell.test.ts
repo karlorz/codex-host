@@ -20,6 +20,7 @@ describe("Renderer settings foundation", () => {
     expect(pages.map(({ label }) => label)).toEqual([
       "Connections",
       "Remote connections",
+      "Enrollment",
       "Accounts",
       "Session Import",
       "Usage statistics",
@@ -31,6 +32,7 @@ describe("Renderer settings foundation", () => {
     expect(pages.map(({ icon }) => icon)).toEqual([
       "connections",
       "gateway",
+      "enrollment",
       "accounts",
       "session-import",
       "dashboard",
@@ -50,6 +52,7 @@ describe("Renderer settings foundation", () => {
     expect(pages.map(({ id }) => id)).toEqual([
       "connections",
       "remote-connections",
+      "enrollment",
       "accounts",
       "session-import",
       "usage-statistics",

@@ -962,6 +962,79 @@ describe("client enrollment store and Runtime", () => {
     expect(JSON.parse(outputText(diagnosticOutput)).error.details.reason).toBe("expired");
   });
 
+  it("lists active public enrollments without tokens and revokes by id", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      consent: createStubEnrollmentConsent("approve"),
+      now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+      createId: (() => {
+        let index = 0;
+        return () => {
+          const id = ["enroll-list", "thread-list"][index++];
+          if (!id) throw new Error("unexpected enrollment id");
+          return id;
+        };
+      })(),
+      createToken: () => "listed-token",
+    });
+    await enrollment.publishBootstrap("http://127.0.0.1:9");
+    const issued = await enrollment.enroll({
+      clientId: "cursor-box-grok",
+      executablePath: "/synthetic/grok",
+      pairing: "machine",
+      attendedHostApprove: true,
+    });
+    await writeEnrollmentStore(
+      enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "cursor-box-grok"),
+      issued,
+    );
+    const listed = enrollment.listPublic();
+    expect(listed).toEqual([
+      expect.objectContaining({
+        enrollmentId: "enroll-list",
+        clientId: "cursor-box-grok",
+        pairing: "machine",
+        executablePath: "/synthetic/grok",
+      }),
+    ]);
+    expect(JSON.stringify(listed)).not.toContain("listed-token");
+    expect(JSON.stringify(listed)).not.toMatch(/"token"/u);
+    await expect(enrollment.revokeEnrollment("missing")).rejects.toThrow(/not active/u);
+    expect(await enrollment.revokeEnrollment("enroll-list")).toEqual({
+      enrollmentId: "enroll-list",
+      revoked: true,
+    });
+    expect(enrollment.listPublic()).toEqual([]);
+    await expect(
+      readFile(enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "cursor-box-grok"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await enrollment.close();
+  });
+
+  it("omits expired enrollments from the Host list", async () => {
+    let nowMs = Date.parse("2026-11-07T00:00:00.000Z");
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: await tempDataDir(),
+      consent: createStubEnrollmentConsent("approve"),
+      now: () => nowMs,
+      createToken: () => "session-token",
+    });
+    await enrollment.publishBootstrap("http://127.0.0.1:9");
+    await enrollment.enroll({
+      clientId: "grok-bot",
+      executablePath: "/synthetic/grok-bot",
+      pairing: "session",
+      attendedHostApprove: true,
+    });
+    expect(enrollment.listPublic()).toHaveLength(1);
+    nowMs += DEFAULT_ENROLLMENT_TTL_MS + 1;
+    expect(enrollment.listPublic()).toEqual([]);
+    await enrollment.close();
+  });
+
   it("prints enroll, status, and revoke in help", async () => {
     expect(DELEGATION_HELP).toContain("codexhost enroll --client <id>");
     expect(DELEGATION_HELP).toContain("codexhost enroll status");

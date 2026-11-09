@@ -88,6 +88,8 @@ import {
 } from "@codexhost/shared-contracts";
 import { handleCredentialImports } from "./credential-imports.js";
 import { HarnessDisplaySettingsStore } from "./harness-display-settings.js";
+import type { EnrollmentAuthority } from "./client-enrollment-authority.js";
+import { handleEnrollmentHostRequest, isEnrollmentHostMethod } from "./client-enrollment-host.js";
 import {
   handleModelPriceOverridesRequest,
   isModelPriceOverridesMethod,
@@ -425,6 +427,8 @@ export interface AppServerHostOptions {
   usageStatistics?: UsageStatistics;
   /** External Harness voice only; official Codex realtime is always native passthrough. */
   createExternalVoiceCall?: ExternalVoiceCallFactory;
+  /** Shared with the Runtime HTTP control server; Host settings list and revoke enrollments. */
+  enrollment?: EnrollmentAuthority;
 }
 
 interface TurnProjectionGate {
@@ -1559,6 +1563,19 @@ export class AppServerHost {
       request.method === THREAD_QUESTION_ACTIVITY_METHOD
     ) {
       await this.#handleSharedQuestionRequest(request);
+      return;
+    }
+    if (isEnrollmentHostMethod(request.method)) {
+      const reply = await handleEnrollmentHostRequest({
+        enrollment: this.#options.enrollment,
+        method: request.method,
+        params: request.params ?? {},
+      });
+      await this.#writer.json(
+        "error" in reply
+          ? rpcError(request, reply.error.code, reply.error.message)
+          : rpcEnvelope(request, { result: jsonValueSchema.parse(reply.result) }),
+      );
       return;
     }
     if (

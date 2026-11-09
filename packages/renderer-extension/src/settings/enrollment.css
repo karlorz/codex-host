@@ -1,0 +1,86 @@
+.settings-enrollment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-enrollment-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
+.settings-enrollment-status {
+  min-height: 1.2em;
+  margin: 0 0 8px;
+  color: light-dark(#676773, #a5a5af);
+  font-size: 12px;
+}
+.settings-enrollment-status.is-error {
+  color: light-dark(#8a3b32, #f0b4ae);
+}
+.settings-enrollment-table-wrap {
+  border: 1px solid light-dark(#e2e2e8, #36363b);
+  border-radius: 11px;
+  overflow-x: auto;
+  container-type: inline-size;
+}
+.settings-enrollment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.settings-enrollment-table th {
+  padding: 12px 16px;
+  color: light-dark(#676773, #a5a5af);
+  background: light-dark(#f8f8fa, #202024);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+}
+.settings-enrollment-table th:last-child,
+.settings-enrollment-actions {
+  text-align: right;
+}
+.settings-enrollment-table td {
+  padding: 14px 16px;
+  vertical-align: middle;
+  border-top: 1px solid var(--settings-divider, light-dark(#ececf0, #2e2e33));
+}
+.settings-enrollment-executable,
+.settings-enrollment-allowlist {
+  color: light-dark(#676773, #a5a5af);
+  font-size: 11px;
+  word-break: break-all;
+}
+.settings-enrollment-empty {
+  color: light-dark(#676773, #a5a5af);
+  text-align: center;
+}
+
+@container (max-width: 720px) {
+  .settings-enrollment-table,
+  .settings-enrollment-table tbody {
+    display: block;
+  }
+  .settings-enrollment-table thead {
+    display: none;
+  }
+  .settings-enrollment-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 16px;
+    border-top: 1px solid var(--settings-divider, light-dark(#ececf0, #2e2e33));
+  }
+  .settings-enrollment-row:first-child {
+    border-top: 0;
+  }
+  .settings-enrollment-table .settings-enrollment-row > td {
+    display: block;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+  .settings-enrollment-actions {
+    text-align: left;
+  }
+}

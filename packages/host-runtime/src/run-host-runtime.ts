@@ -172,6 +172,7 @@ async function prepareDelegationRuntime(input: {
     environment: NodeJS.ProcessEnv,
     onDelegationApi: (api: DelegationControlRegistration) => (() => void) | undefined,
     registry: DelegationControlRegistry,
+    enrollment: EnrollmentAuthority,
   ): Promise<number>;
 }): Promise<number> {
   const registry = new DelegationControlRegistry({
@@ -209,7 +210,12 @@ async function prepareDelegationRuntime(input: {
   await installManagedHomeFiles(installDelegationSkills, "delegation Skill");
   await installManagedHomeFiles(retireCodexhostDesktopRules, "Desktop rule retirement");
   try {
-    return await input.createHost(environment, (value) => registry.register(value), registry);
+    return await input.createHost(
+      environment,
+      (value) => registry.register(value),
+      registry,
+      enrollment,
+    );
   } finally {
     registry.close();
     await enrollment.close();
@@ -302,7 +308,7 @@ export async function runHostRuntime(input: {
     return prepareDelegationRuntime({
       environment,
       ...(hostRuntimePath ? { hostRuntimePath } : {}),
-      createHost: async (delegationEnvironment, onDelegationApi, registry) => {
+      createHost: async (delegationEnvironment, onDelegationApi, registry, enrollment) => {
         const official = await prepareLocalCodex({
           stockCodexPath,
           arguments: remoteControlPlan?.officialArguments ?? input.arguments,
@@ -335,6 +341,7 @@ export async function runHostRuntime(input: {
               ...shared,
               ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
               onDelegationApi,
+              enrollment,
               ...(updateCoordinator ? { updateCoordinator } : {}),
               ...(consoleOpener ? { consoleOpener } : {}),
             });
@@ -358,6 +365,7 @@ export async function runHostRuntime(input: {
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
             closeMappingStoreOnExit: false,
+            enrollment,
             ...(updateCoordinator ? { updateCoordinator } : {}),
             ...(consoleOpener ? { consoleOpener } : {}),
           };
@@ -417,7 +425,7 @@ export async function runHostRuntime(input: {
   return prepareDelegationRuntime({
     environment: input.environment,
     ...(hostRuntimePath ? { hostRuntimePath } : {}),
-    createHost: async (delegationEnvironment, _onDelegationApi, registry) => {
+    createHost: async (delegationEnvironment, _onDelegationApi, registry, enrollment) => {
       const socketPath = remoteAppServerSocketPath(delegationEnvironment, listenUrl);
       const officialPlan = createRemoteOfficialAppServerPlan(input.arguments, socketPath);
       const officialRuntimeScope = new OfficialRuntimeScope({
@@ -452,6 +460,7 @@ export async function runHostRuntime(input: {
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
+        enrollment,
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
@@ -483,6 +492,7 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
+            enrollment,
             ...(sharedDelegation ? { sharedDelegation } : {}),
             sharedThreads: new SharedThreadBridge({
               connect: async () => sharedOwner.connect(),

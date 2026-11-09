@@ -39,6 +39,7 @@ import CircleHelp from "lucide/dist/esm/icons/circle-question-mark.mjs";
 import X from "lucide/dist/esm/icons/x.mjs";
 import Users from "lucide/dist/esm/icons/users.mjs";
 import Plus from "lucide/dist/esm/icons/plus.mjs";
+import KeyRound from "lucide/dist/esm/icons/key-round.mjs";
 import codexhostLogoUrl from "../assets/codexhost-app-icon.svg";
 
 export const RENDERER_SETTINGS_ICON_NAMES = [
@@ -48,6 +49,7 @@ export const RENDERER_SETTINGS_ICON_NAMES = [
   "github",
   "language",
   "connections",
+  "enrollment",
   "accounts",
   "session-import",
   "add",
@@ -103,6 +105,7 @@ const iconNodes = {
   ],
   language: Languages,
   connections: PlugZap,
+  enrollment: KeyRound,
   accounts: Users,
   "session-import": FolderInput,
   add: Plus,

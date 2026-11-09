@@ -869,6 +869,16 @@ export function installRendererBindingProbe(
     getAccountClient: () => modelControl,
     getConnectionDiagnostics: () => connectionDiagnostics,
     getLoadedSessionsClient: () => modelClientForHost("local"),
+    getEnrollmentClient: () => {
+      const client = modelClientForHost("local");
+      const listEnrollments = client?.listEnrollments;
+      const revokeEnrollment = client?.revokeEnrollment;
+      if (!listEnrollments || !revokeEnrollment) return null;
+      return {
+        listEnrollments: () => listEnrollments(),
+        revokeEnrollment: (enrollmentId) => revokeEnrollment(enrollmentId),
+      };
+    },
     requestUsageStatistics: usageStatistics.request,
     usageStatisticsHosts: usageStatistics.hosts,
     getSessionImportClient: (requestedHostId) => {

@@ -16,7 +16,9 @@ import { ConsoleState } from "./state.js";
 import { createConsoleRemoteConnections } from "./remote-connections.js";
 import { createRendererModelClient } from "../renderer-model-client.js";
 import { createRendererSessionImportClient } from "../renderer-session-import-client.js";
+import { createRendererEnrollmentClient } from "../renderer-enrollment-client.js";
 import accountsCss from "../settings/accounts.css";
+import enrollmentCss from "../settings/enrollment.css";
 import {
   RendererSettingsPageScope,
   type RendererSettingsPageDefinition,
@@ -131,6 +133,9 @@ export function startConsoleApp(document: Document): void {
   const sessionImportClient = createRendererSessionImportClient((method, params) =>
     manager.sendRequest(method, params),
   );
+  const enrollmentClient = createRendererEnrollmentClient((method, params) =>
+    manager.sendRequest(method, params),
+  );
   const updateClient = consoleUpdateClient();
   const remoteConnections = createConsoleRemoteConnections(manager);
   const settingsPages = createDefaultRendererSettingsPages(
@@ -143,6 +148,10 @@ export function startConsoleApp(document: Document): void {
     () => null,
     () => remoteConnections,
     (method, params) => manager.sendRequest(method, params),
+    undefined,
+    undefined,
+    undefined,
+    () => enrollmentClient,
   );
   const navigate = (pageId: string): void => {
     navigation.classList.remove("is-open");
@@ -168,6 +177,7 @@ export function startConsoleApp(document: Document): void {
           ),
         ),
         hostPage(required(settingsPages, "remote-connections"), messages, state),
+        hostPage(required(settingsPages, "enrollment"), messages, state),
         hostPage(required(settingsPages, "accounts"), messages, state),
         hostPage(required(settingsPages, "session-import"), messages, state),
         hostPage(required(settingsPages, "usage-statistics"), messages, state),
@@ -192,7 +202,7 @@ export function startConsoleApp(document: Document): void {
   // Constructable sheets: the page CSP forbids inline style elements.
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(
-    `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${consoleComponentsCss}\n${usageCss}\n${consoleCss}`,
+    `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${enrollmentCss}\n${consoleComponentsCss}\n${usageCss}\n${consoleCss}`,
   );
   shadow.adoptedStyleSheets = [sheet];
 

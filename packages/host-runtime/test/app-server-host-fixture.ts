@@ -23,6 +23,7 @@ import type { OfficialRuntimeScope } from "../src/codex-runtime/official-runtime
 import type { OfficialAppServerConnection } from "../src/official-app-server-connection.js";
 import type { HostUpdateCoordinator } from "../src/update-coordinator.js";
 import type { HostConsoleOpener } from "../src/console-opener.js";
+import type { EnrollmentAuthority } from "../src/client-enrollment-authority.js";
 
 export class FakeOfficialProcess extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -290,6 +291,7 @@ export function createFixture(
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
     createExternalVoiceCall?: AppServerHostOptions["createExternalVoiceCall"];
+    enrollment?: EnrollmentAuthority;
   } = {},
 ) {
   const adapter =
@@ -366,6 +368,7 @@ export function createFixture(
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),
     ...(options.onCreateRequestRoute ? { onCreateRequestRoute: options.onCreateRequestRoute } : {}),
+    ...(options.enrollment ? { enrollment: options.enrollment } : {}),
   });
   const running = host.run();
   void running.then(

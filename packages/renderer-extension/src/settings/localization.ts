@@ -306,6 +306,23 @@ export interface RendererSettingsMessages {
   readonly aboutConsoleOpen: string;
   readonly aboutConsoleOpening: string;
   readonly aboutConsoleFailed: string;
+  readonly enrollment: {
+    readonly description: string;
+    readonly helpLabel: string;
+    readonly help: readonly string[];
+    readonly columns: readonly string[];
+    readonly empty: string;
+    readonly unavailable: string;
+    readonly failed: string;
+    readonly loading: string;
+    readonly refresh: string;
+    readonly confirmRevoke: string;
+    readonly pairingMachine: string;
+    readonly pairingSession: string;
+    readonly untilRevoked: string;
+    readonly revoke: string;
+    readonly revoking: string;
+  };
   readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
 }
 
@@ -642,9 +659,32 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "Open console",
   aboutConsoleOpening: "Opening…",
   aboutConsoleFailed: "The console could not be opened",
+  enrollment: Object.freeze({
+    description:
+      "Clients paired with this Mac Host, like SSH authorized keys. Tokens are never shown. Pair from an authorized Host session with codexhost enroll. enroll serve is a separate CLI process, not a Desktop service.",
+    helpLabel: "About client enrollment",
+    help: Object.freeze([
+      "Machine pairing stays valid until you revoke it. Session pairing expires after 24 hours.",
+      "Revoke removes the Host record and the local client store on this Mac. A Tailscale handoff on another machine fails closed on the next request.",
+      "This page does not start or stop enroll serve. Run that CLI in a terminal when a tailnet listener is required.",
+    ]),
+    columns: Object.freeze(["Client", "Pairing", "Expiry", "Allowlist", "Actions"]),
+    empty: "No active enrollments. Run codexhost enroll from an authorized Host session.",
+    unavailable: "Client enrollment requires the local Host.",
+    failed: "Could not load enrollments.",
+    loading: "Loading enrollments…",
+    refresh: "Refresh",
+    confirmRevoke: "Confirm revoke",
+    pairingMachine: "Machine",
+    pairingSession: "Session",
+    untilRevoked: "Until revoked",
+    revoke: "Revoke",
+    revoking: "Revoking…",
+  }),
   pageLabels: Object.freeze({
     connections: "Connections",
     "remote-connections": "Remote connections",
+    enrollment: "Enrollment",
     appearance: "General",
     voice: "Voice",
     accounts: "Accounts",
@@ -968,9 +1008,32 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "打开控制台",
   aboutConsoleOpening: "正在打开…",
   aboutConsoleFailed: "控制台打开失败",
+  enrollment: Object.freeze({
+    description:
+      "已与本机 Host 配对的客户端，类似 SSH authorized keys。页面从不显示令牌。在已授权的 Host 会话中运行 codexhost enroll 进行配对。enroll serve 是独立 CLI 进程，不是桌面服务。",
+    helpLabel: "关于客户端登记",
+    help: Object.freeze([
+      "机器配对在撤销前一直有效。会话配对 24 小时后过期。",
+      "撤销会删除本机 Host 记录和本地客户端存储。另一台机器上的 Tailscale 交接会在下次请求时失败退出。",
+      "此页不会启动或停止 enroll serve。需要 tailnet 监听时在终端运行该 CLI。",
+    ]),
+    columns: Object.freeze(["客户端", "配对", "有效期", "允许列表", "操作"]),
+    empty: "暂无有效登记。请在已授权的 Host 会话中运行 codexhost enroll。",
+    unavailable: "客户端登记需要正在运行的本地 Host。",
+    failed: "无法加载登记。",
+    loading: "正在加载登记…",
+    refresh: "刷新",
+    confirmRevoke: "确认撤销",
+    pairingMachine: "机器",
+    pairingSession: "会话",
+    untilRevoked: "撤销前有效",
+    revoke: "撤销",
+    revoking: "正在撤销…",
+  }),
   pageLabels: Object.freeze({
     connections: "连接",
     "remote-connections": "远程连接",
+    enrollment: "客户端登记",
     appearance: "通用",
     voice: "语音",
     accounts: "账号",

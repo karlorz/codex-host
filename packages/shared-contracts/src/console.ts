@@ -34,6 +34,8 @@ export type ConsoleOpenResult = z.infer<typeof consoleOpenResultSchema>;
  */
 export const CONSOLE_HOST_METHODS = Object.freeze([
   "codexhost/voice/gateway-status",
+  "codexhost/enrollment/list",
+  "codexhost/enrollment/revoke",
   "codexhost/console/remote-connections",
   "codexhost/runtime/status",
   "codexhost/remote/ssh-setup",

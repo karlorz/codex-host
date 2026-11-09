@@ -87,6 +87,10 @@ describe("Renderer settings localization", () => {
     expect(chinese.aboutParagraphs).toHaveLength(3);
     expect(chinese.aboutStarCallout).toContain("请给我们一个 Star");
     expect(chinese.aboutRepository).toBe("开源仓库");
+    expect(chinese.pageLabels.enrollment).toBe("客户端登记");
+    expect(english.enrollment.refresh).toBe("Refresh");
+    expect(chinese.enrollment.confirmRevoke).toBe("确认撤销");
+    expect(Object.keys(chinese.enrollment)).toEqual(Object.keys(english.enrollment));
     expect(Object.keys(chinese.pageLabels)).toEqual(Object.keys(english.pageLabels));
     expect(Object.isFrozen(english)).toBe(true);
     expect(Object.isFrozen(chinese.pageLabels)).toBe(true);
@@ -97,6 +101,17 @@ describe("Renderer settings localization", () => {
       createDefaultRendererSettingsPages(rendererSettingsMessages("zh-CN")).map(
         ({ label }) => label,
       ),
-    ).toEqual(["连接", "远程连接", "账号", "会话导入", "用量统计", "通用", "语音", "更新", "关于"]);
+    ).toEqual([
+      "连接",
+      "远程连接",
+      "客户端登记",
+      "账号",
+      "会话导入",
+      "用量统计",
+      "通用",
+      "语音",
+      "更新",
+      "关于",
+    ]);
   });
 });

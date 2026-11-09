@@ -43,6 +43,7 @@ import {
   createHarnessSchedulesPage,
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
+import { createEnrollmentSettingsPage, type RendererEnrollmentClient } from "./enrollment-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -87,6 +88,7 @@ function windowsInstallerDownloadUrl(window: Window | null | undefined, version:
 export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "connections",
   "remote-connections",
+  "enrollment",
   "accounts",
   "session-import",
   "usage-statistics",
@@ -703,10 +705,12 @@ export function createDefaultRendererSettingsPages(
   requestVoiceSettings: VoiceSettingsRequestClient = () =>
     Promise.reject(new Error("Local Host connection is unavailable")),
   harnessSchedules?: HarnessSchedulesPageOptions,
+  getEnrollmentClient: () => RendererEnrollmentClient | null = () => null,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
     createRemoteConnectionsPage(messages, getRemoteConnections),
+    createEnrollmentSettingsPage(messages, getEnrollmentClient),
     createAccountsSettingsPage(messages, getAccountClient),
     ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
     createSessionImportSettingsPage(
@@ -755,3 +759,4 @@ export function createDefaultRendererSettingsRegistry(
 }
 
 export type { RendererCodexAccountClient } from "./accounts-page.js";
+export type { RendererEnrollmentClient } from "./enrollment-page.js";

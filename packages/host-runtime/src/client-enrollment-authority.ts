@@ -27,8 +27,10 @@ import {
   type EnrollmentConsent,
 } from "./client-enrollment-consent.js";
 import {
+  deleteEnrollmentStore,
   enrollmentBootstrapPath,
   enrollmentRuntimeRecordsPath,
+  enrollmentStorePath,
   readRuntimeEnrollmentRecords,
   writeEnrollmentBootstrap,
   writeRuntimeEnrollmentRecords,
@@ -270,6 +272,44 @@ export class EnrollmentAuthority {
     }
     verifyEnrollmentRecord(principal.record, this.#now());
     return publicEnrollmentView(principal.record);
+  }
+
+  listPublic(): ReturnType<typeof publicEnrollmentView>[] {
+    return [...this.#byToken.values()]
+      .filter((record) => this.#verified(record))
+      .map((record) => publicEnrollmentView(record))
+      .sort((left, right) => {
+        const client = left.clientId.localeCompare(right.clientId);
+        return client === 0 ? right.issuedAt.localeCompare(left.issuedAt) : client;
+      });
+  }
+
+  async revokeEnrollment(enrollmentId: string): Promise<{ enrollmentId: string; revoked: true }> {
+    const id = enrollmentId.trim();
+    let target: EnrollmentRecord | undefined;
+    for (const record of this.#byToken.values()) {
+      if (record.enrollmentId === id && !record.revokedAt) {
+        target = record;
+        break;
+      }
+    }
+    if (!target) {
+      throw enrollmentError("ENROLLMENT_INVALID", "Enrollment is not active", "revoked");
+    }
+    this.#byToken.set(target.token, {
+      ...target,
+      revokedAt: new Date(this.#now()).toISOString(),
+    });
+    await this.#saveRecords();
+    const remaining = [...this.#byToken.values()].some(
+      (record) => record.clientId === target.clientId && this.#verified(record),
+    );
+    if (!remaining) {
+      await deleteEnrollmentStore(
+        enrollmentStorePath({ CODEXHOST_DATA_DIR: this.#dataDirectory }, target.clientId),
+      );
+    }
+    return { enrollmentId: target.enrollmentId, revoked: true };
   }
 
   authorize(record: EnrollmentRecord, action: EnrollmentRequestAction): void {

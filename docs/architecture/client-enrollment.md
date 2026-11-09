@@ -80,6 +80,10 @@ The first switch from a session pairing to machine pairing issues a new token an
 
 The listener stops on SIGINT/SIGTERM. Session pairing also stops it at token expiry. Machine pairing does not time out with the listener. Revocation at Runtime invalidates all requests immediately, even while the listener remains open. After a Runtime restart, persisted machine pairings stay valid and the listener follows the new loopback port from bootstrap. Restart the listener if it was stopped, or after a pairing switch that issued a new token. Write a new handoff file when the remote store is missing or the token changed. To roll back, revoke this client from its Mac local store, stop this listener, then remove the handoff and remote client store. Existing enrollments and native Threads/schedules are independent. There is no service installation.
 
+## Settings and console
+
+Desktop Settings and the local console share an **Enrollment** page. It lists active Runtime records (client id, pairing, expiry, allowlist, executable) and can revoke one enrollment. Tokens are never shown. The page does not start or stop `enroll serve`; that remains a foreground CLI. Listing and revoke go through Host methods `codexhost/enrollment/list` and `codexhost/enrollment/revoke`, which the console may call only while the local Host is running.
+
 ## Out of scope
 
 - Direct Linux VM access to Mac loopback, Web/Relay, and general remote Host routing

@@ -129,6 +129,10 @@ import {
   createRendererSessionImportClient,
   type RendererSessionImportClient,
 } from "./renderer-session-import-client.js";
+import {
+  createRendererEnrollmentClient,
+  type RendererEnrollmentClient,
+} from "./renderer-enrollment-client.js";
 
 export const HARNESS_INSPECT_METHOD = "codexhost/harness/inspect";
 export const HARNESS_PLUGIN_LIST_METHOD = "codexhost/harness/plugins/list";
@@ -206,7 +210,8 @@ function notificationTarget(manager: RequestManagerCandidate): RequestManagerCan
   return nested && typeof nested.addNotificationCallback === "function" ? nested : null;
 }
 
-export interface RendererModelClient extends Partial<RendererSessionImportClient> {
+export interface RendererModelClient
+  extends Partial<RendererSessionImportClient>, Partial<RendererEnrollmentClient> {
   installation?(input: HarnessInstallationParams): Promise<HarnessInstallationState>;
   getHarnessDisplaySettings?(): Promise<HarnessDisplaySettings>;
   setHarnessDisplaySettings?(input: HarnessDisplaySet): Promise<HarnessDisplaySettings>;
@@ -452,6 +457,9 @@ export function createRendererModelClient(
       );
     },
     ...createRendererSessionImportClient(async (method, params) =>
+      manager.sendRequest(method, params),
+    ),
+    ...createRendererEnrollmentClient(async (method, params) =>
       manager.sendRequest(method, params),
     ),
     async forkThread(input: ExternalThreadForkParams): Promise<ExternalThreadForkResult> {

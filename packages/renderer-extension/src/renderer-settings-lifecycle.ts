@@ -4,6 +4,7 @@ import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
 import type { LoadedSessionsClient } from "./settings/loaded-sessions-table.js";
 import type { HarnessSchedulesPageOptions } from "./settings/harness-schedules-page.js";
+import type { RendererEnrollmentClient } from "./settings/enrollment-page.js";
 import { readCodexLocaleSettings, type CodexLocaleSettings } from "./codex-locale-adapter.js";
 import {
   rendererSettingsMessages,
@@ -37,6 +38,7 @@ export interface RendererSettingsLifecycleOptions {
   getSessionImportClient?(hostId?: string): RendererSessionImportClient | null;
   getLoadedSessionsClient?(): LoadedSessionsClient | null;
   getRemoteConnections?(): RemoteConnectionsControl | null;
+  getEnrollmentClient?(): RendererEnrollmentClient | null;
   requestUsageStatistics?: RendererUsageStatisticsRequest;
   requestVoiceSettings?: VoiceSettingsRequestClient;
   /** Machines the usage statistics page may read besides the local Host. */
@@ -104,6 +106,7 @@ export function installRendererSettingsLifecycle(
             },
           }
         : undefined,
+      options.getEnrollmentClient ?? (() => null),
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {
