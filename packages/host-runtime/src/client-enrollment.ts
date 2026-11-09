@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { isIPv4 } from "node:net";
 
+import type { EnrollmentPublicView } from "@codexhost/shared-contracts";
+
 import { DelegationControlError } from "./delegation-types.js";
 import type { DelegationThreadListResult, ThreadWatchListResult } from "./delegation-types.js";
 
@@ -406,17 +408,7 @@ export function filterEnrollmentWatches(
   };
 }
 
-export function publicEnrollmentView(record: EnrollmentRecord): {
-  enrollmentId: string;
-  threadId: string;
-  clientId: string;
-  executablePath: string;
-  endpoint: string;
-  issuedAt: string;
-  expiresAt: string;
-  pairing: EnrollmentPairing;
-  allowlist: EnrollmentAllowlistEntry[];
-} {
+export function publicEnrollmentView(record: EnrollmentRecord): EnrollmentPublicView {
   return {
     enrollmentId: record.enrollmentId,
     threadId: record.threadId,

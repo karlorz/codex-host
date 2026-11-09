@@ -39,7 +39,6 @@ import {
   createThreadUsageSubscriptionRelay,
 } from "../src/renderer-model-client.js";
 
-import { RendererEnrollmentUnavailableError } from "../src/renderer-enrollment-client.js";
 import { RendererSessionImportUnavailableError } from "../src/renderer-session-import-client.js";
 
 const piHarnessId = harnessIdSchema.parse("pi");
@@ -422,7 +421,6 @@ describe("Renderer fixed Model request client", () => {
       "inspectThreadUsage",
       "installation",
       "listCodexAccounts",
-      "listEnrollments",
       "listHarnessAccountSources",
       "listHarnessAccounts",
       "listHarnessPlugins",
@@ -435,7 +433,6 @@ describe("Renderer fixed Model request client", () => {
       "readDelegationThread",
       "readUpdateStatus",
       "refreshCodexAccounts",
-      "revokeEnrollment",
       "runtimeStatus",
       "selectThreadModel",
       "selectThreadPermissionMode",
@@ -618,60 +615,6 @@ describe("Renderer fixed Model request client", () => {
       ).rejects.toThrow();
     }
     expect(sendRequest).toHaveBeenCalledTimes(3);
-  });
-
-  it("lists and revokes enrollments through fixed Host methods without accepting extra fields", async () => {
-    const sendRequest = vi
-      .fn()
-      .mockResolvedValueOnce({
-        enrollments: [
-          {
-            enrollmentId: "enroll-1",
-            threadId: "thread-1",
-            clientId: "cursor-box-grok",
-            executablePath: "/synthetic/grok",
-            endpoint: "http://127.0.0.1:9",
-            issuedAt: "2026-11-07T00:00:00.000Z",
-            expiresAt: "2036-11-07T00:00:00.000Z",
-            pairing: "machine",
-            allowlist: [{ threadId: "thread-1", verbs: ["read", "send"] }],
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ enrollmentId: "enroll-1", revoked: true });
-    const client = createRendererModelClient([{ sendRequest }]);
-    if (!client?.listEnrollments || !client.revokeEnrollment) {
-      throw new Error("Enrollment client missing");
-    }
-    expect(await client.listEnrollments()).toMatchObject({
-      enrollments: [{ clientId: "cursor-box-grok", pairing: "machine" }],
-    });
-    expect(await client.revokeEnrollment("enroll-1")).toEqual({
-      enrollmentId: "enroll-1",
-      revoked: true,
-    });
-    expect(sendRequest.mock.calls).toEqual([
-      ["codexhost/enrollment/list", {}],
-      ["codexhost/enrollment/revoke", { enrollmentId: "enroll-1" }],
-    ]);
-    await expect(client.revokeEnrollment("")).rejects.toThrow();
-    expect(sendRequest).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([-32601, -32076])("normalizes enrollment unavailable code %s", async (code) => {
-    const sendRequest = vi.fn(async () => {
-      throw Object.assign(new Error("private detail"), { code });
-    });
-    const client = createRendererModelClient([{ sendRequest }]);
-    if (!client?.listEnrollments || !client.revokeEnrollment) {
-      throw new Error("Enrollment client missing");
-    }
-    await expect(client.listEnrollments()).rejects.toBeInstanceOf(
-      RendererEnrollmentUnavailableError,
-    );
-    await expect(client.revokeEnrollment("enroll-1")).rejects.toBeInstanceOf(
-      RendererEnrollmentUnavailableError,
-    );
   });
 
   it("coalesces per Harness and native ID across remounts without colliding with other Harnesses", async () => {

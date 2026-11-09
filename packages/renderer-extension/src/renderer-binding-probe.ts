@@ -112,6 +112,7 @@ import {
   rendererHarnessCommandExecutesDirectly,
   routeRendererHarnessCommandSelection,
 } from "./renderer-harness-command-claim.js";
+import { createRendererEnrollmentClient } from "./renderer-enrollment-client.js";
 import { installRendererSettingsLifecycle } from "./renderer-settings-lifecycle.js";
 import { createRendererUsageStatisticsSource } from "./renderer-usage-statistics-source.js";
 import {
@@ -870,14 +871,8 @@ export function installRendererBindingProbe(
     getConnectionDiagnostics: () => connectionDiagnostics,
     getLoadedSessionsClient: () => modelClientForHost("local"),
     getEnrollmentClient: () => {
-      const client = modelClientForHost("local");
-      const listEnrollments = client?.listEnrollments;
-      const revokeEnrollment = client?.revokeEnrollment;
-      if (!listEnrollments || !revokeEnrollment) return null;
-      return {
-        listEnrollments: () => listEnrollments(),
-        revokeEnrollment: (enrollmentId) => revokeEnrollment(enrollmentId),
-      };
+      if (disposed || !window.__codexhostHostRoutingV1?.forHost("local")) return null;
+      return createRendererEnrollmentClient(requestLocalSettings);
     },
     requestUsageStatistics: usageStatistics.request,
     usageStatisticsHosts: usageStatistics.hosts,
