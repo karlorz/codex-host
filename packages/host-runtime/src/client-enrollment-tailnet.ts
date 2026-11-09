@@ -180,12 +180,15 @@ export async function runEnrollmentTailnetServe(input: {
   const closed = new Promise<void>((resolve) => server.once("close", resolve));
   try {
     await mkdir(path.dirname(exportFile), { recursive: true, mode: 0o700 });
-    const parent = await stat(path.dirname(exportFile));
-    if ((parent.mode & 0o777) !== 0o700 || parent.uid !== process.getuid?.()) {
-      throw new DelegationControlError(
-        "INVALID_ARGUMENT",
-        "Export directory must be owned by this user with mode 700",
-      );
+    const owner = process.getuid?.();
+    if (owner !== undefined) {
+      const parent = await stat(path.dirname(exportFile));
+      if ((parent.mode & 0o777) !== 0o700 || parent.uid !== owner) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Export directory must be owned by this user with mode 700",
+        );
+      }
     }
     const handoff: EnrollmentRecord = { ...record, endpoint, networkScope: "tailnet" };
     assertEnrollmentBindings(handoff);

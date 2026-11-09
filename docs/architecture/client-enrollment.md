@@ -70,7 +70,7 @@ codexhost enroll --client cursor-box-grok --allow '70afcd8a-2124-44e3-aa9d-9a7d4
 codexhost enroll serve --client cursor-box-grok --listen <mac-tailscale-ipv4> --export-file /private/client-handoff/cursor-box-grok.json
 ```
 
-`serve` runs as a separate foreground CLI process using only the client's local enrollment store. It requires a user-owned mode-700 export directory, creates a new mode-600 handoff file exclusively, and reports only endpoint, client, PID, expiry and file path. It does not replace the running Runtime or stop Desktop. The caller can remove Host credentials from this process's environment before starting it.
+`serve` runs as a separate foreground CLI process using only the client's local enrollment store. On POSIX it requires a user-owned mode-700 export directory. It creates a new mode-600 handoff file exclusively, and reports only endpoint, client, PID, expiry and file path. It does not replace the running Runtime or stop Desktop. The caller can remove Host credentials from this process's environment before starting it.
 
 The listener accepts only that client's bearer, forwards only `thread read`, `thread send`, `enroll status` and `enroll revoke` to the live loopback Runtime from the local enroll bootstrap when present, and disables redirects. Runtime remains the authorization authority. Reads always use the issued client identity and cannot route to another Host. Requests are limited to 2 MiB with a 30-second upstream deadline. It does not expose enrollment issuance, delegation, cancel, wait or watch. Tailscale provides encrypted transport; configure tailnet access so only the intended peers can reach the listener. Only IPv4 is supported by this command.
 
