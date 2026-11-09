@@ -1,12 +1,24 @@
 .settings-enrollment-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 8px;
 }
-.settings-enrollment-toolbar {
+.settings-enrollment-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.settings-enrollment-title {
   display: flex;
-  justify-content: flex-end;
-  margin: 0 0 8px;
+  align-items: center;
+  gap: 6px;
+}
+.settings-enrollment-header .settings-section-label {
+  padding-bottom: 0;
+}
+.settings-enrollment-header .settings-page-description {
+  margin: 5px 0 0;
 }
 .settings-enrollment-status {
   min-height: 1.2em;

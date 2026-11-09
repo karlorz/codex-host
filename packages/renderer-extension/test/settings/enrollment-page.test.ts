@@ -155,6 +155,12 @@ describe("Enrollment settings page", () => {
     });
     expect(visibleText(content)).toContain("Client enrollment requires the local Host.");
     expect(visibleText(content)).toContain("not a Desktop service");
+    const help = descendants(content).find(
+      (element) =>
+        element.tagName === "button" &&
+        element.getAttribute("aria-label") === "About client enrollment",
+    );
+    assert(help);
     scope.dispose();
   });
 });

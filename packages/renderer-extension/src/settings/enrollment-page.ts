@@ -39,24 +39,25 @@ export function createEnrollmentSettingsPage(
       const copy = messages.enrollment;
       const header = document.createElement("div");
       header.className = "settings-enrollment-header";
-      const heading = document.createElement("div");
+      const copyBlock = document.createElement("div");
+      copyBlock.className = "settings-enrollment-copy";
+      const title = document.createElement("div");
+      title.className = "settings-enrollment-title";
+      const heading = document.createElement("h1");
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.enrollment;
-      header.append(heading, createHelpTooltip(document, copy.helpLabel, copy.help));
-
+      title.append(heading, createHelpTooltip(document, copy.helpLabel, copy.help));
       const description = document.createElement("p");
       description.className = "settings-page-description";
       description.textContent = copy.description;
-
-      const toolbar = document.createElement("div");
-      toolbar.className = "settings-enrollment-toolbar";
+      copyBlock.append(title, description);
       const refresh = document.createElement("button");
       refresh.type = "button";
       refresh.className = "settings-icon-button";
       refresh.title = copy.refresh;
       refresh.setAttribute("aria-label", copy.refresh);
       refresh.append(createRendererSettingsIcon("refresh", 16));
-      toolbar.append(refresh);
+      header.append(copyBlock, refresh);
 
       const status = document.createElement("p");
       status.className = "settings-enrollment-status";
@@ -84,7 +85,7 @@ export function createEnrollmentSettingsPage(
       table.append(thead, tbody);
       tableWrap.append(table);
 
-      context.content.append(header, description, toolbar, status, tableWrap);
+      context.content.append(header, status, tableWrap);
 
       const client = getClient();
       const renderEmpty = (message: string): void => {
