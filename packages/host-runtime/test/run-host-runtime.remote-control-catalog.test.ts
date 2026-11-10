@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -70,8 +70,8 @@ vi.mock("../src/model-prices.js", () => ({
 }));
 vi.mock("../src/usage-statistics.js", () => ({ UsageStatistics: vi.fn() }));
 vi.mock("../src/remote-control-app-server.js", () => ({
-  createRemoteControlAppServerPlan: () => ({
-    environment: {},
+  createRemoteControlAppServerPlan: ({ environment }: { environment: NodeJS.ProcessEnv }) => ({
+    environment,
     officialArguments: [],
     pipePath: "\\\\.\\pipe\\synthetic-catalog-test",
   }),
@@ -111,6 +111,9 @@ it("registers the primary Remote Control Host as the catalog for its attached se
         },
       }),
     ).toBe(0);
+    expect(
+      JSON.parse(readFileSync(path.join(dataDir, "enroll", "bootstrap.json"), "utf8")),
+    ).toMatchObject({ endpoint: "http://127.0.0.1:1" });
     expect(state.hosts).toHaveLength(2);
     for (const host of state.hosts) {
       expect(host.mappingStore).toBe(state.store);
