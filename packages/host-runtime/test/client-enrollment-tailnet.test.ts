@@ -60,6 +60,7 @@ async function fixture() {
     hostToken: "host-secret",
     dataDirectory,
     consent: createStubEnrollmentConsent("approve"),
+    createThread: async () => "native-thread",
   });
   const read = vi.fn(async (body) => ({ threadId: body.threadId, status: "completed" }));
   const send = vi.fn(async () => ({ accepted: true }));
@@ -314,6 +315,47 @@ describe("tailnet enrollment transport", () => {
       expect(diagnostics.read().toString()).toContain("EEXIST");
       expect(listeners).toHaveLength(1);
       expect(listeners[0]?.listening).toBe(false);
+      expect(await readFile(exportFile, "utf8")).toBe("preserve");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("preserves an existing handoff when binding fails with EADDRINUSE", async () => {
+    const { record, dataDirectory } = await fixture();
+    const environment = { CODEXHOST_DATA_DIR: dataDirectory };
+    await writeEnrollmentStore(enrollmentStorePath(environment, record.clientId), record);
+    const exportFile = path.join(dataDirectory, "preserve.json");
+    await writeFile(exportFile, "preserve", { mode: 0o600 });
+    const occupied = createServer();
+    await listen(occupied);
+    const address = occupied.address() as AddressInfo;
+    const originalListen = Server.prototype.listen;
+    const spy = vi.spyOn(Server.prototype, "listen").mockImplementation(function (
+      this: Server,
+      ...args: unknown[]
+    ) {
+      return Reflect.apply(originalListen, this, [address.port, "127.0.0.1", args.at(-1)]);
+    });
+    try {
+      const diagnosticOutput = new PassThrough();
+      expect(
+        await runDelegationCli({
+          arguments: [
+            "enroll",
+            "serve",
+            "--client",
+            record.clientId,
+            "--listen",
+            "100.64.0.1",
+            "--export-file",
+            exportFile,
+          ],
+          environment,
+          diagnosticOutput,
+        }),
+      ).toBe(1);
+      expect(String(diagnosticOutput.read())).toContain("EADDRINUSE");
       expect(await readFile(exportFile, "utf8")).toBe("preserve");
     } finally {
       spy.mockRestore();

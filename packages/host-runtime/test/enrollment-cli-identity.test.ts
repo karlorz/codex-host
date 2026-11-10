@@ -488,10 +488,8 @@ describe("enrollment CLI identity", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-muse", "muse-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-muse",
+      createThread: async () => "muse-thread",
       createToken: () => "muse-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -576,6 +574,7 @@ describe("enrollment CLI identity", () => {
         dataDirectory: dataDir,
         consent: createStubEnrollmentConsent("approve"),
         now: () => NOW,
+        createThread: async () => "muse-thread",
       });
       const cancel = vi.fn<DelegationControlApi["cancel"]>(async ({ threadId }) => ({
         threadId,

@@ -31,6 +31,10 @@ function only<T>(values: readonly T[], message: string): T {
 
 export class DelegationControlRegistry implements DelegationControlApi, DelegationWatchApi {
   readonly #registrations = new Set<DelegationControlRegistration>();
+  readonly #enrollmentThreads = new Map<
+    DelegationControlRegistration,
+    (clientId: string) => Promise<string>
+  >();
   // Changes whenever the session set changes, so a merged list cursor cannot outlive it. The
   // instance id keeps a cursor from matching a rebuilt Registry at the same count.
   readonly #instanceId = randomUUID();
@@ -59,15 +63,35 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
 
   register(
     registration: DelegationControlRegistration,
-    options: { harnessCatalog?: boolean } = {},
+    options: {
+      harnessCatalog?: boolean;
+      createEnrollmentThread?: (clientId: string) => Promise<string>;
+    } = {},
   ): () => void {
     this.#registrations.add(registration);
+    if (options.createEnrollmentThread) {
+      this.#enrollmentThreads.set(registration, options.createEnrollmentThread);
+    }
     this.#registrationGeneration += 1;
     if (options.harnessCatalog) this.#harnessCatalog = registration;
     return () => {
       if (this.#registrations.delete(registration)) this.#registrationGeneration += 1;
+      this.#enrollmentThreads.delete(registration);
       if (this.#harnessCatalog === registration) this.#harnessCatalog = undefined;
     };
+  }
+
+  async createEnrollmentThread(clientId: string): Promise<string> {
+    const creators = [...this.#enrollmentThreads.values()];
+    const create = this.#harnessCatalog
+      ? this.#enrollmentThreads.get(this.#harnessCatalog)
+      : creators.length === 1
+        ? creators[0]
+        : undefined;
+    if (!create) {
+      throw new DelegationControlError("RUNTIME_UNREACHABLE", "Native enrollment is unavailable");
+    }
+    return create(clientId);
   }
 
   async inspect(input: HarnessInspectInput) {

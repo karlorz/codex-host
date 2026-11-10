@@ -72,6 +72,21 @@ function registration(threadId: string): DelegationControlRegistration {
 }
 
 describe("DelegationControlRegistry", () => {
+  it("creates an enrolled native Thread through the registered Host", async () => {
+    const registry = new DelegationControlRegistry();
+    const create = vi.fn(async (clientId: string) => `native-${clientId}`);
+    const unregister = registry.register(registration("host"), {
+      createEnrollmentThread: create,
+    });
+    await expect(registry.createEnrollmentThread("muse")).resolves.toBe("native-muse");
+    expect(create).toHaveBeenCalledExactlyOnceWith("muse");
+    unregister();
+    await expect(registry.createEnrollmentThread("muse")).rejects.toMatchObject({
+      code: "RUNTIME_UNREACHABLE",
+    });
+    registry.close();
+  });
+
   it("uses only the calling Thread's execution identity for same-Host reads", async () => {
     const caller = registration("caller");
     caller.executionHostId = (id) => (id === "caller" ? "ssh:mac" : undefined);

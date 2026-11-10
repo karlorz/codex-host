@@ -421,7 +421,10 @@ export interface AppServerHostOptions {
   runtimeMaintenance?: RuntimeMaintenance;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
-  onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
+  onDelegationApi?: (
+    api: DelegationControlRegistration,
+    extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
+  ) => (() => void) | undefined;
   /** Shared by all Hosts of one runtime; defaults to the bundled snapshot only. */
   modelPrices?: ModelPriceCatalog;
   /** Machine-wide usage statistics; one per runtime, read from the loaded Harness plugins. */
@@ -927,40 +930,69 @@ export class AppServerHost {
     });
     const maintenanceOperation = <T>(run: () => Promise<T>): Promise<T> =>
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
-    const unregisterDelegationApi = options.onDelegationApi?.({
-      listHarnesses: () =>
-        this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses()),
-      inspect: (input) =>
-        this.#waitForPlugins().then(() => this.#delegationCoordinator.inspect(input)),
-      start: (input) =>
-        maintenanceOperation(async () => {
-          if (options.sharedDelegation && input.harnessId !== "codex") {
-            const active = [...this.#activeOfficialTurns.keys()];
-            const parentThreadId =
-              input.parentThreadId ?? (active.length === 1 ? active[0] : undefined);
-            return options.sharedDelegation.start({
-              ...input,
-              ...(parentThreadId ? { parentThreadId } : {}),
-            });
-          }
-          return this.#waitForPlugins().then(() => this.#delegationCoordinator.start(input));
-        }),
-      send: (input) =>
-        maintenanceOperation(() =>
-          this.#waitForPlugins().then(() => this.#delegationCoordinator.send(input)),
-        ),
-      cancel: (input) =>
-        this.#waitForPlugins().then(() => this.#delegationCoordinator.cancel(input)),
-      read: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.read(input)),
-      wait: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.wait(input)),
-      list: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.list(input)),
-      canHandleStart: (input) => this.#canHandleDelegationStart(input),
-      ownsThread: (threadId) => this.#ownsDelegationThread(threadId),
-      executionHostId: (threadId) => {
-        const thread = this.#externalRuntime.get(threadId);
-        return thread ? this.#executionHosts.get(thread) : undefined;
+    const unregisterDelegationApi = options.onDelegationApi?.(
+      {
+        listHarnesses: () =>
+          this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses()),
+        inspect: (input) =>
+          this.#waitForPlugins().then(() => this.#delegationCoordinator.inspect(input)),
+        start: (input) =>
+          maintenanceOperation(async () => {
+            if (options.sharedDelegation && input.harnessId !== "codex") {
+              const active = [...this.#activeOfficialTurns.keys()];
+              const parentThreadId =
+                input.parentThreadId ?? (active.length === 1 ? active[0] : undefined);
+              return options.sharedDelegation.start({
+                ...input,
+                ...(parentThreadId ? { parentThreadId } : {}),
+              });
+            }
+            return this.#waitForPlugins().then(() => this.#delegationCoordinator.start(input));
+          }),
+        send: (input) =>
+          maintenanceOperation(() =>
+            this.#waitForPlugins().then(() => this.#delegationCoordinator.send(input)),
+          ),
+        cancel: (input) =>
+          this.#waitForPlugins().then(() => this.#delegationCoordinator.cancel(input)),
+        read: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.read(input)),
+        wait: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.wait(input)),
+        list: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.list(input)),
+        canHandleStart: (input) => this.#canHandleDelegationStart(input),
+        ownsThread: (threadId) => this.#ownsDelegationThread(threadId),
+        executionHostId: (threadId) => {
+          const thread = this.#externalRuntime.get(threadId);
+          return thread ? this.#executionHosts.get(thread) : undefined;
+        },
       },
-    });
+      {
+        createEnrollmentThread: (clientId) =>
+          maintenanceOperation(async () => {
+            const response = await this.#requestOfficial("thread/start", {
+              ephemeral: false,
+              historyMode: "paginated",
+            });
+            const result = isRecord(response.result) ? response.result : null;
+            const thread = result && isRecord(result.thread) ? result.thread : null;
+            if (
+              isRecord(response.error) ||
+              !thread ||
+              typeof thread.id !== "string" ||
+              !thread.id
+            ) {
+              throw new DelegationControlError(
+                "INTERNAL_ERROR",
+                "Native enrollment Thread creation failed",
+              );
+            }
+            await this.#requestOfficial("thread/name/set", {
+              threadId: thread.id,
+              name: `Enrolled client: ${clientId}`,
+            }).catch(() => undefined);
+            return thread.id;
+          }),
+      },
+    );
     this.#unregisterDelegationApi =
       typeof unregisterDelegationApi === "function" ? unregisterDelegationApi : undefined;
   }

@@ -59,6 +59,8 @@ export class EnrollmentAuthority {
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #createToken: () => string;
+  readonly #createThread: ((clientId: string) => Promise<string>) | undefined;
+  #issuing: Promise<unknown> = Promise.resolve();
   readonly #pid: number;
   readonly #byToken = new Map<string, EnrollmentRecord>();
   #endpoint: string | undefined;
@@ -71,6 +73,7 @@ export class EnrollmentAuthority {
     now?: () => number;
     createId?: () => string;
     createToken?: () => string;
+    createThread?: (clientId: string) => Promise<string>;
     pid?: number;
     bootstrapToken?: string;
   }) {
@@ -81,6 +84,7 @@ export class EnrollmentAuthority {
     this.#now = input.now ?? Date.now;
     this.#createId = input.createId ?? randomUUID;
     this.#createToken = input.createToken ?? (() => randomBytes(32).toString("hex"));
+    this.#createThread = input.createThread;
     this.#pid = input.pid ?? process.pid;
   }
 
@@ -142,6 +146,13 @@ export class EnrollmentAuthority {
     if (this.#bootstrapPath) await rm(this.#bootstrapPath, { force: true });
   }
 
+  #publicView(record: EnrollmentRecord): ReturnType<typeof publicEnrollmentView> {
+    return publicEnrollmentView({
+      ...record,
+      endpoint: this.#endpoint ?? record.endpoint,
+    });
+  }
+
   matchesBootstrap(header: string | undefined): boolean {
     return matchesBearerToken(header, this.#bootstrapToken);
   }
@@ -170,7 +181,13 @@ export class EnrollmentAuthority {
     }
   }
 
-  async enroll(request: EnrollmentIssueRequest): Promise<EnrollmentRecord> {
+  enroll(request: EnrollmentIssueRequest): Promise<EnrollmentRecord> {
+    const issued = this.#issuing.then(() => this.#issue(request));
+    this.#issuing = issued.catch(() => undefined);
+    return issued;
+  }
+
+  async #issue(request: EnrollmentIssueRequest): Promise<EnrollmentRecord> {
     const clientId = parseEnrollmentClientId(request.clientId);
     const executablePath = path.isAbsolute(request.executablePath)
       ? request.executablePath
@@ -216,9 +233,14 @@ export class EnrollmentAuthority {
         "consent_ui_unavailable",
       );
     }
-    if (pairing === "machine") this.#revokeActiveForClient(clientId);
+    if (!this.#createThread) {
+      throw new DelegationControlError(
+        "RUNTIME_UNREACHABLE",
+        "Native enrollment Thread creation is unavailable",
+      );
+    }
     const enrollmentId = this.#createId();
-    const threadId = this.#createId();
+    const threadId = await this.#createThread(clientId);
     if (threadId === enrollmentId) {
       throw new DelegationControlError("INTERNAL_ERROR", "Enrollment identifiers must be distinct");
     }
@@ -248,6 +270,7 @@ export class EnrollmentAuthority {
       allowlistDigest: allowlistDigest(allowlist),
       pairing,
     };
+    if (pairing === "machine") this.#revokeActiveForClient(clientId);
     this.#byToken.set(token, record);
     await this.#saveRecords();
     return record;
@@ -273,13 +296,13 @@ export class EnrollmentAuthority {
       throw enrollmentError("ENROLLMENT_INVALID", "Enrollment is not active", "revoked");
     }
     verifyEnrollmentRecord(principal.record, this.#now());
-    return publicEnrollmentView(principal.record);
+    return this.#publicView(principal.record);
   }
 
   listPublic(): ReturnType<typeof publicEnrollmentView>[] {
     return [...this.#byToken.values()]
       .filter((record) => this.#verified(record))
-      .map((record) => publicEnrollmentView(record))
+      .map((record) => this.#publicView(record))
       .sort((left, right) => {
         const client = left.clientId.localeCompare(right.clientId);
         return client === 0 ? right.issuedAt.localeCompare(left.issuedAt) : client;

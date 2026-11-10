@@ -286,7 +286,10 @@ export function createFixture(
     consoleOpener?: HostConsoleOpener;
     accountControl?: CodexAccountControl;
     officialRuntimeScope?: OfficialRuntimeScope;
-    onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
+    onDelegationApi?: (
+      api: DelegationControlRegistration,
+      extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
+    ) => (() => void) | undefined;
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];

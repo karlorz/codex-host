@@ -22,12 +22,14 @@ The CLI talks to a loopback enroll bootstrap published while Desktop/Runtime is 
 On Approve, Runtime creates:
 
 - `enrollment_id`
-- `thread_id` (the client's own Thread; never the parent Thread)
+- `thread_id` — a native idle Codex Thread created in the Host before credentials are issued (never the parent Thread; `thread read` of this id must work without a prior client send)
 - `token` distinct from the Host token and bootstrap token
 - `pairing`: `machine` (recorded ten-year expiry unless revoked sooner, the default) or `session` (24-hour TTL with `--session`)
 - `allowlist[]` of `{thread_id, verbs}` plus a digest of the canonical allowlist
 
 The CLI writes the record to a user-private mode `600` store under `$CODEXHOST_DATA_DIR/enroll/clients/<client>.json` (default `~/.codexhost/...`). Deny or timeout writes nothing.
+
+Native Thread creation starts no Turn. Failure prevents issuance and leaves an existing pairing valid. Reusing a machine pairing retains its original caller identity. A credential whose caller id has no native Thread can still access its allowlisted targets; obtaining a native own Thread requires attended replacement and a refreshed handoff. Runtime port changes alone do not require replacement.
 
 Later `codexhost thread *` uses Host-injected `CODEXHOST_RUNTIME_ENDPOINT` / `CODEXHOST_RUNTIME_TOKEN` when both are present, unless `--enrolled-client <id>` is set. That option uses the named enrollment and fails if the store is missing or invalid; it does not fall back to Host credentials. When neither Host env nor `--enrolled-client` is set, the CLI reads `CODEXHOST_ENROLL_CLIENT` (default `grok-bot`). A missing default store keeps `missing_runtime_environment`.
 
@@ -65,7 +67,7 @@ Enrollment defaults to machine pairing for that client id, like an SSH authorize
 
 A Host-authenticated session issues enrollment. Later `thread read` / `thread send` from an unmanaged shell should pass `--enrolled-client <id>`. That uses the enrollment store even when Host Runtime env is inherited, and fails if the store is missing or invalid.
 
-`enroll status` uses the same client selector (`--client`, `--enrolled-client`, or `CODEXHOST_ENROLL_CLIENT`, default `grok-bot`) and reports `authentication.source` without the token: `host-session` when both Host Runtime variables are set and `--enrolled-client` is omitted, `incomplete-host-session` with the missing variable names when only one is set, and `enrollment` when `--enrolled-client` is set or both Host Runtime variables are absent. Partial Host credentials fail with `missing_runtime_environment` on thread commands; they do not fall back to enrollment. The store file must remain mode `600`. Invalid stores fail closed with `expired`, `insecure_store_mode`, or `missing_store`, including client id and path.
+`enroll status` uses the same client selector (`--client`, `--enrolled-client`, or `CODEXHOST_ENROLL_CLIENT`, default `grok-bot`) and reports `authentication.source` without the token: `host-session` when both Host Runtime variables are set and `--enrolled-client` is omitted, `incomplete-host-session` with the missing variable names when only one is set, and `enrollment` when `--enrolled-client` is set or both Host Runtime variables are absent. For a loopback store, `endpoint` is the live Runtime bootstrap port when published; the on-disk client file is not rewritten and tokens are not rotated. A tailnet handoff keeps its Tailscale URL. Partial Host credentials fail with `missing_runtime_environment` on thread commands; they do not fall back to enrollment. The store file must remain mode `600`. Invalid stores fail closed with `expired`, `insecure_store_mode`, or `missing_store`, including client id and path.
 
 ```sh
 codexhost enroll --client muse \
@@ -110,6 +112,8 @@ codexhost enroll serve --client muse --listen <mac-tailscale-ipv4> --port 4397 -
 ```
 
 `serve` runs as a separate foreground CLI process using only the client's local enrollment store. On POSIX it requires a user-owned mode-700 export directory. It creates a new mode-600 handoff file exclusively, and reports only endpoint, client, PID, expiry and file path. It does not replace the running Runtime or stop Desktop. The caller can remove Host credentials from this process's environment before starting it.
+
+The listener binds before creating the export. A bind failure such as `EADDRINUSE` preserves an existing handoff. Use a fresh export path for each start attempt; operator supervisors must not delete a canonical handoff before binding. A supervisor can atomically publish the new handoff only after the private attempt file exists. Restarting the listener with the same enrollment does not rotate its token, and an existing remote store keeps working at the same Tailscale address and port.
 
 The listener accepts only that client's bearer, forwards only `thread read`, `thread send`, `enroll status` and `enroll revoke` to the live loopback Runtime from the local enroll bootstrap when present, and disables redirects. Runtime remains the authorization authority. Reads always use the issued client identity and cannot route to another Host. Requests are limited to 2 MiB with a 30-second upstream deadline. It does not expose enrollment issuance, delegation, cancel, wait or watch. Tailscale provides encrypted transport; configure tailnet access so only the intended peers can reach the listener. Only IPv4 is supported by this command.
 

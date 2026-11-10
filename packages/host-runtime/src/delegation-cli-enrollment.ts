@@ -401,7 +401,10 @@ export async function runEnrollStatus(input: {
   const clientId = selectedEnrollmentClientId(input.parsed, input.environment);
   const storePath = enrollmentStorePath(input.environment, clientId);
   try {
-    const record = await readEnrollmentStore(storePath, input.nowMs, clientId);
+    const [record, liveEndpoint] = await Promise.all([
+      readEnrollmentStore(storePath, input.nowMs, clientId),
+      readLiveEnrollmentEndpoint(input.environment),
+    ]);
     if (!record) {
       throw enrollmentError(
         "ENROLLMENT_INVALID",
@@ -421,7 +424,12 @@ export async function runEnrollStatus(input: {
     });
     return {
       storePath,
-      view: { ...publicEnrollmentView(record), storePath, authentication },
+      view: {
+        ...publicEnrollmentView(record),
+        endpoint: enrollmentClientEndpoint(record, liveEndpoint),
+        storePath,
+        authentication,
+      },
     };
   } catch (error) {
     if (error instanceof DelegationControlError) {

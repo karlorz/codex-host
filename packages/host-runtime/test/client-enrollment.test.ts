@@ -32,7 +32,8 @@ import {
   writeEnrollmentBootstrap,
   writeEnrollmentStore,
 } from "../src/client-enrollment-store.js";
-import { resolveCliRuntimeConnection } from "../src/delegation-cli-enrollment.js";
+import { resolveCliRuntimeConnection, runEnrollStatus } from "../src/delegation-cli-enrollment.js";
+import { parseDelegationArguments } from "../src/delegation-cli-options.js";
 import { DELEGATION_HELP, runDelegationCli } from "../src/delegation-cli.js";
 import { startDelegationControlServer } from "../src/delegation-control-server.js";
 import {
@@ -44,6 +45,15 @@ import {
 
 const PARENT_TOKEN = "parent-runtime-token";
 const directories: string[] = [];
+
+function sequentialIds(ids: string[]): () => string {
+  let index = 0;
+  return () => {
+    const id = ids[index++];
+    if (!id) throw new Error("unexpected enrollment id");
+    return id;
+  };
+}
 
 async function tempDataDir(): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-enroll-"));
@@ -277,10 +287,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-id",
+      createThread: async () => "enrolled-thread",
       createToken: () => "enrolled-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -360,6 +368,121 @@ describe("client enrollment store and Runtime", () => {
     expect(connection.source).toBe("enrollment");
   });
 
+  it("reports the live bootstrap endpoint from enroll status without rotating the store", async () => {
+    const dataDir = await tempDataDir();
+    const stale = record({ endpoint: "http://127.0.0.1:49702" });
+    const storePath = enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot");
+    await writeEnrollmentStore(storePath, stale);
+    await writeEnrollmentBootstrap(enrollmentBootstrapPath({ CODEXHOST_DATA_DIR: dataDir }), {
+      schemaVersion: 1,
+      endpoint: "http://127.0.0.1:50843",
+      bootstrapToken: "bootstrap-token",
+      pid: 9,
+      startedAt: "2026-11-07T00:00:00.000Z",
+    });
+    const result = await runEnrollStatus({
+      environment: { CODEXHOST_DATA_DIR: dataDir },
+      parsed: parseDelegationArguments(["enroll", "status"]),
+      nowMs: Date.parse("2026-11-07T00:00:00.000Z"),
+    });
+    expect(result.view.endpoint).toBe("http://127.0.0.1:50843");
+    expect(result.view.enrollmentId).toBe(stale.enrollmentId);
+    const stored = JSON.parse(await readFile(storePath, "utf8")) as EnrollmentRecord;
+    expect(stored.endpoint).toBe("http://127.0.0.1:49702");
+  });
+
+  it("refuses to issue enrollment without native Thread creation", async () => {
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: await tempDataDir(),
+      consent: createStubEnrollmentConsent("approve"),
+    });
+    await enrollment.publishBootstrap("http://127.0.0.1:9");
+    await expect(
+      enrollment.enroll({
+        clientId: "muse",
+        executablePath: "/synthetic/muse",
+        attendedHostApprove: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "RUNTIME_UNREACHABLE",
+    });
+    await enrollment.close();
+  });
+
+  it("keeps a valid pairing when replacement native Thread creation fails", async () => {
+    const createThread = vi.fn(async () => "native-own-thread");
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: await tempDataDir(),
+      createThread,
+    });
+    await enrollment.publishBootstrap("http://127.0.0.1:9");
+    try {
+      const request = {
+        clientId: "muse",
+        executablePath: "/synthetic/muse",
+        attendedHostApprove: true,
+      };
+      const first = await enrollment.enroll(request);
+      createThread.mockRejectedValueOnce(new Error("native unavailable"));
+      await expect(
+        enrollment.enroll({ ...request, allowlist: [{ threadId: "new-target", verbs: ["read"] }] }),
+      ).rejects.toThrow("native unavailable");
+      expect(enrollment.status(`Bearer ${first.token}`).enrollmentId).toBe(first.enrollmentId);
+      expect(enrollment.listPublic()).toHaveLength(1);
+    } finally {
+      await enrollment.close();
+    }
+  });
+
+  it("reuses one native Thread for concurrent equivalent machine enrollment requests", async () => {
+    const createThread = vi.fn(async () => "native-own-thread");
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: await tempDataDir(),
+      createThread,
+    });
+    await enrollment.publishBootstrap("http://127.0.0.1:9");
+    try {
+      const request = {
+        clientId: "muse",
+        executablePath: "/synthetic/muse",
+        attendedHostApprove: true,
+      };
+      const [first, second] = await Promise.all([
+        enrollment.enroll(request),
+        enrollment.enroll(request),
+      ]);
+      expect(first.enrollmentId).toBe(second.enrollmentId);
+      expect(first.token).toBe(second.token);
+      expect(createThread).toHaveBeenCalledExactlyOnceWith("muse");
+    } finally {
+      await enrollment.close();
+    }
+  });
+
+  it("keeps a tailnet status endpoint even when local bootstrap is present", async () => {
+    const environment = { CODEXHOST_DATA_DIR: await tempDataDir() };
+    const storePath = enrollmentStorePath(environment, "grok-bot");
+    const tailnet = record({ networkScope: "tailnet", endpoint: "http://100.64.0.1:4397" });
+    await writeEnrollmentStore(storePath, tailnet);
+    await writeEnrollmentBootstrap(enrollmentBootstrapPath(environment), {
+      schemaVersion: 1,
+      endpoint: "http://127.0.0.1:50843",
+      bootstrapToken: "bootstrap-token",
+      pid: 9,
+      startedAt: "2026-11-07T00:00:00.000Z",
+    });
+    const { view } = await runEnrollStatus({
+      environment,
+      parsed: parseDelegationArguments(["enroll", "status"]),
+      nowMs: Date.parse("2026-11-07T12:00:00.000Z"),
+    });
+    expect(view.endpoint).toBe(tailnet.endpoint);
+    expect(JSON.parse(await readFile(storePath, "utf8"))).toEqual(tailnet);
+  });
+
   it("reloads persisted enrollments onto a new Runtime listen port", async () => {
     const dataDir = await tempDataDir();
     const first = new EnrollmentAuthority({
@@ -367,10 +490,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-id",
+      createThread: async () => "enrolled-thread",
       createToken: () => "enrolled-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -423,10 +544,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("timeout"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-id",
+      createThread: async () => "enrolled-thread",
       createToken: () => "enrolled-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -476,13 +595,10 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("timeout"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => {
-          const id = ["enroll-a", "thread-a", "enroll-b", "thread-b"][index++];
-          if (!id) throw new Error("unexpected new enrollment ids");
-          return id;
-        };
+      createId: sequentialIds(["enroll-a", "enroll-b"]),
+      createThread: (() => {
+        const next = sequentialIds(["thread-a", "thread-b"]);
+        return async () => next();
       })(),
       createToken: (() => {
         let index = 0;
@@ -579,6 +695,7 @@ describe("client enrollment store and Runtime", () => {
       consent: createStubEnrollmentConsent("timeout"),
       bootstrapToken: "bootstrap-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+      createThread: async () => "native-thread",
     });
     const server = await startDelegationControlServer({
       token: PARENT_TOKEN,
@@ -626,6 +743,7 @@ describe("client enrollment store and Runtime", () => {
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
+      createThread: async () => "native-thread",
     });
     const server = await startDelegationControlServer({
       token: PARENT_TOKEN,
@@ -806,10 +924,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-id",
+      createThread: async () => "enrolled-thread",
       createToken: () => "enrolled-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -918,10 +1034,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       bootstrapToken: "bootstrap-token",
-      createId: (() => {
-        let index = 0;
-        return () => ["enrollment-id", "enrolled-thread"][index++] ?? "extra";
-      })(),
+      createId: () => "enrollment-id",
+      createThread: async () => "enrolled-thread",
       createToken: () => "enrolled-token",
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -1048,14 +1162,8 @@ describe("client enrollment store and Runtime", () => {
       dataDirectory: dataDir,
       consent: createStubEnrollmentConsent("approve"),
       now: () => Date.parse("2026-11-07T00:00:00.000Z"),
-      createId: (() => {
-        let index = 0;
-        return () => {
-          const id = ["enroll-list", "thread-list"][index++];
-          if (!id) throw new Error("unexpected enrollment id");
-          return id;
-        };
-      })(),
+      createId: () => "enroll-list",
+      createThread: async () => "thread-list",
       createToken: () => "listed-token",
     });
     await enrollment.publishBootstrap("http://127.0.0.1:9");
@@ -1100,6 +1208,7 @@ describe("client enrollment store and Runtime", () => {
       consent: createStubEnrollmentConsent("approve"),
       now: () => nowMs,
       createToken: () => "session-token",
+      createThread: async () => "session-thread",
     });
     await enrollment.publishBootstrap("http://127.0.0.1:9");
     await enrollment.enroll({

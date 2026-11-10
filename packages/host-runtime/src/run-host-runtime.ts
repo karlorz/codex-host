@@ -167,7 +167,10 @@ async function prepareDelegationRuntime(input: {
   hostRuntimePath?: string;
   createHost(
     environment: NodeJS.ProcessEnv,
-    onDelegationApi: (api: DelegationControlRegistration) => (() => void) | undefined,
+    onDelegationApi: (
+      api: DelegationControlRegistration,
+      extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
+    ) => (() => void) | undefined,
     registry: DelegationControlRegistry,
     enrollment: EnrollmentAuthority,
   ): Promise<number>;
@@ -184,6 +187,7 @@ async function prepareDelegationRuntime(input: {
     hostToken: token,
     dataDirectory: codexhostDataDirectory(input.environment),
     consent: createUnavailableEnrollmentConsent(),
+    createThread: (clientId) => registry.createEnrollmentThread(clientId),
   });
   const server = await startDelegationControlServer({
     token,
@@ -209,7 +213,7 @@ async function prepareDelegationRuntime(input: {
   try {
     return await input.createHost(
       environment,
-      (value) => registry.register(value),
+      (api, extras) => registry.register(api, extras),
       registry,
       enrollment,
     );
@@ -373,7 +377,8 @@ export async function runHostRuntime(input: {
             ...common,
             arguments: input.arguments,
             // Every Remote Control client shares this backend and Mapping Store.
-            onDelegationApi: (api) => registry.register(api, { harnessCatalog: true }),
+            onDelegationApi: (api, extras) =>
+              registry.register(api, { ...extras, harnessCatalog: true }),
           });
           listener = createRemoteAppServerWebSocketListener({
             socketPath: remoteControlPlan.pipePath,
@@ -388,7 +393,7 @@ export async function runHostRuntime(input: {
                 desktopInput,
                 desktopOutput,
                 diagnosticOutput,
-                onDelegationApi: (api) => registry.register(api),
+                onDelegationApi: (api, extras) => registry.register(api, extras),
               }),
           });
           await listener.listen();
@@ -470,9 +475,9 @@ export async function runHostRuntime(input: {
         closeMappingStoreOnExit: false,
         officialRuntimeScope,
         accountControl,
-        onDelegationApi: (api) => {
+        onDelegationApi: (api, extras) => {
           sharedDelegation = api;
-          return registry.register(api, { harnessCatalog: true });
+          return registry.register(api, { ...extras, harnessCatalog: true });
         },
       });
       const externalRunning = externalHost.run();
@@ -508,7 +513,7 @@ export async function runHostRuntime(input: {
             closeMappingStoreOnExit: false,
             officialRuntimeScope,
             accountControl,
-            onDelegationApi: (api) => registry.register(api),
+            onDelegationApi: (api, extras) => registry.register(api, extras),
             ...(updateCoordinator ? { updateCoordinator } : {}),
           });
         },
