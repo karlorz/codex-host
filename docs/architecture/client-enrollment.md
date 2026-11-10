@@ -15,7 +15,7 @@ Host injects Runtime endpoint and token only into processes it started. An unman
 
 `--client grok-bot` is the v1 client id. `--allow` is optional and defaults to empty besides the newly issued Thread (`read`, `watch`, `send`, `cancel`). A parent Thread such as `70afcd8a-2124-44e3-aa9d-9a7d4695f97c` is reachable only when that id is listed; the fixture allowlist is `read,watch` only. `send` does not grant `cancel`.
 
-The CLI talks to a loopback enroll bootstrap published while Desktop/Runtime is running. That bootstrap token is not the Host session bearer token used by Host-started processes.
+The CLI talks to a loopback enroll bootstrap published when Desktop/Runtime starts. The last published descriptor remains on disk through shutdown and is atomically replaced by the next Runtime, so an older Runtime cannot delete a newer Runtime's discovery file. It is discovery metadata, not a liveness guarantee: requests to a stopped Runtime fail with `RUNTIME_UNREACHABLE`. That bootstrap token is not the Host session bearer token used by Host-started processes.
 
 ## Issued credentials
 

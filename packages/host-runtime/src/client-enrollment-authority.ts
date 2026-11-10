@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -143,7 +142,10 @@ export class EnrollmentAuthority {
   }
 
   async close(): Promise<void> {
-    if (this.#bootstrapPath) await rm(this.#bootstrapPath, { force: true });
+    // The next Runtime replaces discovery atomically. Removing the shared path here
+    // could delete a newer Runtime's descriptor during overlapping shutdown/startup.
+    this.#endpoint = undefined;
+    this.#byToken.clear();
   }
 
   #publicView(record: EnrollmentRecord): ReturnType<typeof publicEnrollmentView> {

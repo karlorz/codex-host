@@ -27,6 +27,7 @@ import {
   enrollmentBootstrapPath,
   enrollmentStorePath,
   loadEnrollmentCredentialsFromEnvFile,
+  readEnrollmentBootstrap,
   loadEnrollmentCredentialsFromPid,
   rejectForeignCredentialSources,
   writeEnrollmentBootstrap,
@@ -481,6 +482,20 @@ describe("client enrollment store and Runtime", () => {
     });
     expect(view.endpoint).toBe(tailnet.endpoint);
     expect(JSON.parse(await readFile(storePath, "utf8"))).toEqual(tailnet);
+  });
+
+  it("preserves newer Runtime discovery when an older Runtime closes", async () => {
+    const dataDirectory = await tempDataDir();
+    const first = new EnrollmentAuthority({ hostToken: "first-host", dataDirectory });
+    const second = new EnrollmentAuthority({ hostToken: "second-host", dataDirectory });
+    await first.publishBootstrap("http://127.0.0.1:50001");
+    await second.publishBootstrap("http://127.0.0.1:50002");
+    const bootstrapPath = enrollmentBootstrapPath({ CODEXHOST_DATA_DIR: dataDirectory });
+    const published = await readEnrollmentBootstrap(bootstrapPath);
+    await first.close();
+    expect(await readEnrollmentBootstrap(bootstrapPath)).toEqual(published);
+    await second.close();
+    expect(await readEnrollmentBootstrap(bootstrapPath)).toEqual(published);
   });
 
   it("reloads persisted enrollments onto a new Runtime listen port", async () => {
