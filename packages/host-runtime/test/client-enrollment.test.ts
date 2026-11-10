@@ -16,6 +16,7 @@ import {
   enrollPairingFromOptions,
   parseEnrollmentPairing,
   verifyEnrollmentRecord,
+  type EnrollmentAllowlistEntry,
   type EnrollmentRecord,
 } from "../src/client-enrollment.js";
 import { createStubEnrollmentConsent } from "../src/client-enrollment-consent.js";
@@ -174,6 +175,55 @@ describe("client enrollment domain", () => {
     } catch (error) {
       expect(error).toMatchObject({ code: "UNAUTHORIZED_TARGET" });
     }
+  });
+
+  it("does not treat send as cancel on existing allowlists", () => {
+    const allowlist: EnrollmentAllowlistEntry[] = [
+      { threadId: "enrolled-thread", verbs: ["read", "watch", "send"] },
+      { threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "watch", "send"] },
+    ];
+    const issued = record({
+      allowlist: [...allowlist],
+      allowlistDigest: allowlistDigest(allowlist),
+    });
+    const now = Date.parse("2026-11-07T12:00:00.000Z");
+    expect(() =>
+      authorizeEnrollment(issued, { type: "send", threadId: FIXTURE_PARENT_THREAD_ID }, now),
+    ).not.toThrow();
+    expect(() => {
+      authorizeEnrollment(issued, { type: "cancel", threadId: FIXTURE_PARENT_THREAD_ID }, now);
+    }).toThrowError(
+      expect.objectContaining({
+        code: "UNAUTHORIZED_TARGET",
+        details: expect.objectContaining({ verb: "cancel" }),
+      }),
+    );
+    expect(() => {
+      authorizeEnrollment(issued, { type: "cancel", threadId: "enrolled-thread" }, now);
+    }).toThrowError(
+      expect.objectContaining({
+        code: "UNAUTHORIZED_TARGET",
+        details: expect.objectContaining({ verb: "cancel" }),
+      }),
+    );
+  });
+
+  it("authorizes cancel only when the grant is listed", () => {
+    const issued = record({
+      allowlist: issuedAllowlist("enrolled-thread", [
+        { threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send", "cancel"] },
+      ]),
+    });
+    const now = Date.parse("2026-11-07T12:00:00.000Z");
+    expect(() =>
+      authorizeEnrollment(issued, { type: "cancel", threadId: FIXTURE_PARENT_THREAD_ID }, now),
+    ).not.toThrow();
+    expect(() =>
+      authorizeEnrollment(issued, { type: "cancel", threadId: "enrolled-thread" }, now),
+    ).not.toThrow();
+    expect(parseAllowlistOption(`${FIXTURE_PARENT_THREAD_ID}:read,send,cancel`)).toEqual([
+      { threadId: FIXTURE_PARENT_THREAD_ID, verbs: ["read", "send", "cancel"] },
+    ]);
   });
 
   it("fails closed on allowlist tamper, expiry, and clock skew", () => {
@@ -645,6 +695,35 @@ describe("client enrollment store and Runtime", () => {
     ).rejects.toThrow();
   });
 
+  it("fails unmanaged enroll immediately when Desktop has no consent UI", async () => {
+    const dataDir = await tempDataDir();
+    const enrollment = new EnrollmentAuthority({
+      hostToken: PARENT_TOKEN,
+      dataDirectory: dataDir,
+      bootstrapToken: "bootstrap-token",
+    });
+    const server = await startDelegationControlServer({
+      token: PARENT_TOKEN,
+      api: controlApi(),
+      enrollment,
+    });
+    try {
+      await enrollment.publishBootstrap(server.endpoint);
+      await expect(
+        enrollment.enroll({
+          clientId: "grok-bot",
+          executablePath: "/synthetic/grok-bot",
+        }),
+      ).rejects.toMatchObject({
+        code: "ENROLLMENT_DENIED",
+        details: { reason: "consent_ui_unavailable" },
+      });
+    } finally {
+      await enrollment.close();
+      await server.close();
+    }
+  });
+
   it("writes no store on deny or timeout", async () => {
     for (const decision of ["deny", "timeout"] as const) {
       const dataDir = await tempDataDir();
@@ -1044,6 +1123,15 @@ describe("client enrollment store and Runtime", () => {
     const enrollHelpText = outputText(enrollHelp);
     expect(enrollHelpText).toContain("--machine");
     expect(enrollHelpText).toContain("--session");
+    expect(enrollHelpText).toContain("consent_ui_unavailable");
+    const sendHelp = new PassThrough();
+    expect(
+      await runDelegationCli({ arguments: ["thread", "send", "--help"], output: sendHelp }),
+    ).toBe(0);
+    const sendHelpText = outputText(sendHelp);
+    expect(sendHelpText).toContain("--enrolled-client");
+    expect(sendHelpText).toContain("No new Turn started");
+    expect(sendHelpText).not.toContain("wait or cancel before sending");
     for (const arguments_ of [
       ["enroll", "--help"],
       ["enroll", "status", "--help"],

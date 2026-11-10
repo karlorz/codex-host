@@ -4,12 +4,11 @@ export interface EnrollmentConsentRequest {
   allowlist: { threadId: string; verbs: readonly string[] }[];
 }
 
-export type EnrollmentConsentDecision = "approve" | "deny" | "timeout";
+export type EnrollmentConsentDecision = "approve" | "deny" | "timeout" | "unavailable";
 
 /**
- * Attended Desktop Approve/Deny for enrollment. Production Host uses a timeout
- * that fails closed when no Desktop prompt can run unattended; tests inject
- * Approve/Deny stubs.
+ * Attended Desktop Approve/Deny for enrollment. Production Host has no prompt
+ * and fails closed immediately; tests inject Approve/Deny/timeout stubs.
  */
 export interface EnrollmentConsent {
   decide(request: EnrollmentConsentRequest): Promise<EnrollmentConsentDecision>;
@@ -27,17 +26,11 @@ export function createStubEnrollmentConsent(
   };
 }
 
-/** Fail-closed attended prompt: no unattended Desktop UI, so the request times out. */
-export function createTimeoutEnrollmentConsent(input: { timeoutMs: number }): EnrollmentConsent {
+/** Production Desktop has no enrollment prompt; fail immediately instead of waiting. */
+export function createUnavailableEnrollmentConsent(): EnrollmentConsent {
   return {
     async decide() {
-      if (input.timeoutMs <= 0) return "timeout";
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, input.timeoutMs);
-      });
-      return "timeout";
+      return "unavailable";
     },
   };
 }
-
-export const DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS = 60_000;

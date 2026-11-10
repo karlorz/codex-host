@@ -159,6 +159,7 @@ export async function runEnrollmentTailnetServe(input: {
   const record = await readEnrollmentStore(
     enrollmentStorePath(input.environment, clientId),
     Date.now(),
+    clientId,
   );
   if (!record) throw new DelegationControlError("ENROLLMENT_INVALID", "Enroll this client first");
   const server = createEnrollmentTailnetServer(

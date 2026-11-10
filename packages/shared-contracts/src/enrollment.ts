@@ -8,9 +8,9 @@ export const ENROLLMENT_REVOKE_METHOD = "codexhost/enrollment/revoke";
 export const enrollmentAllowlistEntrySchema = z.strictObject({
   threadId: z.string().trim().min(1).max(128),
   verbs: z
-    .array(z.enum(["read", "watch", "send"]))
+    .array(z.enum(["read", "watch", "send", "cancel"]))
     .min(1)
-    .max(3),
+    .max(4),
 });
 
 /** Public enrollment fields. Never includes a token. */

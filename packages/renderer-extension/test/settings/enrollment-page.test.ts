@@ -120,7 +120,8 @@ describe("Enrollment settings page", () => {
       runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
     });
     await vi.waitFor(() => expect(visibleText(content)).toContain("cursor-box-grok"));
-    expect(visibleText(content)).toContain("Until revoked");
+    expect(visibleText(content)).toMatch(/unless revoked earlier/u);
+    expect(visibleText(content)).not.toContain("Until revoked");
     expect(visibleText(content)).not.toContain("token");
     const refresh = descendants(content).find(
       (element) => element.tagName === "button" && element.getAttribute("aria-label") === "Refresh",

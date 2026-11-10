@@ -319,7 +319,7 @@ export interface RendererSettingsMessages {
     readonly confirmRevoke: string;
     readonly pairingMachine: string;
     readonly pairingSession: string;
-    readonly untilRevoked: string;
+    readonly validUntilUnlessRevoked: string;
     readonly revoke: string;
     readonly revoking: string;
   };
@@ -664,7 +664,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
       "Clients paired with this Mac Host, like SSH authorized keys. Tokens are never shown. Pair from an authorized Host session with codexhost enroll. enroll serve is a separate CLI process, not a Desktop service.",
     helpLabel: "About client enrollment",
     help: Object.freeze([
-      "Machine pairing stays valid until you revoke it. Session pairing expires after 24 hours.",
+      "Machine pairing stays valid until the recorded expiry unless you revoke it sooner. Session pairing expires after 24 hours.",
       "Revoke removes the Host record and the local client store on this Mac. A Tailscale handoff on another machine fails closed on the next request.",
       "This page does not start or stop enroll serve. Run that CLI in a terminal when a tailnet listener is required.",
     ]),
@@ -677,7 +677,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     confirmRevoke: "Confirm revoke",
     pairingMachine: "Machine",
     pairingSession: "Session",
-    untilRevoked: "Until revoked",
+    validUntilUnlessRevoked: "Valid until %s unless revoked earlier",
     revoke: "Revoke",
     revoking: "Revoking…",
   }),
@@ -1013,7 +1013,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
       "已与本机 Host 配对的客户端，类似 SSH authorized keys。页面从不显示令牌。在已授权的 Host 会话中运行 codexhost enroll 进行配对。enroll serve 是独立 CLI 进程，不是桌面服务。",
     helpLabel: "关于客户端登记",
     help: Object.freeze([
-      "机器配对在撤销前一直有效。会话配对 24 小时后过期。",
+      "机器配对在记录的到期日之前有效，提前撤销则立即失效。会话配对 24 小时后过期。",
       "撤销会删除本机 Host 记录和本地客户端存储。另一台机器上的 Tailscale 交接会在下次请求时失败退出。",
       "此页不会启动或停止 enroll serve。需要 tailnet 监听时在终端运行该 CLI。",
     ]),
@@ -1026,7 +1026,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     confirmRevoke: "确认撤销",
     pairingMachine: "机器",
     pairingSession: "会话",
-    untilRevoked: "撤销前有效",
+    validUntilUnlessRevoked: "有效至 %s，提前撤销则失效",
     revoke: "撤销",
     revoking: "正在撤销…",
   }),

@@ -24,6 +24,7 @@ import { resolveDelegationStartConfiguration } from "./delegation-model-validati
 import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
+  threadBusyError,
   isTerminalDelegationStatus,
   type DelegationConfigurationResult,
   type DelegationStartInput,
@@ -463,7 +464,7 @@ export class HarnessDelegationCoordinator {
       });
     }
     if (this.#externalThreadBusy(thread) || thread.activeTurnId) {
-      throw new DelegationControlError("THREAD_BUSY", "Thread already has an active Turn");
+      throw threadBusyError(input.threadId);
     }
     const turnId = hostTurnIdSchema.parse(randomUUID());
     try {

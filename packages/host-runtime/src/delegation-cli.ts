@@ -6,6 +6,7 @@ import { parseDelegationArguments, type DelegationCliArguments } from "./delegat
 import { compactDelegationOutput } from "./delegation-cli-output.js";
 import { runEnrollmentTailnetServe } from "./client-enrollment-tailnet.js";
 import {
+  ENROLLED_CLIENT_OPTION,
   resolveCliRuntimeConnection,
   runEnrollRequest,
   runEnrollRevoke,
@@ -84,6 +85,10 @@ function rejectUnknown(parsed: DelegationCliArguments, allowed: readonly string[
     if (!known.has(name))
       throw new DelegationControlError("INVALID_ARGUMENT", `Unknown option '${name}'`);
   }
+}
+
+function runtimeOptions(allowed: readonly string[]): string[] {
+  return [...allowed, ENROLLED_CLIENT_OPTION];
 }
 
 async function requestRuntime(input: {
@@ -215,7 +220,7 @@ export async function runDelegationCli(input: {
               "--from-env-file",
               "--as-thread",
             ]
-          : ["--client", "--from-pid", "--from-env-file", "--as-thread"];
+          : ["--client", ENROLLED_CLIENT_OPTION, "--from-pid", "--from-env-file", "--as-thread"];
       rejectUnknown(parsed, enrollOptions);
       if (parsed.positionals.length > 0) {
         throw new DelegationControlError(
@@ -272,7 +277,7 @@ export async function runDelegationCli(input: {
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       });
     if (group === "harness" && command === "list") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, runtimeOptions([]));
       if (parsed.positionals.length > 0) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -283,7 +288,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "harness" && command === "inspect") {
-      rejectUnknown(parsed, ["--cwd", "--refresh"]);
+      rejectUnknown(parsed, runtimeOptions(["--cwd", "--refresh"]));
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -309,19 +314,22 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "delegate" && command === "start") {
-      rejectUnknown(parsed, [
-        "--harness",
-        "--task",
-        "--task-name",
-        "--cwd",
-        "--model",
-        "--thinking",
-        "--parent-thread",
-        "--request-id",
-        "--watch",
-        "--watch-timeout-ms",
-        "--fallback-default",
-      ]);
+      rejectUnknown(
+        parsed,
+        runtimeOptions([
+          "--harness",
+          "--task",
+          "--task-name",
+          "--cwd",
+          "--model",
+          "--thinking",
+          "--parent-thread",
+          "--request-id",
+          "--watch",
+          "--watch-timeout-ms",
+          "--fallback-default",
+        ]),
+      );
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -367,7 +375,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "send") {
-      rejectUnknown(parsed, ["--message"]);
+      rejectUnknown(parsed, runtimeOptions(["--message"]));
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -389,7 +397,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "cancel") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, runtimeOptions([]));
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -407,13 +415,16 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && (command === "read" || command === "wait")) {
-      rejectUnknown(parsed, [
-        "--view",
-        "--cursor",
-        "--limit",
-        "--timeout-ms",
-        ...(command === "read" ? ["--host"] : []),
-      ]);
+      rejectUnknown(
+        parsed,
+        runtimeOptions([
+          "--view",
+          "--cursor",
+          "--limit",
+          "--timeout-ms",
+          ...(command === "read" ? ["--host"] : []),
+        ]),
+      );
       if (parsed.positionals.length !== 1)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -474,7 +485,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "watch") {
-      rejectUnknown(parsed, ["--notify", "--timeout-ms"]);
+      rejectUnknown(parsed, runtimeOptions(["--notify", "--timeout-ms"]));
       if (parsed.positionals.length !== 1)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -502,7 +513,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "watches") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, runtimeOptions([]));
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -512,7 +523,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "list") {
-      rejectUnknown(parsed, ["--cwd", "--parent", "--limit", "--cursor", "--sort"]);
+      rejectUnknown(parsed, runtimeOptions(["--cwd", "--parent", "--limit", "--cursor", "--sort"]));
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",

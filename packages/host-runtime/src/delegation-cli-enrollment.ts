@@ -21,12 +21,22 @@ import {
 } from "./client-enrollment-store.js";
 import type { DelegationCliArguments } from "./delegation-cli-options.js";
 import {
+  DELEGATION_ENROLL_CLIENT_ENV,
   DELEGATION_RUNTIME_ENDPOINT_ENV,
   DELEGATION_RUNTIME_TOKEN_ENV,
   DELEGATION_THREAD_ID_ENV,
   NATIVE_CODEX_THREAD_ID_ENV,
   DelegationControlError,
 } from "./delegation-types.js";
+
+export const ENROLLED_CLIENT_OPTION = "--enrolled-client";
+
+const HOST_IDENTITY_ENVS = [
+  DELEGATION_RUNTIME_ENDPOINT_ENV,
+  DELEGATION_RUNTIME_TOKEN_ENV,
+  DELEGATION_THREAD_ID_ENV,
+  NATIVE_CODEX_THREAD_ID_ENV,
+] as const;
 
 export interface CliRuntimeConnection {
   endpoint: string;
@@ -64,6 +74,35 @@ function option(parsed: DelegationCliArguments, name: string): string | undefine
   return parsed.options.get(name);
 }
 
+function presentEnv(environment: NodeJS.ProcessEnv, names: readonly string[]): string[] {
+  return names.filter((name) => Boolean(environment[name]));
+}
+
+function enrollmentRecovery(reason: unknown, clientId: string): string | undefined {
+  if (reason === "expired" || reason === "missing_store" || reason === "consent_ui_unavailable") {
+    return `Request a new enrollment from an authorized Host session: codexhost enroll --client ${clientId} --machine`;
+  }
+  if (reason === "insecure_store_mode") {
+    return "Re-enroll from an authorized Host session. Do not chmod a store whose origin is untrusted.";
+  }
+  return undefined;
+}
+
+function annotateEnrollmentClientError(
+  error: unknown,
+  details: { clientId: string; storePath: string },
+): never {
+  if (!(error instanceof DelegationControlError)) throw error;
+  const reason = error.details?.reason;
+  const recovery = enrollmentRecovery(reason, details.clientId);
+  throw new DelegationControlError(error.code, error.message, {
+    ...error.details,
+    clientId: details.clientId,
+    storePath: details.storePath,
+    ...(recovery ? { recovery } : {}),
+  });
+}
+
 export function rejectEnrollmentAttackOptions(
   environment: NodeJS.ProcessEnv,
   parsed: DelegationCliArguments,
@@ -79,12 +118,146 @@ export function rejectEnrollmentAttackOptions(
   });
 }
 
+export function selectedEnrollmentClientId(
+  parsed: DelegationCliArguments,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const enrolled = option(parsed, ENROLLED_CLIENT_OPTION);
+  const client = option(parsed, "--client");
+  if (enrolled && client && enrolled !== client) {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "--client and --enrolled-client must name the same client",
+    );
+  }
+  return parseEnrollmentClientId(
+    enrolled ?? client ?? environment[DELEGATION_ENROLL_CLIENT_ENV] ?? DEFAULT_ENROLLMENT_CLIENT_ID,
+  );
+}
+
+export function inspectCliAuthentication(input: {
+  environment: NodeJS.ProcessEnv;
+  parsed: DelegationCliArguments;
+  clientId: string;
+  enrollmentThreadId?: string;
+}): {
+  source: "host-session" | "incomplete-host-session" | "enrollment";
+  clientId: string;
+  callerThreadId?: string;
+  ignoredAmbient: string[];
+  missingEnvironmentVariables?: string[];
+} {
+  const enrolled = option(input.parsed, ENROLLED_CLIENT_OPTION);
+  const endpoint = input.environment[DELEGATION_RUNTIME_ENDPOINT_ENV];
+  const token = input.environment[DELEGATION_RUNTIME_TOKEN_ENV];
+  if (enrolled) {
+    return {
+      source: "enrollment",
+      clientId: input.clientId,
+      ...(input.enrollmentThreadId ? { callerThreadId: input.enrollmentThreadId } : {}),
+      ignoredAmbient: presentEnv(input.environment, HOST_IDENTITY_ENVS),
+    };
+  }
+  if (Boolean(endpoint) !== Boolean(token)) {
+    return {
+      source: "incomplete-host-session",
+      clientId: input.clientId,
+      ignoredAmbient: [],
+      missingEnvironmentVariables: [
+        ...(!endpoint ? [DELEGATION_RUNTIME_ENDPOINT_ENV] : []),
+        ...(!token ? [DELEGATION_RUNTIME_TOKEN_ENV] : []),
+      ],
+    };
+  }
+  if (endpoint && token) {
+    const callerThreadId =
+      input.environment[DELEGATION_THREAD_ID_ENV] ||
+      input.environment[NATIVE_CODEX_THREAD_ID_ENV] ||
+      undefined;
+    return {
+      source: "host-session",
+      clientId: input.clientId,
+      ...(callerThreadId ? { callerThreadId } : {}),
+      ignoredAmbient: [],
+    };
+  }
+  return {
+    source: "enrollment",
+    clientId: input.clientId,
+    ...(input.enrollmentThreadId ? { callerThreadId: input.enrollmentThreadId } : {}),
+    ignoredAmbient: presentEnv(input.environment, [
+      DELEGATION_THREAD_ID_ENV,
+      NATIVE_CODEX_THREAD_ID_ENV,
+    ]),
+  };
+}
+
+function explicitEnrollmentClientSelected(
+  parsed: DelegationCliArguments,
+  environment: NodeJS.ProcessEnv,
+): boolean {
+  return Boolean(
+    option(parsed, ENROLLED_CLIENT_OPTION) ||
+    option(parsed, "--client") ||
+    environment[DELEGATION_ENROLL_CLIENT_ENV],
+  );
+}
+
+async function loadEnrollmentConnection(input: {
+  environment: NodeJS.ProcessEnv;
+  clientId: string;
+  nowMs: number;
+  explicit: boolean;
+}): Promise<CliRuntimeConnection> {
+  const storePath = enrollmentStorePath(input.environment, input.clientId);
+  try {
+    const [record, liveEndpoint] = await Promise.all([
+      readEnrollmentStore(storePath, input.nowMs, input.clientId),
+      readLiveEnrollmentEndpoint(input.environment),
+    ]);
+    if (!record) {
+      if (input.explicit) {
+        throw enrollmentError(
+          "ENROLLMENT_INVALID",
+          "No enrollment store is present",
+          "missing_store",
+          { clientId: input.clientId, storePath },
+        );
+      }
+      throw missingRuntimeEnvironmentError(undefined, undefined);
+    }
+    return {
+      endpoint: enrollmentClientEndpoint(record, liveEndpoint),
+      token: record.token,
+      callerThreadId: record.threadId,
+      source: "enrollment",
+    };
+  } catch (error) {
+    if (
+      error instanceof DelegationControlError &&
+      error.details?.reason === "missing_runtime_environment"
+    ) {
+      throw error;
+    }
+    annotateEnrollmentClientError(error, { clientId: input.clientId, storePath });
+  }
+}
+
 export async function resolveCliRuntimeConnection(input: {
   environment: NodeJS.ProcessEnv;
   parsed: DelegationCliArguments;
   nowMs: number;
 }): Promise<CliRuntimeConnection> {
   rejectEnrollmentAttackOptions(input.environment, input.parsed);
+  const enrolledClient = option(input.parsed, ENROLLED_CLIENT_OPTION);
+  if (enrolledClient) {
+    return loadEnrollmentConnection({
+      environment: input.environment,
+      clientId: parseEnrollmentClientId(enrolledClient),
+      nowMs: input.nowMs,
+      explicit: true,
+    });
+  }
   const endpoint = input.environment[DELEGATION_RUNTIME_ENDPOINT_ENV];
   const token = input.environment[DELEGATION_RUNTIME_TOKEN_ENV];
   if (endpoint && token) {
@@ -100,22 +273,13 @@ export async function resolveCliRuntimeConnection(input: {
     };
   }
   if (endpoint || token) throw missingRuntimeEnvironmentError(endpoint, token);
-  const clientId = parseEnrollmentClientId(
-    option(input.parsed, "--client") ??
-      input.environment.CODEXHOST_ENROLL_CLIENT ??
-      DEFAULT_ENROLLMENT_CLIENT_ID,
-  );
-  const [record, liveEndpoint] = await Promise.all([
-    readEnrollmentStore(enrollmentStorePath(input.environment, clientId), input.nowMs),
-    readLiveEnrollmentEndpoint(input.environment),
-  ]);
-  if (!record) throw missingRuntimeEnvironmentError(undefined, undefined);
-  return {
-    endpoint: enrollmentClientEndpoint(record, liveEndpoint),
-    token: record.token,
-    callerThreadId: record.threadId,
-    source: "enrollment",
-  };
+  const clientId = selectedEnrollmentClientId(input.parsed, input.environment);
+  return loadEnrollmentConnection({
+    environment: input.environment,
+    clientId,
+    nowMs: input.nowMs,
+    explicit: explicitEnrollmentClientSelected(input.parsed, input.environment),
+  });
 }
 
 function enrollmentClientEndpoint(
@@ -227,21 +391,57 @@ export async function runEnrollStatus(input: {
   parsed: DelegationCliArguments;
   nowMs: number;
 }): Promise<{
-  view: ReturnType<typeof publicEnrollmentView> & { storePath: string };
+  view: ReturnType<typeof publicEnrollmentView> & {
+    storePath: string;
+    authentication: ReturnType<typeof inspectCliAuthentication>;
+  };
   storePath: string;
 }> {
   rejectEnrollmentAttackOptions(input.environment, input.parsed);
-  const clientId = parseEnrollmentClientId(
-    option(input.parsed, "--client") ?? DEFAULT_ENROLLMENT_CLIENT_ID,
-  );
+  const clientId = selectedEnrollmentClientId(input.parsed, input.environment);
   const storePath = enrollmentStorePath(input.environment, clientId);
-  const record = await readEnrollmentStore(storePath, input.nowMs);
-  if (!record) {
-    throw new DelegationControlError("ENROLLMENT_INVALID", "No enrollment store is present", {
-      reason: "missing_store",
+  try {
+    const record = await readEnrollmentStore(storePath, input.nowMs, clientId);
+    if (!record) {
+      throw enrollmentError(
+        "ENROLLMENT_INVALID",
+        "No enrollment store is present",
+        "missing_store",
+        {
+          clientId,
+          storePath,
+        },
+      );
+    }
+    const authentication = inspectCliAuthentication({
+      environment: input.environment,
+      parsed: input.parsed,
+      clientId,
+      enrollmentThreadId: record.threadId,
     });
+    return {
+      storePath,
+      view: { ...publicEnrollmentView(record), storePath, authentication },
+    };
+  } catch (error) {
+    if (error instanceof DelegationControlError) {
+      const authentication = inspectCliAuthentication({
+        environment: input.environment,
+        parsed: input.parsed,
+        clientId,
+      });
+      const reason = error.details?.reason;
+      const recovery = enrollmentRecovery(reason, clientId);
+      throw new DelegationControlError(error.code, error.message, {
+        ...error.details,
+        clientId,
+        storePath,
+        authentication,
+        ...(recovery ? { recovery } : {}),
+      });
+    }
+    throw error;
   }
-  return { storePath, view: { ...publicEnrollmentView(record), storePath } };
 }
 
 export async function runEnrollRevoke(input: {
@@ -255,17 +455,23 @@ export async function runEnrollRevoke(input: {
   ) => Promise<unknown>;
 }): Promise<{ enrollmentId: string; revoked: true; storePath: string }> {
   rejectEnrollmentAttackOptions(input.environment, input.parsed);
-  const clientId = parseEnrollmentClientId(
-    option(input.parsed, "--client") ?? DEFAULT_ENROLLMENT_CLIENT_ID,
-  );
+  const clientId = selectedEnrollmentClientId(input.parsed, input.environment);
   const storePath = enrollmentStorePath(input.environment, clientId);
-  const [record, liveEndpoint] = await Promise.all([
-    readEnrollmentStore(storePath, input.nowMs),
-    readLiveEnrollmentEndpoint(input.environment),
-  ]);
+  let record: EnrollmentRecord | undefined;
+  let liveEndpoint: string | undefined;
+  try {
+    [record, liveEndpoint] = await Promise.all([
+      readEnrollmentStore(storePath, input.nowMs, clientId),
+      readLiveEnrollmentEndpoint(input.environment),
+    ]);
+  } catch (error) {
+    annotateEnrollmentClientError(error, { clientId, storePath });
+  }
   if (!record) {
     throw new DelegationControlError("ENROLLMENT_INVALID", "No enrollment store is present", {
       reason: "revoked",
+      clientId,
+      storePath,
     });
   }
   await input.request(

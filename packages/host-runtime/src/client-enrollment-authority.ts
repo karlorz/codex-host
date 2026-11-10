@@ -22,8 +22,7 @@ import {
   type EnrollmentRequestAction,
 } from "./client-enrollment.js";
 import {
-  createTimeoutEnrollmentConsent,
-  DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS,
+  createUnavailableEnrollmentConsent,
   type EnrollmentConsent,
 } from "./client-enrollment-consent.js";
 import {
@@ -77,11 +76,7 @@ export class EnrollmentAuthority {
   }) {
     this.#hostToken = input.hostToken;
     this.#bootstrapToken = input.bootstrapToken ?? randomBytes(32).toString("hex");
-    this.#consent =
-      input.consent ??
-      createTimeoutEnrollmentConsent({
-        timeoutMs: DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS,
-      });
+    this.#consent = input.consent ?? createUnavailableEnrollmentConsent();
     this.#dataDirectory = input.dataDirectory;
     this.#now = input.now ?? Date.now;
     this.#createId = input.createId ?? randomUUID;
@@ -211,8 +206,15 @@ export class EnrollmentAuthority {
     if (decision === "deny") {
       throw enrollmentError("ENROLLMENT_DENIED", "Enrollment was denied", "denied");
     }
-    if (decision !== "approve") {
+    if (decision === "timeout") {
       throw enrollmentError("ENROLLMENT_DENIED", "Enrollment timed out", "timeout");
+    }
+    if (decision !== "approve") {
+      throw enrollmentError(
+        "ENROLLMENT_DENIED",
+        "Desktop has no enrollment consent UI. Request enrollment from an authorized Host session.",
+        "consent_ui_unavailable",
+      );
     }
     if (pairing === "machine") this.#revokeActiveForClient(clientId);
     const enrollmentId = this.#createId();

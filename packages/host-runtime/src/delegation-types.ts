@@ -12,6 +12,8 @@ export const DELEGATION_CLI_PATH_ENV = "CODEXHOST_CLI_PATH";
 /** Node for the Launcher's delegation CLI in npm installations; read only by the Launcher. */
 export const DELEGATION_CLI_NODE_PATH_ENV = "CODEXHOST_CLI_NODE_PATH";
 export const DELEGATION_THREAD_ID_ENV = "CODEXHOST_THREAD_ID";
+/** Non-secret local enrollment client selector. Not a token. */
+export const DELEGATION_ENROLL_CLIENT_ENV = "CODEXHOST_ENROLL_CLIENT";
 /**
  * Native Codex shares one app-server across Threads, so the Host cannot set
  * CODEXHOST_THREAD_ID per Thread; Codex exports the calling Thread here instead.
@@ -319,4 +321,14 @@ export class DelegationControlError extends Error {
     super(message);
     this.name = "DelegationControlError";
   }
+}
+
+export const THREAD_BUSY_MESSAGE =
+  "Thread already has an active Turn; no new Turn started. Wait or read until idle, then retry. Cancellation requires a separate cancel grant.";
+
+export function threadBusyError(threadId: string): DelegationControlError {
+  return new DelegationControlError("THREAD_BUSY", THREAD_BUSY_MESSAGE, {
+    threadId,
+    notStarted: true,
+  });
 }

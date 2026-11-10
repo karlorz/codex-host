@@ -15,10 +15,14 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function formatExpiry(view: EnrollmentPublicView, messages: RendererSettingsMessages): string {
-  if (view.pairing === "machine") return messages.enrollment.untilRevoked;
   const parsed = Date.parse(view.expiresAt);
-  if (!Number.isFinite(parsed)) return view.expiresAt;
-  return new Date(parsed).toLocaleString(messages.locale);
+  const formatted = Number.isFinite(parsed)
+    ? new Date(parsed).toLocaleString(messages.locale)
+    : view.expiresAt;
+  if (view.pairing === "machine") {
+    return messages.enrollment.validUntilUnlessRevoked.replace("%s", formatted);
+  }
+  return formatted;
 }
 
 function formatAllowlist(view: EnrollmentPublicView): string {

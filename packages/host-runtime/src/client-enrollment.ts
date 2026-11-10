@@ -9,7 +9,7 @@ import type { DelegationThreadListResult, ThreadWatchListResult } from "./delega
 /** Fixture parent Thread from the enrollment design; never an enrolled client's identity. */
 export const FIXTURE_PARENT_THREAD_ID = "70afcd8a-2124-44e3-aa9d-9a7d4695f97c";
 
-export const ENROLLMENT_VERBS = ["read", "watch", "send"] as const;
+export const ENROLLMENT_VERBS = ["read", "watch", "send", "cancel"] as const;
 export type EnrollmentVerb = (typeof ENROLLMENT_VERBS)[number];
 
 export const DEFAULT_ENROLLMENT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -48,6 +48,8 @@ export interface EnrollmentRecord {
 export type EnrollmentFailureReason =
   | "denied"
   | "timeout"
+  | "consent_ui_unavailable"
+  | "client_mismatch"
   | "revoked"
   | "expired"
   | "clock_skew"
@@ -85,7 +87,7 @@ export function parseEnrollmentClientId(value: string): string {
   if (!CLIENT_ID_PATTERN.test(value)) {
     throw new DelegationControlError(
       "INVALID_ARGUMENT",
-      "--client must be a lowercase id such as grok-bot",
+      "client id must be a lowercase id such as grok-bot",
     );
   }
   return value;
@@ -316,6 +318,8 @@ export function verifyEnrollmentRecord(
   if (nowMs > expiresAt) {
     throw enrollmentError("ENROLLMENT_INVALID", "Enrollment token has expired", "expired", {
       enrollmentId: record.enrollmentId,
+      clientId: record.clientId,
+      expiresAt: record.expiresAt,
     });
   }
 }
@@ -374,13 +378,22 @@ export function authorizeEnrollment(
       }
       return;
     case "send":
-    case "cancel":
       if (!entryAllows(record, action.threadId, "send")) {
         throw enrollmentError(
           "UNAUTHORIZED_TARGET",
           "Thread is not allowlisted for send",
           "denied",
           { threadId: action.threadId, verb: "send" },
+        );
+      }
+      return;
+    case "cancel":
+      if (!entryAllows(record, action.threadId, "cancel")) {
+        throw enrollmentError(
+          "UNAUTHORIZED_TARGET",
+          "Thread is not allowlisted for cancel",
+          "denied",
+          { threadId: action.threadId, verb: "cancel" },
         );
       }
       return;

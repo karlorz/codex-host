@@ -16,10 +16,7 @@ import { DelegationControlRegistry } from "./delegation-control-registry.js";
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import { startDelegationControlServer } from "./delegation-control-server.js";
 import { EnrollmentAuthority } from "./client-enrollment-authority.js";
-import {
-  createTimeoutEnrollmentConsent,
-  DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS,
-} from "./client-enrollment-consent.js";
+import { createUnavailableEnrollmentConsent } from "./client-enrollment-consent.js";
 import { codexhostDataDirectory } from "./client-enrollment-store.js";
 import { retireCodexhostDesktopRules } from "./codexhost-desktop-rule.js";
 import { installDelegationSkills } from "./delegation-skill.js";
@@ -186,7 +183,7 @@ async function prepareDelegationRuntime(input: {
   const enrollment = new EnrollmentAuthority({
     hostToken: token,
     dataDirectory: codexhostDataDirectory(input.environment),
-    consent: createTimeoutEnrollmentConsent({ timeoutMs: DEFAULT_ENROLLMENT_CONSENT_TIMEOUT_MS }),
+    consent: createUnavailableEnrollmentConsent(),
   });
   const server = await startDelegationControlServer({
     token,

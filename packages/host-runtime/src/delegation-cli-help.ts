@@ -18,25 +18,27 @@ Do not silently replace a requested Model with the Harness default. Pass --fallb
 Reuse --request-id for an idempotent retry. Identical recent parent/target/task/configuration requests are also deduplicated briefly.
 --watch true also registers thread watch on the child with the resolved parent as the notified Thread; the response's watch field reports whether it was registered.
 The response confirms cwd and parent. Use its Thread reference with thread read, wait, send, cancel, or watch.`,
-  "thread send": `codexhost thread send <thread> --message <text> [--format json|compact]
+  "thread send": `codexhost thread send <thread> --message <text> [--enrolled-client <id>] [--format json|compact]
 Start a new Turn in an idle writable Thread and return immediately.
-THREAD_BUSY means the current Turn is still active: wait or cancel before sending. Messages are not queued.
+THREAD_BUSY means the target already has an active Turn. No new Turn started. Wait or read until idle, then send again. Messages are not queued. Cancellation requires a cancel grant, distinct from send. For an enrolled client, THREAD_BUSY is returned after allowlist authorization.
+--enrolled-client uses that enrollment even when Host Runtime env is set. A missing or invalid enrollment fails without using Host credentials.
 To be notified when that Turn ends, run thread watch after sending.`,
-  "thread cancel": `codexhost thread cancel <thread> [--format json|compact]
+  "thread cancel": `codexhost thread cancel <thread> [--enrolled-client <id>] [--format json|compact]
 Request cancellation of the active Turn while preserving the Thread and history.
-cancelled=true (compact: cancelRequested=true) means the cancellation request was accepted. Read or wait to confirm the terminal state. An idle Thread returns false.`,
-  "thread read": `codexhost thread read <thread> [--host <hostId>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
+cancelled=true (compact: cancelRequested=true) means the cancellation request was accepted. Read or wait to confirm the terminal state. An idle Thread returns false.
+Enrolled clients need an explicit cancel grant; send does not authorize cancel.`,
+  "thread read": `codexhost thread read <thread> [--host <hostId>] [--enrolled-client <id>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
 Read immediately without starting a Turn. Accepts thread://<id>?hostId=<encoded-host-id> or --host with a bare ID. Explicit remote Hosts use the existing Desktop connection, never local fallback. Requires updated local and remote codexhost; remote send/wait/watch are not supported.
 The default result view reports the latest Turn's status and result. When a newer Turn is running, lastCompleted holds the previous terminal Turn's result so compact output does not hide it.
 The messages view pages visible user/Agent messages, oldest first. Default limit 25, maximum 100; --cursor and --limit require --view messages.
 hasMore describes remaining messages now. Save nextCursor for later incremental reads even when hasMore=false.
 Compact messages output contains only the message page and status; compact result output includes the latest nonempty progress while running.
 Full JSON retains the complete snapshot. Tool calls/output, file activity, and reasoning are not included in either format.`,
-  "thread wait": `codexhost thread wait <thread> [--timeout-ms <n>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
+  "thread wait": `codexhost thread wait <thread> [--timeout-ms <n>] [--enrolled-client <id>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
 Wait until the Thread is terminal or the timeout expires (default 30000 ms), then return the same snapshot as thread read plus timedOut.
 timedOut=true is a running checkpoint: the child keeps running. The response already includes the result when available; another read is unnecessary unless more information is needed.
 Message pagination uses --view messages, default limit 25, maximum 100. hasMore is for current pages; nextCursor also supports future incremental reads.`,
-  "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--format json|compact]
+  "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--enrolled-client <id>] [--format json|compact]
 Ask the Host to notify one Thread, once, when the watched Thread stops. Returns immediately; no waiting or polling by the caller is needed, and the caller may end its Turn.
 --notify defaults to the calling Thread when it is identified (CODEXHOST_THREAD_ID, or CODEX_THREAD_ID in native Codex); otherwise it is required. delegate start reports the caller as its parent.
 The notification starts a new Turn in the notified Thread with the watched Thread's link and outcome: completed, failed, interrupted, timedOut, unreadable, or notFound; a terminal outcome names the Turn it came from, including turn index and turnStatus when known. completed waits a quiet period (default 8s) so a follow-up Turn can start before the watch fires. failed and interrupted notify immediately. It reports execution state only; read the Thread to judge the work.
@@ -44,24 +46,26 @@ The notification starts a new Turn in the notified Thread with the watched Threa
 state=watching means registered. state=alreadyTerminal means the Thread was not running: nothing was registered and nothing will be sent.
 A busy notified Thread is notified after its Turn ends (retried for up to 6 hours); notifications due together arrive as one message. THREAD_BUSY is never treated as delivered.
 A watch is one-shot and cannot be cancelled. Watching the same pair again while it is still watched returns that watch; once it has stopped, a new watch covers the next stop and any pending notification is still delivered. Watches live in Host Runtime memory and are lost when it restarts.`,
-  "thread watches": `codexhost thread watches [--format json|compact]
+  "thread watches": `codexhost thread watches [--enrolled-client <id>] [--format json|compact]
 List watches that have not been delivered: watching, pendingDelivery (waiting for the notified Thread), or undeliverable (with the reason). Delivered watches are removed.`,
-  "thread list": `codexhost thread list [--cwd <path>] [--parent <thread>] [--limit <n>] [--cursor <cursor>] [--sort created-asc|created-desc|updated-asc|updated-desc|recency-asc|recency-desc] [--format json|compact]
+  "thread list": `codexhost thread list [--cwd <path>] [--parent <thread>] [--limit <n>] [--cursor <cursor>] [--sort created-asc|created-desc|updated-asc|updated-desc|recency-asc|recency-desc] [--enrolled-client <id>] [--format json|compact]
 Find existing Threads by workspace, or use --parent to list a Thread's delegated children.
 Workspace listing defaults to the caller process cwd. Default limit 25 (maximum 100), sorted created-desc.
 --parent uses Delegation relationships. A null nextCursor ends the list.
 Compact output keeps task links, Harness, status, title, and workspace.`,
   enroll: `codexhost enroll --client <id> [--allow <threadId:verb[,verb][;...]>] [--executable <path>] [--machine] [--session] [--format json|compact]
 Request attended Host enrollment for a local client such as grok-bot.
-Desktop shows the client, executable path, Thread allowlist, and verbs for Approve/Deny.
+Request enrollment from an authorized Host session. Unmanaged bootstrap has no Desktop consent UI and fails immediately with consent_ui_unavailable. Host-authenticated enroll auto-approves under that session's attended authorization.
 On Approve, Host issues a distinct enrollment_id, Thread id, and token, and the CLI writes a user-private mode-600 store.
-The allowlist defaults to empty besides the new Thread (read/watch/send). Parent Thread access requires an explicit allowlist entry.
-Enrollment defaults to machine pairing until revoke, like an SSH authorized key: a Host-authenticated session reuses the same client and allowlist without a new consent. Unmanaged bootstrap still times out. Changing the allowlist is a new trust step. enroll revoke removes the key. --session issues a 24-hour token.
+The allowlist defaults to empty besides the new Thread (read/watch/send/cancel). Parent Thread access requires an explicit allowlist entry. send does not grant cancel; list cancel explicitly.
+Enrollment defaults to machine pairing with a recorded expiry (ten years unless revoked sooner), like an SSH authorized key: a Host-authenticated session reuses the same client and allowlist without a new consent. Changing the allowlist is a new trust step. enroll revoke removes the key. --session issues a 24-hour token.
 Does not copy another process's Runtime environment, a Runtime descriptor, or a parent env file.`,
-  "enroll status": `codexhost enroll status [--client <id>] [--format json|compact]
-Show the local enrollment store for this login without printing the token.`,
-  "enroll revoke": `codexhost enroll revoke [--client <id>] [--format json|compact]
-Revoke the enrollment at the Host Runtime and delete the local store. Later commands fail closed.`,
+  "enroll status": `codexhost enroll status [--client <id>] [--enrolled-client <id>] [--format json|compact]
+Show the local enrollment store for this login without printing the token.
+Selects the client from --client, --enrolled-client, or CODEXHOST_ENROLL_CLIENT (default grok-bot). Reports authentication.source for what thread commands would use: host-session when both Host Runtime variables are set, incomplete-host-session with missing variable names when only one is set, enrollment when --enrolled-client is set or both Host Runtime variables are absent. Invalid stores fail closed with client, path, and reason (expired, insecure_store_mode, missing_store).`,
+  "enroll revoke": `codexhost enroll revoke [--client <id>] [--enrolled-client <id>] [--format json|compact]
+Revoke the enrollment at the Host Runtime and delete the local store. Later commands fail closed.
+Uses the same client selector as enroll status.`,
   "enroll serve": `codexhost enroll serve --client <id> --listen <tailscale-ipv4> [--port 4398] --export-file <absolute-path>
 Serve one existing local enrollment over Tailscale without restarting Desktop.
 Accepts only that client's token and forwards read/send/status/revoke to the live loopback Runtime from the local enroll bootstrap when present.
@@ -112,7 +116,9 @@ function groupHelp(group: string): string {
   const usages = Object.entries(COMMAND_HELP)
     .filter(([name]) => name === group || name.startsWith(`${group} `))
     .map(([, help]) => help.split("\n")[0]);
-  return `${usages.join("\n")}\n\n${COMMON_HELP}\n`;
+  const enrollDetail =
+    group === "enroll" ? `\n${COMMAND_HELP.enroll.split("\n").slice(1).join("\n")}\n` : "";
+  return `${usages.join("\n")}\n${enrollDetail}\n${COMMON_HELP}\n`;
 }
 
 export function delegationCliHelp(arguments_: readonly string[]): string | undefined {

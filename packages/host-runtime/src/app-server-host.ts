@@ -255,6 +255,7 @@ import {
   DELEGATION_RUNTIME_TOKEN_ENV,
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
+  threadBusyError,
 } from "./delegation-types.js";
 import { resolveDelegationStartConfiguration } from "./delegation-model-validation.js";
 import { HarnessDelegationCoordinator } from "./harness-delegation-coordinator.js";
@@ -2968,7 +2969,7 @@ export class AppServerHost {
       throw new DelegationControlError("INVALID_ARGUMENT", "Message must not be empty");
     }
     if (this.#activeOfficialTurns.has(input.threadId)) {
-      throw new DelegationControlError("THREAD_BUSY", "Thread already has an active Turn");
+      throw threadBusyError(input.threadId);
     }
     const current = await this.#requestOfficial("thread/read", {
       threadId: input.threadId,
@@ -2980,7 +2981,7 @@ export class AppServerHost {
     }
     const currentThread = isRecord(current.result.thread) ? current.result.thread : null;
     if (officialThreadBusy(currentThread)) {
-      throw new DelegationControlError("THREAD_BUSY", "Thread already has an active Turn");
+      throw threadBusyError(input.threadId);
     }
     // Read stays idle after unsubscribe and does not resubscribe. Resume does, and
     // excludeTurns keeps paginated history out of the response without replacing config.
@@ -3006,7 +3007,7 @@ export class AppServerHost {
       );
     }
     if (officialThreadBusy(resumedThread)) {
-      throw new DelegationControlError("THREAD_BUSY", "Thread already has an active Turn");
+      throw threadBusyError(input.threadId);
     }
     if (!isRecord(resumedThread.status) || resumedThread.status.type !== "idle") {
       throw new DelegationControlError(

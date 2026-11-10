@@ -24,6 +24,23 @@ import { matchesBearerToken } from "./bearer-token.js";
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 
+function annotateEnrollmentBusy(
+  error: unknown,
+  principal: EnrollmentPrincipal | undefined,
+): unknown {
+  if (
+    !(error instanceof DelegationControlError) ||
+    error.code !== "THREAD_BUSY" ||
+    principal?.kind !== "enrollment"
+  ) {
+    return error;
+  }
+  return new DelegationControlError(error.code, error.message, {
+    ...error.details,
+    authorized: true,
+  });
+}
+
 function errorBody(error: unknown): {
   error: { code: string; message: string; details?: unknown };
 } {
@@ -163,6 +180,7 @@ export async function startDelegationControlServer(input: {
   enrollment?: EnrollmentAuthority;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
+    let principal: EnrollmentPrincipal | undefined;
     void (async () => {
       if (request.method !== "POST") {
         writeJson(response, 405, {
@@ -200,7 +218,7 @@ export async function startDelegationControlServer(input: {
         writeJson(response, 200, record);
         return;
       }
-      const principal = authenticateControlRequest(
+      principal = authenticateControlRequest(
         request.headers.authorization,
         input.token,
         input.enrollment,
@@ -294,7 +312,8 @@ export async function startDelegationControlServer(input: {
           throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
       }
     })().catch((error) => {
-      writeJson(response, enrollmentHttpStatus(error), errorBody(error));
+      const annotated = annotateEnrollmentBusy(error, principal);
+      writeJson(response, enrollmentHttpStatus(annotated), errorBody(annotated));
     });
   });
   await new Promise<void>((resolve, reject) => {

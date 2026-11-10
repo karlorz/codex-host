@@ -48,6 +48,10 @@ export function isPrivateFileMode(mode: number): boolean {
   return (mode & 0o777) === 0o600;
 }
 
+export function posixFileMode(mode: number): string {
+  return (mode & 0o777).toString(8).padStart(3, "0");
+}
+
 export async function writePrivateJsonFile(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(path.dirname(filePath), 0o700);
@@ -151,6 +155,7 @@ export async function readRuntimeEnrollmentRecords(filePath: string): Promise<En
       "ENROLLMENT_INVALID",
       "Runtime enrollment records are not user-private mode 600",
       "insecure_store_mode",
+      { observedMode: posixFileMode(mode), requiredMode: "600" },
     );
   }
   let parsed: unknown;
@@ -180,6 +185,7 @@ export async function writeEnrollmentStore(
 export async function readEnrollmentStore(
   filePath: string,
   nowMs: number,
+  expectedClientId?: string,
 ): Promise<EnrollmentRecord | undefined> {
   let text: string;
   let mode: number;
@@ -204,6 +210,7 @@ export async function readEnrollmentStore(
       "ENROLLMENT_INVALID",
       "Enrollment store is not user-private mode 600",
       "insecure_store_mode",
+      { observedMode: posixFileMode(mode), requiredMode: "600" },
     );
   }
   let parsed: unknown;
@@ -220,6 +227,14 @@ export async function readEnrollmentStore(
     throw enrollmentError("ENROLLMENT_INVALID", "Enrollment store is invalid", "allowlist_tamper");
   }
   verifyEnrollmentRecord(parsed, nowMs);
+  if (expectedClientId !== undefined && parsed.clientId !== expectedClientId) {
+    throw enrollmentError(
+      "ENROLLMENT_INVALID",
+      "Enrollment store belongs to a different client",
+      "client_mismatch",
+      { clientId: expectedClientId, storedClientId: parsed.clientId, storePath: filePath },
+    );
+  }
   return parsed;
 }
 
@@ -267,6 +282,7 @@ export async function readEnrollmentBootstrap(
       "ENROLLMENT_INVALID",
       "Enrollment bootstrap is not user-private mode 600",
       "insecure_store_mode",
+      { observedMode: posixFileMode(mode), requiredMode: "600" },
     );
   }
   let parsed: unknown;
