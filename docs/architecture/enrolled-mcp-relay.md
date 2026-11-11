@@ -274,7 +274,7 @@ Live checks that stay true:
 - Allowlisted `thread_read` and unauthorized UUID `UNAUTHORIZED_TARGET` from Muse.
 - Idle `thread_send` starts a Turn. `--view messages` pages oldest-first (default 25, max 100); `nextCursor` reaches the user text for those Turns.
 - Enrolled `THREAD_BUSY` on an already-running grok Thread returns `authorized`/`notStarted` and starts no Turn. Bounded `thread_wait` returns `timedOut` while that Turn is still running.
-- Hop operator `list-clients` / `revoke-client` cut the Muse OAuth grant. File revoke plus one hop restart loads the revoked store. Unauthenticated `POST /mcp` stays 401 with `resource_metadata`; a revoked bearer is 401 without it. Mac enrollment is unchanged. Karl reconnects the Muse connector after cutover.
+- Hop operator `list-clients` / `revoke-client` cut the Muse OAuth grant (2026-11-11). File revoke plus one hop restart loaded the revoked store. Unauthenticated `POST /mcp` stays 401 with `resource_metadata`. Mac enrollment is unchanged. Mac `enroll relay-link` reconnected. Karl reconnects the Muse connector after cutover.
 
 Open live checks:
 
