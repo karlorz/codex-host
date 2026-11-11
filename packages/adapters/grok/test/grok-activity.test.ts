@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,13 +9,19 @@ import {
   parseGrokTaskList,
   readGrokScheduledLoops,
 } from "../src/grok-activity.js";
+import { grokScheduledTaskIdFromPrompt } from "../src/grok-scheduled-origin.js";
 import { applyGrokScheduledEvent, type GrokScheduledLoop } from "../src/grok-background.js";
 
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function setup() {
+async function setup(
+  input: {
+    scheduledTaskIds?: Set<string>;
+    scheduledChildIds?: Set<string>;
+  } = {},
+) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "grok-activity-"));
   roots.push(directory);
   const loops = new Map<string, GrokScheduledLoop>();
@@ -53,6 +59,8 @@ async function setup() {
     outputLimit: 100,
     commandItemId: (id) => commandItems.get(id),
     isOpen: () => open,
+    ...(input.scheduledTaskIds ? { scheduledTaskIds: input.scheduledTaskIds } : {}),
+    ...(input.scheduledChildIds ? { scheduledChildIds: input.scheduledChildIds } : {}),
   });
   return {
     directory,
@@ -290,6 +298,47 @@ describe("Grok native background activity", () => {
       vi.useRealTimers();
     }
   });
+  it("bounds settled subagent rows and keeps a loop relatedActivityId resolvable", async () => {
+    const s = await setup();
+    for (let index = 0; index < 25; index++) {
+      s.children.set(`old-${index}`, {
+        subagentId: `old-${index}`,
+        nativeSubagentId: `old-${index}`,
+        description: `run ${index}`,
+        background: true,
+        status: "completed",
+      });
+    }
+    s.children.set("live", {
+      subagentId: "live",
+      nativeSubagentId: "live",
+      description: "live run",
+      background: true,
+      status: "running",
+    });
+    s.loops.set("l", {
+      taskId: "l",
+      prompt: "check",
+      humanSchedule: "every minute",
+      lastSubagentId: "old-0",
+    });
+    const listed = await s.activity.list();
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.value.filter((item) => item.kind === "subagent").map((item) => item.id)).toEqual([
+      "subagent:live",
+      ...Array.from({ length: 20 }, (_, index) => `subagent:old-${24 - index}`),
+      "subagent:old-0",
+    ]);
+    expect(listed.value).toContainEqual(
+      expect.objectContaining({ id: "loop:l", relatedActivityId: "subagent:old-0" }),
+    );
+    expect(listed.value.some((item) => item.id === "subagent:old-1")).toBe(false);
+    expect(await s.activity.read("subagent:old-0")).toMatchObject({
+      ok: true,
+      value: { activity: { id: "subagent:old-0", status: "completed" } },
+    });
+  });
   it("keeps a Loop separate from its real child and never stops unrelated children", async () => {
     const s = await setup();
     s.loops.set("l", {
@@ -346,5 +395,76 @@ describe("Grok native background activity", () => {
     expect(await s.activity.list()).toMatchObject({ ok: false, error: { code: "nativeFailure" } });
     s.close();
     expect(await s.activity.stop("task:r")).toMatchObject({ ok: false });
+  });
+  it("tags a history child from a matching meta.json prompt header and leaves ordinary children untagged", async () => {
+    const scheduledTaskIds = new Set(["task-1"]);
+    const s = await setup({ scheduledTaskIds });
+    const prompt =
+      "<system-reminder>\nScheduled task task-1 (every minute). Earlier iterations, if any, appear above.\nRun the task below.";
+    expect(grokScheduledTaskIdFromPrompt(prompt)).toBe("task-1");
+    await mkdir(path.join(s.directory, "subagents", "loop-child"), { recursive: true });
+    await writeFile(
+      path.join(s.directory, "subagents", "loop-child", "meta.json"),
+      JSON.stringify({ prompt }),
+    );
+    await mkdir(path.join(s.directory, "subagents", "helper"), { recursive: true });
+    await writeFile(
+      path.join(s.directory, "subagents", "helper", "meta.json"),
+      JSON.stringify({
+        prompt: "Investigate the helper task.",
+        description: "loop: looks scheduled but is not",
+      }),
+    );
+    s.children.set("loop-child", {
+      subagentId: "loop-child",
+      nativeSubagentId: "loop-child",
+      description: "loop: Fallback wake",
+      background: true,
+      status: "completed",
+    });
+    s.children.set("helper", {
+      subagentId: "helper",
+      nativeSubagentId: "helper",
+      description: "loop: looks scheduled but is not",
+      background: true,
+      status: "completed",
+    });
+    expect(await s.activity.list()).toMatchObject({ ok: true });
+    expect(s.children.get("loop-child")).toMatchObject({ origin: "scheduled" });
+    expect(s.children.get("helper")).not.toHaveProperty("origin");
+    expect(s.activity.subagents?.()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: expect.objectContaining({ nativeSubagentId: "loop-child", origin: "scheduled" }),
+        }),
+        expect.objectContaining({
+          state: expect.objectContaining({ nativeSubagentId: "helper" }),
+        }),
+      ]),
+    );
+    expect(
+      s.activity.subagents?.()?.find((entry) => entry.state.nativeSubagentId === "helper")?.state,
+    ).not.toHaveProperty("origin");
+  });
+  it("tags a live scheduled.fired child without reading description text", async () => {
+    const scheduledChildIds = new Set(["fired-child"]);
+    const s = await setup({ scheduledChildIds });
+    s.children.set("fired-child", {
+      subagentId: "fired-child",
+      nativeSubagentId: "fired-child",
+      description: "Disposable check",
+      background: true,
+      status: "running",
+    });
+    s.children.set("helper", {
+      subagentId: "helper",
+      nativeSubagentId: "helper",
+      description: "general-purpose helper",
+      background: true,
+      status: "running",
+    });
+    expect(await s.activity.list()).toMatchObject({ ok: true });
+    expect(s.children.get("fired-child")).toMatchObject({ origin: "scheduled" });
+    expect(s.children.get("helper")).not.toHaveProperty("origin");
   });
 });

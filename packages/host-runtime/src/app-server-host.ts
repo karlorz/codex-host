@@ -768,6 +768,7 @@ export class AppServerHost {
   #nextConsoleRequest = 0;
   #subagentThreadStatuses = new Map<string, "active" | "idle">();
   #runningSubagentsByParent = new Map<string, Set<string>>();
+  #scheduledOriginBackfilled = new Set<string>();
   #pendingExternalCommandRequests = new Set<string>();
   #manualCompactionTurns = new WeakMap<ExternalThread, HostTurnId>();
   #closeRequested = false;
@@ -1588,6 +1589,11 @@ export class AppServerHost {
           ...("activityId" in parsed.data ? { activityId: String(parsed.data.activityId) } : {}),
           isCurrent: () => this.#externalRuntime.get(thread.id) === thread,
           materialize: (child) => this.#materializeSubagent(thread, child),
+          lookup: async (child) => {
+            const record = await this.#repository.lookupSubagent(thread.record, child);
+            return record ? { ...child, subagentId: record.hostThreadId } : null;
+          },
+          afterList: () => this.#backfillScheduledSubagentOrigins(thread),
         });
         await this.#writer.json(
           result.error
@@ -6072,6 +6078,24 @@ export class AppServerHost {
     }
   }
 
+  async #backfillScheduledSubagentOrigins(parent: ExternalThread): Promise<void> {
+    if (this.#scheduledOriginBackfilled.has(parent.id)) return;
+    this.#scheduledOriginBackfilled.add(parent.id);
+    try {
+      const children = parent.session.backgroundActivity?.subagents?.() ?? [];
+      for (const { state } of children) {
+        if (state.origin !== "scheduled") continue;
+        const record = await this.#repository.lookupSubagent(parent.record, state);
+        if (!record?.subagent || record.subagent.origin !== undefined) continue;
+        const updated = await this.#repository.setSubagentOrigin(record.hostThreadId, "scheduled");
+        const loaded = this.#externalRuntime.get(updated.hostThreadId);
+        if (loaded) loaded.record = updated;
+      }
+    } catch (error) {
+      this.#diagnose(error);
+    }
+  }
+
   async #materializeSubagent(
     parent: ExternalThread,
     subagent: HostSubagentState,
@@ -6079,8 +6103,9 @@ export class AppServerHost {
     if (!subagent.nativeSubagentId || !parent.record.nativeSessionRef) return subagent;
     const status =
       subagent.status === "pending" || subagent.status === "running" ? "active" : "idle";
-    const record = await this.#repository.materializeSubagent(parent.record, subagent);
-    if (!record) return subagent;
+    const materialized = await this.#repository.materializeSubagentResult(parent.record, subagent);
+    if (!materialized) return subagent;
+    const { record, created } = materialized;
     const loaded = this.#externalRuntime.get(record.hostThreadId);
     if (loaded) {
       loaded.record = record;
@@ -6095,19 +6120,21 @@ export class AppServerHost {
       await this.#setSubagentThreadStatus(record.hostThreadId, status);
       return { ...subagent, subagentId: record.hostThreadId };
     }
-    const thread = externalThreadValue({
-      record,
-      turns: [],
-      sessionId: parent.sessionId,
-      running: status === "active",
-    });
     this.#subagentThreadStatuses.set(record.hostThreadId, status);
     this.#trackRunningSubagent(parent.id, record.hostThreadId, status);
-    await this.#writer.json({
-      method: "thread/started",
-      emittedAtMs: Date.now(),
-      params: { thread },
-    });
+    if (created || status === "active") {
+      const thread = externalThreadValue({
+        record,
+        turns: [],
+        sessionId: parent.sessionId,
+        running: status === "active",
+      });
+      await this.#writer.json({
+        method: "thread/started",
+        emittedAtMs: Date.now(),
+        params: { thread },
+      });
+    }
     return { ...subagent, subagentId: record.hostThreadId };
   }
 

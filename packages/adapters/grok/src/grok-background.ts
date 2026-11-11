@@ -327,6 +327,21 @@ export function applyGrokScheduledEvent(
   });
 }
 
+export function collectGrokScheduledTaskIds(
+  events: readonly { type: string; taskId?: string }[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (
+      (event.type === "scheduled.created" || event.type === "scheduled.fired") &&
+      typeof event.taskId === "string"
+    ) {
+      ids.add(event.taskId);
+    }
+  }
+  return ids;
+}
+
 export function collectGrokScheduledLoops(
   events: readonly { type: string }[],
 ): Map<string, GrokScheduledLoop> {

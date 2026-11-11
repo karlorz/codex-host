@@ -103,7 +103,7 @@ function subagentMaterializer(
     return rebound;
   };
 
-  return async (child: HostSubagentState): Promise<StoredThreadRecordV1 | null> => {
+  return async (child: HostSubagentState): Promise<ExternalSubagentMaterialization | null> => {
     if (!child.nativeSubagentId || !parent.nativeSessionRef || parent.state !== "ready")
       return null;
     const nativeRef = parent.nativeSessionRef;
@@ -122,7 +122,7 @@ function subagentMaterializer(
         (previousRequest ? byRequest.get(previousRequest) : undefined) ??
         null;
     }
-    const configured = (record: StoredThreadRecordV1) =>
+    const configured = async (record: StoredThreadRecordV1) =>
       child.model !== undefined || child.reasoningEffort !== undefined
         ? store.updateMetadata(record.hostThreadId, {
             subagentConfiguration: {
@@ -135,15 +135,16 @@ function subagentMaterializer(
         : record;
     if (existing?.state === "ready") {
       if (existing.nativeSessionRef?.nativeSessionId === nativeRef.nativeSessionId)
-        return configured(existing);
+        return { record: await configured(existing), created: false };
       if (!previousRef) throw new Error("Subagent belongs to a different Native Session");
       // Only children retained in a validated rollback Snapshot are rebound. Native
       // Session IDs remain part of ordinary lookup, so later reused IDs cannot
       // accidentally select children removed by a previous rollback.
-      return configured(await rebind(existing, parent));
+      return { record: await configured(await rebind(existing, parent)), created: false };
     }
 
     // MappingStore atomically deduplicates overlapping live/history creation.
+    const created = !existing;
     const provisional =
       existing ??
       (await store.createProvisional({
@@ -159,17 +160,50 @@ function subagentMaterializer(
           parentHostThreadId: parent.hostThreadId,
           nativeSubagentId: child.nativeSubagentId,
           ...(child.role ? { role: child.role } : {}),
+          ...(child.origin ? { origin: child.origin } : {}),
         },
       }));
-    return configured(
-      provisional.state === "ready"
-        ? provisional
-        : await store.commitReady({
-            hostThreadId: provisional.hostThreadId,
-            nativeSessionRef: nativeRef,
-          }),
-    );
+    return {
+      record: await configured(
+        provisional.state === "ready"
+          ? provisional
+          : await store.commitReady({
+              hostThreadId: provisional.hostThreadId,
+              nativeSessionRef: nativeRef,
+            }),
+      ),
+      created,
+    };
   };
+}
+
+export interface ExternalSubagentMaterialization {
+  record: StoredThreadRecordV1;
+  created: boolean;
+}
+
+/** Indexed create-request lookup only; never scans the store or creates a record. */
+export async function lookupExternalSubagent(
+  store: ExternalThreadStore,
+  parent: StoredThreadRecordV1,
+  child: HostSubagentState,
+): Promise<StoredThreadRecordV1 | null> {
+  if (!child.nativeSubagentId || !parent.nativeSessionRef || parent.state !== "ready") return null;
+  const existing = await store.getThreadByCreateRequest(
+    childCreateRequest(parent, parent.nativeSessionRef, child.nativeSubagentId),
+  );
+  return existing?.state === "ready" &&
+    existing.nativeSessionRef?.nativeSessionId === parent.nativeSessionRef.nativeSessionId
+    ? existing
+    : null;
+}
+
+export async function materializeExternalSubagentResult(
+  store: ExternalThreadStore,
+  parent: StoredThreadRecordV1,
+  child: HostSubagentState,
+): Promise<ExternalSubagentMaterialization | null> {
+  return subagentMaterializer(store, parent)(child);
 }
 
 /** The same native child must have one Host identity in live events and restored history. */
@@ -178,7 +212,8 @@ export async function materializeExternalSubagent(
   parent: StoredThreadRecordV1,
   child: HostSubagentState,
 ): Promise<StoredThreadRecordV1 | null> {
-  return subagentMaterializer(store, parent)(child);
+  const result = await materializeExternalSubagentResult(store, parent, child);
+  return result?.record ?? null;
 }
 
 export async function projectExternalSnapshot(
@@ -198,7 +233,7 @@ export async function projectExternalSnapshot(
         const subagents = await Promise.all(
           entry.item.subagents.map(async (child) => {
             const stored = await materialize(child);
-            return stored ? { ...child, subagentId: stored.hostThreadId } : child;
+            return stored ? { ...child, subagentId: stored.record.hostThreadId } : child;
           }),
         );
         return { ...entry, item: { ...entry.item, subagents } };

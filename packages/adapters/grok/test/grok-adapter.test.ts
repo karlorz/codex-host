@@ -5041,6 +5041,106 @@ it("detaches native Run output and keeps idle Loop children separate from parent
   await adapter.close();
 });
 
+it("tags live scheduled.fired children and leaves ordinary Subagents untagged", async () => {
+  const transport = new FakeGrokTransport();
+  const { adapter, session } = await openedSession(transport);
+  transport.backgroundEvent({
+    type: "subagent.spawned",
+    nativeSubagentId: "helper",
+    description: "general-purpose helper",
+  });
+  transport.backgroundEvent({
+    type: "subagent.spawned",
+    nativeSubagentId: "spawned-first",
+    description: "loop: spawned first",
+  });
+  transport.backgroundEvent({
+    type: "scheduled.created",
+    taskId: "loop-1",
+    prompt: "Disposable check",
+    humanSchedule: "every minute",
+  });
+  transport.backgroundEvent({
+    type: "scheduled.fired",
+    taskId: "loop-1",
+    prompt: "Disposable check",
+    humanSchedule: "every minute",
+    subagentId: "fired-first",
+  });
+  transport.backgroundEvent({
+    type: "subagent.spawned",
+    nativeSubagentId: "fired-first",
+    description: "loop: fired first",
+  });
+  transport.backgroundEvent({
+    type: "scheduled.fired",
+    taskId: "loop-1",
+    prompt: "Disposable check",
+    humanSchedule: "every minute",
+    subagentId: "spawned-first",
+  });
+  const children = session.backgroundActivity?.subagents?.() ?? [];
+  const origin = (id: string) =>
+    children.find((entry) => entry.state.nativeSubagentId === id)?.state.origin;
+  expect(origin("fired-first")).toBe("scheduled");
+  expect(origin("spawned-first")).toBe("scheduled");
+  expect(origin("helper")).toBeUndefined();
+  await adapter.close();
+});
+
+it("restores scheduled origin from native meta.json when scheduled.fired is absent from history", async () => {
+  const grokHome = await mkdtemp(path.join(os.tmpdir(), "grok-scheduled-origin-"));
+  const transport = new FakeGrokTransport();
+  try {
+    const sessionDirectory = grokNativeSessionDirectory(
+      { cwd: "/synthetic", environment: { GROK_HOME: grokHome } },
+      transport.sessionId,
+    );
+    await mkdir(path.join(sessionDirectory, "subagents", "loop-child"), { recursive: true });
+    await writeFile(
+      path.join(sessionDirectory, "subagents", "loop-child", "meta.json"),
+      JSON.stringify({
+        prompt:
+          "<system-reminder>\nScheduled task task-1 (every minute). Earlier iterations, if any, appear above.\nRun the task below.",
+      }),
+    );
+    await mkdir(path.join(sessionDirectory, "subagents", "helper"), { recursive: true });
+    await writeFile(
+      path.join(sessionDirectory, "subagents", "helper", "meta.json"),
+      JSON.stringify({ prompt: "Investigate the helper task.", subagent_type: "general-purpose" }),
+    );
+    transport.replay = [
+      {
+        type: "scheduled.created",
+        taskId: "task-1",
+        prompt: "Disposable check",
+        humanSchedule: "every minute",
+      },
+      {
+        type: "subagent.spawned",
+        nativeSubagentId: "loop-child",
+        description: "loop: Disposable check",
+      },
+      {
+        type: "subagent.spawned",
+        nativeSubagentId: "helper",
+        description: "general-purpose helper",
+      },
+    ];
+    const { adapter, session } = await openedSession(transport, "create", undefined, {
+      GROK_HOME: grokHome,
+    });
+    const children = session.backgroundActivity?.subagents?.() ?? [];
+    const origin = (id: string) =>
+      children.find((entry) => entry.state.nativeSubagentId === id)?.state.origin;
+    expect(origin("loop-child")).toBe("scheduled");
+    expect(origin("helper")).toBeUndefined();
+    await adapter.close();
+  } finally {
+    await rm(grokHome, { recursive: true, force: true });
+  }
+});
+
 it.each([
   { key: "subagent-completed-child", output: true, ephemeral: false },
   { key: "task-completed-child", output: true, ephemeral: false },

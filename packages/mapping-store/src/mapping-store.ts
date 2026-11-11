@@ -918,6 +918,17 @@ export class MappingStore {
     );
   }
 
+  /** Tags a child record's origin only when it is still missing. */
+  async setSubagentOrigin(
+    hostThreadId: HostThreadId,
+    origin: "scheduled",
+  ): Promise<StoredThreadRecordV1> {
+    return this.#update(hostThreadId, (current) => {
+      if (!current.subagent || current.subagent.origin !== undefined) return null;
+      return { ...current, subagent: { ...current.subagent, origin } };
+    });
+  }
+
   /**
    * Patch Desktop metadata. With `ifProjectId`, the patch applies only while the
    * stored assignment still equals it; otherwise the current record is returned.

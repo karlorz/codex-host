@@ -224,6 +224,55 @@ describe("External Thread metadata catalog", () => {
     );
   });
 
+  it("excludes settled scheduled children from scoped lists and keeps running and ordinary children", () => {
+    const parent = record("parent");
+    const settled = record("settled", {
+      nativeSessionRef: parent.nativeSessionRef,
+      subagent: {
+        parentHostThreadId: parent.hostThreadId,
+        nativeSubagentId: "loop-settled",
+        origin: "scheduled",
+      },
+    });
+    const running = record("running", {
+      nativeSessionRef: parent.nativeSessionRef,
+      subagent: {
+        parentHostThreadId: parent.hostThreadId,
+        nativeSubagentId: "loop-running",
+        origin: "scheduled",
+      },
+    });
+    const ordinary = record("ordinary", {
+      nativeSessionRef: parent.nativeSessionRef,
+      subagent: { parentHostThreadId: parent.hostThreadId, nativeSubagentId: "delegate" },
+    });
+    const records = [parent, settled, running, ordinary];
+    const runtimeFor = (id: string) =>
+      id === "running"
+        ? { running: true }
+        : id === "settled" || id === "ordinary"
+          ? { running: false }
+          : null;
+    const ids = (params: JsonObject) =>
+      listExternalThreadMetadata({
+        records,
+        query: query(params),
+        runtimeFor,
+      }).data.map((entry) => entry.thread.id);
+    expect(ids({ parentThreadId: "parent", sourceKinds: ["subAgentThreadSpawn"] }).sort()).toEqual([
+      "ordinary",
+      "running",
+    ]);
+    expect(
+      ids({ ancestorThreadId: "parent", sourceKinds: ["subAgentThreadSpawn"] }).sort(),
+    ).toEqual(["ordinary", "running"]);
+    expect(ids({ sourceKinds: ["subAgentThreadSpawn"] }).sort()).toEqual([
+      "ordinary",
+      "running",
+      "settled",
+    ]);
+  });
+
   it("does not inject External rows for an unknown future filter", () => {
     const page = listExternalThreadMetadata({
       records: [record("external")],

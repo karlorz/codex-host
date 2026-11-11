@@ -146,6 +146,45 @@ describe("External native child identity", () => {
       await repository.close();
     }
   });
+  it("persists scheduled origin on create and does not rewrite an existing record", async () => {
+    const { repository, parent, store } = await fixture();
+    try {
+      const created = await repository.materializeSubagent(parent, {
+        subagentId: "loop-child",
+        nativeSubagentId: "loop-child",
+        description: "Loop run",
+        background: true,
+        status: "completed",
+        origin: "scheduled",
+      });
+      expect(created?.subagent).toMatchObject({
+        origin: "scheduled",
+        nativeSubagentId: "loop-child",
+      });
+      const untagged = await repository.materializeSubagent(parent, {
+        subagentId: "legacy-child",
+        nativeSubagentId: "legacy-child",
+        description: "Legacy run",
+        background: true,
+        status: "completed",
+      });
+      if (!untagged) throw new Error("Missing legacy child");
+      expect(untagged.subagent).not.toHaveProperty("origin");
+      const setOrigin = vi.spyOn(store, "setSubagentOrigin");
+      const again = await repository.materializeSubagent(parent, {
+        subagentId: "legacy-child",
+        nativeSubagentId: "legacy-child",
+        description: "Legacy run",
+        background: true,
+        status: "completed",
+        origin: "scheduled",
+      });
+      expect(again?.subagent).not.toHaveProperty("origin");
+      expect(setOrigin).not.toHaveBeenCalled();
+    } finally {
+      await repository.close();
+    }
+  });
   it("uses native history time for an opened idle child rather than its mapping creation time", async () => {
     const { repository, parent } = await fixture();
     try {
@@ -483,6 +522,33 @@ describe("External native child identity", () => {
       expect(
         children.find((entry) => entry.subagent?.parentHostThreadId === "fork")?.nativeSessionRef,
       ).toEqual(replacementRef);
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it("looks up existing children without creating or scanning", async () => {
+    const { repository, store, parent } = await fixture();
+    try {
+      const child = {
+        subagentId: "loop-child",
+        nativeSubagentId: "loop-child",
+        description: "Loop run",
+        background: true,
+        status: "completed" as const,
+      };
+      const created = await repository.materializeSubagentResult(parent, child);
+      expect(created?.created).toBe(true);
+      const list = vi.spyOn(store, "listThreads");
+      const insert = vi.spyOn(store, "createProvisional");
+      const found = await repository.lookupSubagent(parent, child);
+      expect(found?.hostThreadId).toBe(created?.record.hostThreadId);
+      expect((await repository.materializeSubagentResult(parent, child))?.created).toBe(false);
+      expect(
+        await repository.lookupSubagent(parent, { ...child, nativeSubagentId: "missing" }),
+      ).toBeNull();
+      expect(list).not.toHaveBeenCalled();
+      expect(insert).not.toHaveBeenCalled();
     } finally {
       await repository.close();
     }

@@ -70,6 +70,8 @@ const storedThreadCoreV1Shape = {
       parentHostThreadId: hostThreadIdSchema,
       nativeSubagentId: nonBlankTextSchema.max(1_024),
       role: z.string().max(1_024).optional(),
+      /** Present when this child is a Harness scheduled/loop run rather than a model-delegated Subagent. */
+      origin: z.literal("scheduled").optional(),
     })
     .strict()
     .optional(),
@@ -273,6 +275,7 @@ export interface CreateProvisionalThreadInput {
     parentHostThreadId: HostThreadId;
     nativeSubagentId: string;
     role?: string;
+    origin?: "scheduled";
   };
 }
 

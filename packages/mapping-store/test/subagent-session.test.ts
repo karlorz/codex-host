@@ -131,3 +131,22 @@ describe("Native child Session rebinding", () => {
     }
   });
 });
+
+describe("Subagent origin", () => {
+  it("tags a missing origin once and leaves a later call unchanged", async () => {
+    const { store, child } = await fixture();
+    try {
+      expect(child.subagent).not.toHaveProperty("origin");
+      const tagged = await store.setSubagentOrigin(childId, "scheduled");
+      expect(tagged).toMatchObject({
+        hostThreadId: childId,
+        revision: child.revision + 1,
+        subagent: { origin: "scheduled", nativeSubagentId: "native-child" },
+      });
+      const again = await store.setSubagentOrigin(childId, "scheduled");
+      expect(again).toEqual(tagged);
+    } finally {
+      await store.close();
+    }
+  });
+});

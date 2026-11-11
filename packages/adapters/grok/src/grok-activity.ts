@@ -13,6 +13,7 @@ import type {
   HostItemId,
 } from "@codexhost/shared-contracts";
 import type { GrokScheduledLoop } from "./grok-background.js";
+import { tagGrokScheduledActivityChildren } from "./grok-scheduled-origin.js";
 
 export interface GrokTaskSnapshot {
   task_id: string;
@@ -28,8 +29,14 @@ export interface GrokTaskSnapshot {
   owner_session_id?: string;
   is_backgrounded?: boolean;
 }
+/** Newest settled child rows; each loop's lastSubagentId stays even outside this cap. */
+const SETTLED_SUBAGENT_ACTIVITY_LIMIT = 20;
+
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+function isActiveChild(status: HostSubagentState["status"]) {
+  return status === "pending" || status === "running";
+}
 const fail = (
   code: "nativeFailure" | "unsupported" | "invalidRequest" | "protocolError",
   message: string,
@@ -115,8 +122,33 @@ export function createGrokActivity(options: {
   observeTasks?(tasks: readonly GrokTaskSnapshot[]): void;
   commandItemId?(taskId: string): HostItemId | undefined;
   isOpen(): boolean;
+  scheduledTaskIds?: ReadonlySet<string>;
+  scheduledChildIds?: ReadonlySet<string>;
 }): HarnessBackgroundActivityCapability {
   let tasks: GrokTaskSnapshot[] = [];
+  const classifiedChildIds = new Set<string>();
+  const listedChildren = (): HostSubagentState[] => {
+    const all = [...options.children.values()];
+    const keep = new Set<string>();
+    for (const child of all) {
+      if (child.nativeSubagentId && isActiveChild(child.status)) keep.add(child.nativeSubagentId);
+    }
+    for (const loop of options.loops.values()) {
+      if (loop.lastSubagentId) keep.add(loop.lastSubagentId);
+    }
+    const settled = all.filter((child) => child.nativeSubagentId && !isActiveChild(child.status));
+    for (const child of [...settled].reverse().slice(0, SETTLED_SUBAGENT_ACTIVITY_LIMIT)) {
+      if (child.nativeSubagentId) keep.add(child.nativeSubagentId);
+    }
+    const active = all.filter(
+      (child) =>
+        child.nativeSubagentId && keep.has(child.nativeSubagentId) && isActiveChild(child.status),
+    );
+    const keptSettledNewestFirst = [...settled]
+      .reverse()
+      .filter((child) => child.nativeSubagentId && keep.has(child.nativeSubagentId));
+    return [...active, ...keptSettledNewestFirst];
+  };
   const summaries = (): BackgroundActivity[] => [
     ...tasks.map((task): BackgroundActivity => {
       const commandItemId = options.commandItemId?.(task.task_id);
@@ -147,7 +179,7 @@ export function createGrokActivity(options: {
       ...(loop.nextFireAt ? { nextRunAt: loop.nextFireAt } : {}),
       ...(loop.lastSubagentId ? { relatedActivityId: `subagent:${loop.lastSubagentId}` } : {}),
     })),
-    ...[...options.children.values()].map((child): BackgroundActivity => ({
+    ...listedChildren().map((child): BackgroundActivity => ({
       id: `subagent:${child.nativeSubagentId}`,
       kind: "subagent",
       label: child.description,
@@ -225,6 +257,14 @@ export function createGrokActivity(options: {
                     : (status as "running" | "completed" | "failed"),
             });
           }
+        await tagGrokScheduledActivityChildren({
+          directory: options.directory,
+          children: options.children,
+          attempted: classifiedChildIds,
+          ...(options.scheduledTaskIds ? { scheduledTaskIds: options.scheduledTaskIds } : {}),
+          ...(options.scheduledChildIds ? { scheduledChildIds: options.scheduledChildIds } : {}),
+        });
+        if (!options.isOpen()) return fail("nativeFailure", "Grok Session changed");
         return { ok: true, value: summaries() };
       } catch (error) {
         return fail(

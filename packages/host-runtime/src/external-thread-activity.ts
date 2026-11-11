@@ -9,12 +9,28 @@ import {
   type BackgroundActivity,
 } from "@codexhost/shared-contracts";
 
+function isActiveSubagent(status: HostSubagentState["status"]) {
+  return status === "pending" || status === "running";
+}
+
+function withChildThread(
+  activity: BackgroundActivity,
+  child: HostSubagentState,
+  resolved: HostSubagentState,
+): BackgroundActivity {
+  return resolved.subagentId !== child.nativeSubagentId
+    ? { ...activity, threadId: resolved.subagentId as HostThreadId }
+    : activity;
+}
+
 export async function executeExternalActivity(input: {
   session: HarnessSession;
   method: string;
   activityId?: string;
   isCurrent(): boolean;
   materialize(child: HostSubagentState): Promise<HostSubagentState>;
+  lookup?(child: HostSubagentState): Promise<HostSubagentState | null>;
+  afterList?(): Promise<void>;
 }) {
   const capability = input.session.backgroundActivity;
   if (!capability)
@@ -24,7 +40,10 @@ export async function executeExternalActivity(input: {
   const current = () => {
     if (!input.isCurrent()) throw new Error("Background activity Session changed");
   };
-  const resolveChildren = async (activities: readonly BackgroundActivity[]) => {
+  const resolveChildren = async (
+    activities: readonly BackgroundActivity[],
+    mode: "list" | "read",
+  ) => {
     const children = capability.subagents?.() ?? [];
     return Promise.all(
       activities.map(async (activity) => {
@@ -32,11 +51,14 @@ export async function executeExternalActivity(input: {
         const child = children.find((entry) => entry.activityId === activity.id)?.state;
         if (!child) return activity;
         current();
+        if (mode === "list" && !isActiveSubagent(child.status)) {
+          const existing = await input.lookup?.(child);
+          current();
+          return existing ? withChildThread(activity, child, existing) : activity;
+        }
         const resolved = await input.materialize(child);
         current();
-        return resolved.subagentId !== child.nativeSubagentId
-          ? { ...activity, threadId: resolved.subagentId as HostThreadId }
-          : activity;
+        return withChildThread(activity, child, resolved);
       }),
     );
   };
@@ -46,14 +68,18 @@ export async function executeExternalActivity(input: {
       const result = await capability.list();
       current();
       if (!result.ok) return failure(result.error);
-      const activities = await resolveChildren(result.value);
+      if (input.afterList) {
+        await input.afterList();
+        current();
+      }
+      const activities = await resolveChildren(result.value, "list");
       return { result: threadActivityListResultSchema.parse({ supported: true, activities }) };
     }
     if (input.method === THREAD_ACTIVITY_READ_METHOD) {
       const result = await capability.read(input.activityId ?? "");
       current();
       if (!result.ok) return failure(result.error);
-      const [activity] = await resolveChildren([result.value.activity]);
+      const [activity] = await resolveChildren([result.value.activity], "read");
       return { result: backgroundActivityDetailSchema.parse({ ...result.value, activity }) };
     }
     const result = await capability.stop(input.activityId ?? "");

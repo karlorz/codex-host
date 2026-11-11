@@ -171,6 +171,7 @@ import {
 import {
   applyGrokScheduledEvent,
   collectGrokScheduledLoops,
+  collectGrokScheduledTaskIds,
   grokBackgroundCompletionOutcome,
   grokBackgroundTaskId,
   grokToolIsBackgrounded,
@@ -450,6 +451,8 @@ class GrokHarnessSession implements HarnessSession {
   readonly #backgroundItems: GrokBackgroundItems;
   readonly #loops: Map<string, GrokScheduledLoop>;
   readonly #observedLoopIds = new Set<string>();
+  readonly #scheduledTaskIds: Set<string>;
+  readonly #scheduledChildIds = new Set<string>();
   readonly #activityChildren = new Map<string, HostSubagentState>();
   readonly #earlyBackground = new Map<
     string,
@@ -495,13 +498,21 @@ class GrokHarnessSession implements HarnessSession {
       emit: (event) => this.#event(event),
     });
     this.#loops = collectGrokScheduledLoops(options.history);
-    for (const event of options.history) this.#observeActivityChild(event);
+    this.#scheduledTaskIds = collectGrokScheduledTaskIds(options.history);
+    for (const event of options.history) {
+      if (event.type === "scheduled.fired" && event.subagentId) {
+        this.#scheduledChildIds.add(event.subagentId);
+      }
+      this.#observeActivityChild(event);
+    }
     this.backgroundActivity = createGrokActivity({
       sessionId: opened.sessionId,
       directory: options.sessionDirectory,
       loops: this.#loops,
       observedLoopIds: this.#observedLoopIds,
       children: this.#activityChildren,
+      scheduledTaskIds: this.#scheduledTaskIds,
+      scheduledChildIds: this.#scheduledChildIds,
       outputLimit: options.toolOutputLimit,
       commandItemId: (taskId) => this.#backgroundItems.commandItemId(taskId),
       observeTasks: (tasks) => {
@@ -981,14 +992,19 @@ class GrokHarnessSession implements HarnessSession {
 
   #observeActivityChild(event: GrokTransportEvent): void {
     if (event.type === "subagent.spawned") {
+      const existing = this.#activityChildren.get(event.nativeSubagentId);
+      const scheduled =
+        existing?.origin === "scheduled" || this.#scheduledChildIds.has(event.nativeSubagentId);
       this.#activityChildren.set(event.nativeSubagentId, {
+        ...existing,
         subagentId: event.nativeSubagentId,
         nativeSubagentId: event.nativeSubagentId,
-        description: event.description ?? "Grok Subagent",
+        description: event.description ?? existing?.description ?? "Grok Subagent",
         background: true,
         status: "running",
         ...(event.role ? { role: event.role } : {}),
         ...(event.model ? { model: event.model } : {}),
+        ...(scheduled ? { origin: "scheduled" as const } : {}),
       });
     }
     if (event.type === "subagent.finished") {
@@ -1034,18 +1050,23 @@ class GrokHarnessSession implements HarnessSession {
       event.type === "scheduled.fired" ||
       event.type === "scheduled.deleted"
     ) {
-      if (
-        event.type === "scheduled.fired" &&
-        event.subagentId &&
-        !this.#activityChildren.has(event.subagentId)
-      )
+      if (event.type === "scheduled.created" || event.type === "scheduled.fired") {
+        this.#scheduledTaskIds.add(event.taskId);
+      }
+      if (event.type === "scheduled.fired" && event.subagentId) {
+        this.#scheduledChildIds.add(event.subagentId);
+        const existing = this.#activityChildren.get(event.subagentId);
         this.#activityChildren.set(event.subagentId, {
-          subagentId: event.subagentId,
-          nativeSubagentId: event.subagentId,
-          description: event.prompt,
-          background: true,
-          status: "running",
+          ...(existing ?? {
+            subagentId: event.subagentId,
+            nativeSubagentId: event.subagentId,
+            description: event.prompt,
+            background: true,
+            status: "running" as const,
+          }),
+          origin: "scheduled",
         });
+      }
       applyGrokScheduledEvent(this.#loops, event, this.#observedLoopIds);
       return true;
     }

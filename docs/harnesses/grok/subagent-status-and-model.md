@@ -4,7 +4,7 @@
 
 The Grok Adapter maps native goal helper events and spawn/task tools to the existing Host `subagentDelegation` contract. Desktop receives native `subAgentActivity` Items and remains responsible for its Subagent list, collapse behavior, navigation, and visual presentation.
 
-The native `subAgentActivity` projection keeps Desktop-owned list, status and history presentation. The shared [Background activity capability](background-activity.md) retains actual Session-owned child descriptors, including idle Loop runs. Host activity list/read materializes those children without a parent Turn, so scoped native child discovery can find them. The summary section uses the genuine latest-child Thread for navigation and does not add duplicate child rows. Activity polling continues when no extension section mounts; terminal state events update existing child mappings. It does not add child `thread/read` requests or scan and rewrite official Codex protocol frames. Native Codex Subagent behavior is unchanged.
+The native `subAgentActivity` projection keeps Desktop-owned list, status and history presentation. The shared [Background activity capability](background-activity.md) retains Session-owned child descriptors: all running/pending children, all Loops, each Loop's latest child, and the newest 20 settled runs. Host activity list materializes only running/pending children; settled rows get a Thread link from an indexed lookup or from `thread/activity/read` of that row, without a parent Turn. The summary section uses the genuine latest-child Thread for navigation and does not add duplicate child rows. Activity polling continues when no extension section mounts; terminal state events update existing child mappings. It does not add child `thread/read` requests or scan and rewrite official Codex protocol frames. Native Codex Subagent behavior is unchanged.
 
 ## Lifecycle and transcripts
 
@@ -46,8 +46,13 @@ The native Desktop summary panel discovers descendants through `thread/list`
 with `ancestorThreadId` (or `parentThreadId` on older app-server versions) and
 `sourceKinds: ["subAgentThreadSpawn"]`. Host serves persisted external child
 metadata for these scoped queries, including `useStateDbOnly`, without opening
-child Harness Sessions or reading their transcripts. Ordinary unscoped task
-lists still omit native subagents unless a subagent source kind is requested.
+child Harness Sessions or reading their transcripts. Scoped queries omit
+children tagged `subagent.origin: "scheduled"` unless that child is currently
+running, so settled Harness loop runs are not treated as model-delegated
+Subagents. Direct `thread/read` and `thread/resume` of those children still
+work. Ordinary unscoped task lists still omit native subagents unless a
+subagent source kind is requested, and they do not apply the scheduled-origin
+filter.
 
 Live child state comes from observed native subagent lifecycle events even if
 the child transcript has never been opened. After Host restart, an unobserved

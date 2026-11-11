@@ -90,6 +90,7 @@ function includesExternalRecord(
   query: DecodedThreadListRequest,
   byId: ReadonlyMap<string, StoredThreadRecordV1>,
   sectionId: string | null,
+  runtime: ExternalThreadListRuntimeState | null,
 ): boolean {
   if (record.state !== "ready" || !record.nativeSessionRef) return false;
   // Rollback retains old records for historical links, but only rebound children
@@ -117,6 +118,8 @@ function includesExternalRecord(
     !query.sourceKinds?.some((kind) => kind === "subAgent" || kind === "subAgentThreadSpawn")
   )
     return false;
+  // Scoped discovery is Desktop's Subagent topology; settled loop runs are not model-delegated children.
+  if (scoped && record.subagent?.origin === "scheduled" && runtime?.running !== true) return false;
   if (query.parentThreadId !== null && record.subagent?.parentHostThreadId !== query.parentThreadId)
     return false;
   if (query.ancestorThreadId !== null) {
@@ -214,6 +217,7 @@ export function externalThreadListEntries(input: ExternalThreadListInput): Threa
         input.query,
         byId,
         input.placementOf?.(record.hostThreadId)?.section.id ?? null,
+        input.runtimeFor(record.hostThreadId),
       ),
     )
     .map((record): ThreadListEntry => {

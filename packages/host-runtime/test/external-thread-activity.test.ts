@@ -47,11 +47,16 @@ function setup() {
     ...state,
     subagentId: "host-child",
   }));
+  const lookup = vi.fn(async (state: HostSubagentState): Promise<HostSubagentState | null> => ({
+    ...state,
+    subagentId: "host-child",
+  }));
   let current = true;
   return {
     capability,
     session,
     materialize,
+    lookup,
     isCurrent: () => current,
     replace: () => {
       current = false;
@@ -100,14 +105,15 @@ describe("external background activity bridge", () => {
       }),
     ).toMatchObject({ error: { code: -32076 } });
   });
-  it("materializes real child identity without a parent Turn", async () => {
+  it("lists settled children through lookup without creating, and materializes on read", async () => {
     const s = setup();
     expect(
       await executeExternalActivity({ ...s, method: THREAD_ACTIVITY_LIST_METHOD }),
     ).toMatchObject({
       result: { supported: true, activities: [{ ...summary, threadId: "host-child" }] },
     });
-    expect(s.materialize).toHaveBeenCalledWith(child);
+    expect(s.materialize).not.toHaveBeenCalled();
+    expect(s.lookup).toHaveBeenCalledWith(child);
     expect(
       await executeExternalActivity({
         ...s,
@@ -115,6 +121,56 @@ describe("external background activity bridge", () => {
         activityId: summary.id,
       }),
     ).toMatchObject({ result: { activity: { threadId: "host-child" }, output: "native result" } });
+    expect(s.materialize).toHaveBeenCalledTimes(1);
+    expect(s.materialize).toHaveBeenCalledWith(child);
+  });
+  it("runs afterList after a successful list and before materializing running children", async () => {
+    const s = setup();
+    const order: string[] = [];
+    const running = { ...child, status: "running" as const };
+    s.capability.subagents = () => [{ activityId: summary.id, state: running }];
+    s.capability.list = async () => {
+      order.push("list");
+      return { ok: true, value: [{ ...summary, status: "running" as const }] };
+    };
+    s.materialize.mockImplementation(async (state) => {
+      order.push("materialize");
+      return { ...state, subagentId: "host-child" };
+    });
+    await executeExternalActivity({
+      ...s,
+      method: THREAD_ACTIVITY_LIST_METHOD,
+      afterList: async () => {
+        order.push("afterList");
+      },
+    });
+    expect(order).toEqual(["list", "afterList", "materialize"]);
+  });
+  it("lists running children by materializing them", async () => {
+    const s = setup();
+    const running = { ...child, status: "running" as const };
+    s.capability.subagents = () => [{ activityId: summary.id, state: running }];
+    s.capability.list = async () => ({
+      ok: true,
+      value: [{ ...summary, status: "running" as const }],
+    });
+    expect(
+      await executeExternalActivity({ ...s, method: THREAD_ACTIVITY_LIST_METHOD }),
+    ).toMatchObject({
+      result: { activities: [{ threadId: "host-child", status: "running" }] },
+    });
+    expect(s.materialize).toHaveBeenCalledWith(running);
+    expect(s.lookup).not.toHaveBeenCalled();
+  });
+  it("lists settled children without a threadId when lookup misses", async () => {
+    const s = setup();
+    s.lookup.mockResolvedValue(null);
+    expect(
+      await executeExternalActivity({ ...s, method: THREAD_ACTIVITY_LIST_METHOD }),
+    ).toMatchObject({
+      result: { activities: [summary] },
+    });
+    expect(s.materialize).not.toHaveBeenCalled();
   });
   it("drops results after replacement and does not mutate a replacement Session", async () => {
     const s = setup();

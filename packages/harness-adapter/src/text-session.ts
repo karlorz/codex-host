@@ -436,6 +436,11 @@ export interface HostSubagentState {
   model?: string;
   /** Native child reasoning effort, when known; do not infer from parent settings. */
   reasoningEffort?: string;
+  /**
+   * How this child was created. `"scheduled"` is a Harness timer/loop run,
+   * not a model-delegated Subagent. Omitted for ordinary Subagents.
+   */
+  origin?: "scheduled";
   background: boolean;
   status: HostSubagentStatus;
   resultSummary?: string;

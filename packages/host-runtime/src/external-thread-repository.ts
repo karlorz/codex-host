@@ -31,7 +31,9 @@ import {
   type NativeTurnRef,
 } from "@codexhost/shared-contracts";
 import {
+  lookupExternalSubagent,
   materializeExternalSubagent,
+  materializeExternalSubagentResult,
   projectExternalSnapshot,
 } from "./external-subagent-threads.js";
 
@@ -77,6 +79,7 @@ export interface ExternalThreadStore {
     transportModelId: string,
   ): Promise<StoredThreadRecordV1>;
   setArchived(hostThreadId: HostThreadId, archived: boolean): Promise<StoredThreadRecordV1>;
+  setSubagentOrigin(hostThreadId: HostThreadId, origin: "scheduled"): Promise<StoredThreadRecordV1>;
   updateMetadata(
     hostThreadId: HostThreadId,
     patch: ThreadMetadataPatch,
@@ -157,6 +160,14 @@ export class ExternalThreadRepository {
     return materializeExternalSubagent(this.store, parent, child);
   }
 
+  materializeSubagentResult(parent: StoredThreadRecordV1, child: HostSubagentState) {
+    return materializeExternalSubagentResult(this.store, parent, child);
+  }
+
+  lookupSubagent(parent: StoredThreadRecordV1, child: HostSubagentState) {
+    return lookupExternalSubagent(this.store, parent, child);
+  }
+
   findByCreateRequest(createRequestId: string): Promise<StoredThreadRecordV1 | null> {
     return this.store.getThreadByCreateRequest(createRequestId);
   }
@@ -221,6 +232,13 @@ export class ExternalThreadRepository {
 
   setArchived(hostThreadId: HostThreadId, archived: boolean): Promise<StoredThreadRecordV1> {
     return this.store.setArchived(hostThreadId, archived);
+  }
+
+  setSubagentOrigin(
+    hostThreadId: HostThreadId,
+    origin: "scheduled",
+  ): Promise<StoredThreadRecordV1> {
+    return this.store.setSubagentOrigin(hostThreadId, origin);
   }
 
   updateMetadata(
