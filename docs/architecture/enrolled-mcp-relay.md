@@ -261,7 +261,7 @@ Cloudflare Origin CA for `codexhost.karldigi.dev` is issued in the **karldigi.de
 
 ## Live path
 
-The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place. Fork prod `v0.17.4-6` is GitHub latest and npm `@karlorz/codexhost-cli@latest`. Next unused fork tag is `0.17.4-7`.
+The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place. Fork prod `v0.17.4-7` is GitHub latest and npm `@karlorz/codexhost-cli@latest`. Next unused fork tag is `0.17.4-8`.
 
 Muse adds the custom connector from a Muse chat (`custom-connector-setup`). Settings Connected then lists Codex Host for `https://codexhost.karldigi.dev/mcp`. A connected Muse chat sees `tools/list` of the four tools; `enroll_status` reports `clientId=muse`, `pairing=machine`, `link=online`, and `runtime=reachable` while the Mac link is up.
 
@@ -279,7 +279,7 @@ Live checks that stay true:
 Open live checks:
 
 - Mac `enroll revoke` stays planned-only, because it rotates the key.
-- Annotated tag `v0.17.4-7` is held until Release Notes confirmation. GitHub latest would prompt Desktop; hop deploy does not require that tag.
+- Annotated tag `v0.17.4-7` is GitHub latest. Next unused fork tag is `0.17.4-8`. Mac `enroll revoke` stays planned-only.
 
 ## Product boundary
 

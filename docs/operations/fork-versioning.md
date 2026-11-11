@@ -240,7 +240,7 @@ A fork tag is not shipped until both of these exist for that version:
 
 Numeric fork counters such as `0.13.3-0` and `0.13.3-1` are GitHub latest and npm `latest`. Named SemVer prereleases (`-rc.1`, `-beta.1`, `-test.1`, `-cpa.1`) stay on `next` / `test` and GitHub prerelease. `packages/repository-automation/src/release.mjs` treats a hyphen plus one or more digit groups (`0.13.3-0`, `0.13.3-1`) as latest, not as `next`. Do not `npm publish` `@codexhost/cli`. Local `npm run install:local` packs and installs tarballs without the registry.
 
-Shipped latest on this fork is `v0.17.4-6`: GitHub latest plus `@karlorz/codexhost-cli@0.17.4-6` on npm `latest`. Recurl the six platform packages after provenance; a `+` log line can still 404 until the staged version is visible. The next unused counter while upstream holds `0.17.4` is `0.17.4-7`.
+Shipped latest on this fork is `v0.17.4-7`: GitHub latest plus `@karlorz/codexhost-cli@0.17.4-7` on npm `latest`. Recurl the six platform packages after provenance; a `+` log line can still 404 until the staged version is visible. The next unused counter while upstream holds `0.17.4` is `0.17.4-8`.
 
 ## GitHub Actions secrets
 
@@ -274,7 +274,7 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.17.4-7` while upstream still holds `0.17.4`). Merge of an identity-lock PR is not a release.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.17.4-8` while upstream still holds `0.17.4`). Merge of an identity-lock PR is not a release.
 
 ## Next unused counter
 
@@ -285,4 +285,4 @@ git fetch origin --tags --prune
 git ls-remote --tags origin 'refs/tags/v0.17.4-*'
 ```
 
-Shipped tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, and `v0.17.4-0` through `v0.17.4-6`. After upstream `0.17.4`, later fork tags on the same upstream are `0.17.4-1`, `0.17.4-2`, …. Then `npm run release:prepare -- 0.17.4-7` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Shipped tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, and `v0.17.4-0` through `v0.17.4-7`. After upstream `0.17.4`, later fork tags on the same upstream are `0.17.4-1`, `0.17.4-2`, …. Then `npm run release:prepare -- 0.17.4-8` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
