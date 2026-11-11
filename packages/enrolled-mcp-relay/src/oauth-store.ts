@@ -44,6 +44,22 @@ function emptyState(): PersistedState {
   return { clients: {}, authCodes: {}, accessTokens: {}, refreshTokens: {} };
 }
 
+function omitRecord<V>(record: Record<string, V>, key: string): Record<string, V> {
+  const next: Record<string, V> = {};
+  for (const [entryKey, value] of Object.entries(record)) {
+    if (entryKey !== key) next[entryKey] = value;
+  }
+  return next;
+}
+
+function omitWhere<V>(record: Record<string, V>, drop: (value: V) => boolean): Record<string, V> {
+  const next: Record<string, V> = {};
+  for (const [entryKey, value] of Object.entries(record)) {
+    if (!drop(value)) next[entryKey] = value;
+  }
+  return next;
+}
+
 export class RelayOAuthStore {
   private readonly filePath: string | undefined;
   private state: PersistedState;
@@ -80,7 +96,7 @@ export class RelayOAuthStore {
     const entry = this.state.authCodes[codeHash];
     if (!entry) return undefined;
     this.commit(() => {
-      delete this.state.authCodes[codeHash];
+      this.state.authCodes = omitRecord(this.state.authCodes, codeHash);
     });
     if (Date.now() > entry.expiresAt) return undefined;
     return entry;
@@ -97,7 +113,7 @@ export class RelayOAuthStore {
     if (!entry) return undefined;
     if (Date.now() > entry.expiresAt) {
       this.commit(() => {
-        delete this.state.accessTokens[tokenHash];
+        this.state.accessTokens = omitRecord(this.state.accessTokens, tokenHash);
       });
       return undefined;
     }
@@ -114,7 +130,7 @@ export class RelayOAuthStore {
     const entry = this.state.refreshTokens[tokenHash];
     if (!entry) return undefined;
     this.commit(() => {
-      delete this.state.refreshTokens[tokenHash];
+      this.state.refreshTokens = omitRecord(this.state.refreshTokens, tokenHash);
     });
     if (Date.now() > entry.expiresAt) return undefined;
     return entry;
@@ -131,7 +147,7 @@ export class RelayOAuthStore {
     const refresh = this.state.refreshTokens[tokenHash];
     if (!refresh) return undefined;
     this.commit(() => {
-      delete this.state.refreshTokens[tokenHash];
+      this.state.refreshTokens = omitRecord(this.state.refreshTokens, tokenHash);
       for (const [hash, access] of Object.entries(this.state.accessTokens)) {
         if (access.clientId === refresh.clientId) {
           this.state.accessTokens[hash] = { ...access, revoked: true };
@@ -143,17 +159,16 @@ export class RelayOAuthStore {
 
   revokeClient(clientId: string): void {
     this.commit(() => {
-      delete this.state.clients[clientId];
-      for (const [hash, code] of Object.entries(this.state.authCodes)) {
-        if (code.clientId === clientId) delete this.state.authCodes[hash];
-      }
+      this.state.clients = omitRecord(this.state.clients, clientId);
+      this.state.authCodes = omitWhere(this.state.authCodes, (code) => code.clientId === clientId);
+      this.state.refreshTokens = omitWhere(
+        this.state.refreshTokens,
+        (token) => token.clientId === clientId,
+      );
       for (const [hash, token] of Object.entries(this.state.accessTokens)) {
         if (token.clientId === clientId) {
           this.state.accessTokens[hash] = { ...token, revoked: true };
         }
-      }
-      for (const [hash, token] of Object.entries(this.state.refreshTokens)) {
-        if (token.clientId === clientId) delete this.state.refreshTokens[hash];
       }
     });
   }
