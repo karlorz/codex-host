@@ -129,7 +129,7 @@ Desktop Settings and the local console share an **Enrollment** page. It lists ac
 
 ## Out of scope
 
-- Direct Linux VM access to Mac loopback, Web/Relay, and general remote Host routing
+- Direct Linux VM access to Mac loopback, general Web/Relay, and general remote Host routing. The outbound enrolled MCP relay (Mac connects out; hop OAuth; client `muse` only) is in product scope as specified in [enrolled-mcp-relay.md](enrolled-mcp-relay.md) and is not implemented. That scope does not include inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, enroll revoke through the relay, `delegate start`, or multi-client relay.
 - Copying `CODEXHOST_*` from Cursor/parent processes, launchd, or shared files
 - Attaching a client to a parent Thread id as if it were that chat
 - Unattended first pairing, a daemon, or `launchctl setenv`
