@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { createTailscaleWhois } from "../src/whois.js";
 
-describe("Tailscale WhoIs localapi", () => {
+describe.skipIf(process.platform === "win32")("Tailscale WhoIs localapi", () => {
   it("sends Host local-tailscaled.sock and reads StableID", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codexhost-whois-"));
     const socketPath = join(dir, "tailscaled.sock");
