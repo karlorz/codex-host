@@ -15,6 +15,7 @@ const question={interactionId:'ask-1',turnId:'turn-1',title:'Grok',questions:[
 ]};
 const state={questions:[question],calls:[],thread:'thread-1',host:'local',fail:false,hold:false,defer:null,listHold:false,listDefer:null,activityHold:false,activityDefer:null,activityFail:false,activityAck:null};
 const route={async sendRequest(method,params){state.calls.push({method,params});
+ if(method.endsWith('question-records/list'))return {records:[],pendingAnchors:[]};
  if(method.endsWith('/list')){if(state.listHold)await new Promise(r=>state.listDefer=r);return {questions:state.questions};}
  if(method.endsWith('/activity')){if(state.activityHold)await new Promise(r=>state.activityDefer=r);if(state.activityFail)throw Error('activity failed');return {autoResolution:state.activityAck};}
  if(!method.endsWith('/respond'))throw Error('Unused fixture RPC');

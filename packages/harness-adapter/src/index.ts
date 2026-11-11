@@ -75,6 +75,7 @@ export type {
   HostItemUpdate,
   HostQuestion,
   HostQuestionInteraction,
+  HostQuestionRecordEvidence,
   HostQuestionResponse,
   HostReasoningItem,
   HostUserMessageItem,

@@ -38,6 +38,12 @@ describe("Renderer settings localization", () => {
     expect(chinese.hideCodexUsageBannerTitle).toBe("隐藏 Codex 额度警告");
     expect(english.hideCodexUsageBannerDescription).toContain("On by default");
     expect(chinese.hideCodexUsageBannerDescription).toContain("默认开启");
+    expect(english.harnessQuestionInChatTitle).toBe("Show Harness questions in the chat");
+    expect(chinese.harnessQuestionInChatTitle).toBe("在对话中显示 Harness 提问");
+    expect(english.harnessQuestionInChatDescription).toContain(
+      "Off: they appear above the message box",
+    );
+    expect(chinese.harnessQuestionInChatDescription).toContain("关闭：提问出现在输入框上方");
     const englishVoice = voiceMessages("en");
     const chineseVoice = voiceMessages("zh-CN");
     expect(Object.keys(englishVoice)).toEqual(Object.keys(chineseVoice));

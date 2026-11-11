@@ -519,6 +519,103 @@ describe("Grok history Fork mapping", () => {
       },
     ]);
   });
+
+  it("attaches native AskUserQuestion records from completed tool history", () => {
+    const snapshot = mapGrokReplay(
+      [
+        { type: "user.text", text: "ask", metadata: { eventId: "user-1" } },
+        {
+          type: "tool.call",
+          callId: "ask-1",
+          name: "_x.ai/ask_user_question",
+          title: "AskUserQuestion",
+          rawInput: {
+            questions: [
+              {
+                question: "Which letter?",
+                multiSelect: true,
+                options: [
+                  { label: "Alpha", description: "First", preview: "Alpha preview" },
+                  { label: "Beta", description: "Second" },
+                ],
+              },
+            ],
+          },
+          status: "completed",
+          rawOutput: {
+            outcome: "accepted",
+            answers: { "Which letter?": ["Alpha", "Beta"] },
+          },
+        },
+        { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
+      ],
+      grokHarnessId,
+      "session-1",
+      "/workspace",
+    );
+    const item = snapshot.turns[0]?.items[0]?.item;
+    expect(item).toMatchObject({
+      type: "toolExecution",
+      toolName: "_x.ai/ask_user_question",
+      questionRecord: {
+        title: "Grok",
+        outcome: "answered",
+        answers: { q0: ["Alpha", "Beta"] },
+        questions: [
+          {
+            id: "q0",
+            prompt: "Which letter?",
+            multiple: true,
+            allowOther: true,
+            options: [{ value: "Alpha", description: "First\n\nAlpha preview" }, { value: "Beta" }],
+          },
+        ],
+      },
+    });
+  });
+
+  it("attaches native UserAnswered messages from completed AskUserQuestion history", () => {
+    const snapshot = mapGrokReplay(
+      [
+        { type: "user.text", text: "ask", metadata: { eventId: "user-1" } },
+        {
+          type: "tool.call",
+          callId: "ask-1",
+          name: "ask_user_question",
+          title: "ask_user_question",
+          rawInput: {
+            questions: [
+              {
+                question: "Which letters?",
+                multi_select: true,
+                options: [
+                  { label: "Alpha", description: "First" },
+                  { label: "Beta", description: "Second" },
+                ],
+              },
+            ],
+          },
+          status: "completed",
+          rawOutput: {
+            type: "AskUserQuestion",
+            UserAnswered: {
+              message:
+                'User has answered your questions: "Which letters?"="Alpha". You can now continue with the user\'s answers in mind.',
+            },
+          },
+        },
+        { type: "turn.completed", nativeTurnKey: "prompt-1", stopReason: "end_turn" },
+      ],
+      grokHarnessId,
+      "session-1",
+      "/workspace",
+    );
+    expect(snapshot.turns[0]?.items[0]?.item).toMatchObject({
+      type: "toolExecution",
+      toolName: "ask_user_question",
+      questionRecord: { outcome: "answered", answers: { q0: ["Alpha"] } },
+    });
+  });
 });
 
 describe("Grok history local media Markdown", () => {

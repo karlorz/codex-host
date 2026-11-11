@@ -18,6 +18,7 @@ const { outputFiles } = await build({
     const state={questions:[question],thread:'thread-1',host:'local',calls:[],fail:false,listFail:false,hold:false,listHold:false};
     const route={async sendRequest(method,params){
       state.calls.push({method,params});
+      if(method.endsWith('question-records/list')) return {records:[],pendingAnchors:[]};
       if(method.endsWith('/list')) {
         const snapshot=structuredClone(state.questions);
         if(state.listHold) await new Promise(resolve=>state.releaseList=resolve);

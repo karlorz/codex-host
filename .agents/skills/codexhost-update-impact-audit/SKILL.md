@@ -69,6 +69,7 @@ Inventory contracts by surface:
 | Sidebar | `data-app-action-sidebar-thread-row`, `data-thread-title-trigger`, `data-thread-title` |
 | Settings | `data-testid="app-shell-header-context-menu-surface"` and structural insertion slot |
 | Fork | `data-response-annotation-conversation`, `data-content-search-turn-key`, owning callback/Fiber state |
+| Transcript | `data-local-conversation-item-target-ids`, `data-turn-key`, `data-content-search-turn-key`; live in-chat Harness question cards mount inside identified item rows; answered records stay visible as a full-width history block during Working, then park on the turn's visible reply |
 | Codex usage gate | Composer owner props `onLocalSubmitStart` + boolean `submitDisabled`; boolean selectors reading `authMethod` → `rate_limit.allowed` and reserve `hardBlocked`; `useSyncExternalStore` hook layout |
 
 Marker counts are triage signals, not conclusions. If a marker moves to another chunk with the same use and live relationship, classify it as relocation. If counts remain equal, still inspect changed relationships and API shape.

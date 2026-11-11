@@ -1,4 +1,8 @@
-import type { QuestionAutoResolution, ThreadQuestion } from "@codexhost/shared-contracts";
+import type {
+  QuestionAutoResolution,
+  QuestionRecordOutcome,
+  ThreadQuestion,
+} from "@codexhost/shared-contracts";
 import type { IconNode } from "lucide";
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Check from "lucide/dist/esm/icons/check.mjs";
@@ -7,12 +11,21 @@ import Pencil from "lucide/dist/esm/icons/pencil.mjs";
 import X from "lucide/dist/esm/icons/x.mjs";
 import { QUESTION_CARD_CSS } from "./renderer-question-card-style.js";
 
+const RECORD_OUTCOME_LABEL: Record<QuestionRecordOutcome, string> = {
+  answered: "Answered",
+  skipped: "Skipped (you cancelled)",
+  closedByHarness: "Closed by Harness",
+  expired: "Expired",
+  turnEnded: "Turn ended",
+};
+
 /** The card submits public Host values, never native labels or SDK objects. */
 export function createQuestionCard(
   document: Document,
   question: ThreadQuestion,
   submit: (answers: Record<string, string[]>, cancelled: boolean) => Promise<void>,
   initial: Record<string, string[]> = {},
+  record?: { outcome: QuestionRecordOutcome },
 ) {
   const icon = (node: IconNode) =>
     document.adoptNode(
@@ -31,7 +44,12 @@ export function createQuestionCard(
     return selected;
   };
   const root = document.createElement("section");
-  root.dataset.codexhostQuestion = question.interactionId;
+  if (record) {
+    root.dataset.codexhostQuestionRecord = question.interactionId;
+    root.dataset.outcome = record.outcome;
+  } else {
+    root.dataset.codexhostQuestion = question.interactionId;
+  }
   root.setAttribute("aria-label", question.title ?? "Question");
   root.addEventListener("keydown", (event) => {
     event.stopPropagation();
@@ -77,7 +95,14 @@ export function createQuestionCard(
   dismiss.className = "dismiss";
   dismiss.append(icon(X));
   dismiss.setAttribute("aria-label", "Dismiss question");
-  title.append(titleIcon, titleText, countdown, dismiss);
+  const outcome = document.createElement("span");
+  outcome.className = "outcome";
+  if (record) {
+    outcome.textContent = RECORD_OUTCOME_LABEL[record.outcome];
+    title.append(titleIcon, titleText, outcome);
+  } else {
+    title.append(titleIcon, titleText, countdown, dismiss);
+  }
   const body = document.createElement("div");
   body.className = "body";
   surface.append(title, body);
@@ -186,6 +211,23 @@ export function createQuestionCard(
   const actions = document.createElement("div");
   actions.className = "actions";
   const readAnswers = () => Object.fromEntries([...readers].map(([id, read]) => [id, read()]));
+  if (record) {
+    surface.classList.add("record");
+    for (const control of controls) control.disabled = true;
+    if (footer.childNodes.length > 0) surface.append(footer);
+    return {
+      root,
+      readAnswers,
+      get autoResolution() {
+        return autoResolution;
+      },
+      updateAutoResolution() {},
+      dispose() {
+        if (countdownTimer !== undefined) document.defaultView?.clearInterval(countdownTimer);
+        root.remove();
+      },
+    };
+  }
   let busy = false;
   const send = async (cancelled: boolean) => {
     if (busy) return;

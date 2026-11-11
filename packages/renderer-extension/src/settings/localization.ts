@@ -42,6 +42,10 @@ export interface RendererSettingsMessages {
   readonly hideCodexUsageBannerDescription: string;
   readonly hideCodexUsageBannerHelpLabel: string;
   readonly hideCodexUsageBannerHelp: readonly string[];
+  readonly harnessQuestionInChatTitle: string;
+  readonly harnessQuestionInChatDescription: string;
+  readonly harnessQuestionInChatHelpLabel: string;
+  readonly harnessQuestionInChatHelp: readonly string[];
   readonly loadedSessions: {
     title: string;
     description: string;
@@ -344,6 +348,17 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "The native card appears when the signed-in ChatGPT Codex quota is exhausted.",
     "When this is on, that card is hidden on every Composer, including Codex threads. Reset usage and Upgrade stay available in Settings.",
     "Turning this off only shows the native card again. Send on this Composer, including Codex threads, is already separated from that quota card.",
+  ]),
+  harnessQuestionInChatTitle: "Show Harness questions in the chat",
+  harnessQuestionInChatDescription:
+    "On: questions from external Harnesses appear in the conversation and stay there after you answer. Off: they appear above the message box and close after Send or Skip.",
+  harnessQuestionInChatHelpLabel: "About Harness question placement",
+  harnessQuestionInChatHelp: Object.freeze([
+    "Codex's own questions always use the Codex Desktop layout.",
+    "Some single-choice and text questions still use the Desktop card.",
+    "Answered questions remain after reopening a chat only if the Harness's own history records them.",
+    "Desktop still folds thinking and tool calls. The answered card stays visible as full-width history during the turn, then with the visible reply.",
+    "Update both the Host and the Desktop extension, including remote Hosts.",
   ]),
   loadedSessions: {
     title: "Loaded sessions",
@@ -713,6 +728,17 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "已登录的 ChatGPT Codex 额度耗尽时，Desktop 会显示原生警告卡片。",
     "开启后，所有 Composer 都隐藏该卡片，包括 Codex 会话。「重置用量」和「升级」仍可在设置中使用。",
     "关闭此开关只会重新显示原生卡片。当前 Composer 的发送（包括 Codex 会话）已与该额度卡片分离。",
+  ]),
+  harnessQuestionInChatTitle: "在对话中显示 Harness 提问",
+  harnessQuestionInChatDescription:
+    "开启：外部 Harness 的提问出现在对话中，回答后仍保留。关闭：提问出现在输入框上方，发送或跳过后关闭。",
+  harnessQuestionInChatHelpLabel: "Harness 提问位置说明",
+  harnessQuestionInChatHelp: Object.freeze([
+    "Codex 自己的提问始终使用 Codex Desktop 的布局。",
+    "部分单选和文本提问仍使用 Desktop 卡片。",
+    "只有 Harness 自己的历史记录了提问和答案时，重新打开会话才会再次显示已回答的提问。",
+    "Desktop 仍会折叠思考和工具调用。已回答的卡片在回合进行中也保持全宽历史，随后留在可见回复处。",
+    "Host 和 Desktop 扩展需要一起更新，包括远程 Host。",
   ]),
   loadedSessions: {
     title: "已加载会话",

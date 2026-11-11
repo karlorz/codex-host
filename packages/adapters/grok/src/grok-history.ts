@@ -57,6 +57,7 @@ import {
   startGrokToolItem,
   type GrokProjectedToolItem,
 } from "./grok-tool-output.js";
+import { grokQuestionRecordFromTool } from "./grok-question-record.js";
 
 function stableId(
   kind: string,
@@ -325,7 +326,14 @@ export function mapGrokReplay(
         rawOutput,
       );
     }
-    items.push({ item: tool, outcome });
+    const questionRecord =
+      tool.type === "toolExecution"
+        ? grokQuestionRecordFromTool(tool.toolName, tool.arguments, rawOutput, status)
+        : undefined;
+    items.push({
+      item: questionRecord && tool.type === "toolExecution" ? { ...tool, questionRecord } : tool,
+      outcome,
+    });
     if (status !== "completed") return;
     const changes = projectGrokFileChanges(content, cwd);
     if (changes) {

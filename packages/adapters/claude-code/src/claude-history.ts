@@ -19,6 +19,7 @@ import {
 } from "./native-message.js";
 import { ClaudeBackgroundOccupancy } from "./background-occupancy.js";
 import { claudeTranscriptItemId } from "./item-identity.js";
+import { claudeAskUserQuestionRecord } from "./claude-question-record.js";
 
 interface ClaudeHistoryMessage {
   type: "user" | "assistant";
@@ -30,6 +31,7 @@ interface ClaudeHistoryMessage {
   syntheticUser: boolean;
   interrupted: boolean;
   startsTurn: boolean;
+  toolUseResult?: unknown;
 }
 
 const claudeCodeHarnessId: HarnessId = harnessIdSchema.parse("claude-code");
@@ -188,6 +190,9 @@ function conversationMessages(values: unknown[], sessionId: string): ClaudeHisto
           value.isMeta === true ||
           isTaskNotificationOrigin(value) ||
           (value.toolUseResult !== undefined && value.toolUseResult !== null)),
+      ...(value.toolUseResult !== undefined || value.tool_use_result !== undefined
+        ? { toolUseResult: value.toolUseResult ?? value.tool_use_result }
+        : {}),
     };
     const notification =
       message.type === "user" &&
@@ -470,6 +475,13 @@ export function mapClaudeSnapshot(values: unknown[], sessionId: string): HostThr
             continue;
           }
           const argumentsResult = jsonValueSchema.safeParse(block.input);
+          const questionRecord = claudeAskUserQuestionRecord(
+            block.name,
+            block.input,
+            output,
+            failed,
+            result.toolUseResult,
+          );
           items.push({
             item: {
               type: "toolExecution",
@@ -477,6 +489,7 @@ export function mapClaudeSnapshot(values: unknown[], sessionId: string): HostThr
               toolName: block.name,
               arguments: argumentsResult.success ? argumentsResult.data : null,
               ...(output ? { output: { content: [{ type: "text" as const, text: output }] } } : {}),
+              ...(questionRecord ? { questionRecord } : {}),
             },
             outcome: toolOutcome,
           });
@@ -500,7 +513,10 @@ function toolResultBlocks(messages: ClaudeHistoryMessage[]): Map<string, Record<
         block.type === "tool_result" &&
         typeof block.tool_use_id === "string"
       ) {
-        results.set(block.tool_use_id, block);
+        results.set(block.tool_use_id, {
+          ...block,
+          ...(message.toolUseResult !== undefined ? { toolUseResult: message.toolUseResult } : {}),
+        });
       }
     }
   }
@@ -654,6 +670,13 @@ export function mapClaudeSubagentSnapshot(
           continue;
         }
         const argumentsResult = jsonValueSchema.safeParse(block.input);
+        const questionRecord = claudeAskUserQuestionRecord(
+          block.name,
+          block.input,
+          output,
+          failed,
+          result.toolUseResult,
+        );
         items.push({
           item: {
             type: "toolExecution",
@@ -661,6 +684,7 @@ export function mapClaudeSubagentSnapshot(
             toolName: block.name,
             arguments: argumentsResult.success ? argumentsResult.data : null,
             ...(output ? { output: { content: [{ type: "text" as const, text: output }] } } : {}),
+            ...(questionRecord ? { questionRecord } : {}),
           },
           outcome: toolOutcome,
         });

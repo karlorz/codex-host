@@ -4,6 +4,11 @@ import {
   writeCodexUsageBannerPreference,
 } from "../renderer-codex-usage-banner-preference.js";
 import {
+  HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT,
+  readHarnessQuestionPlacement,
+  writeHarnessQuestionPlacement,
+} from "../renderer-question-placement-preference.js";
+import {
   REASONING_SOFT_WRAP_CHANGE_EVENT,
   readReasoningTranscriptSoftWrap,
   setReasoningTranscriptSoftWrap,
@@ -66,6 +71,28 @@ export function createAppearanceSettingsPage(
       usageBannerRow.item.append(usageBanner);
       card.append(usageBannerRow.item);
 
+      const inChatId = preferenceId("harness-question-in-chat");
+      const inChatRow = createPreferenceItem(document, {
+        title: messages.harnessQuestionInChatTitle,
+        description: messages.harnessQuestionInChatDescription,
+        controlId: inChatId,
+        help: {
+          label: messages.harnessQuestionInChatHelpLabel,
+          lines: messages.harnessQuestionInChatHelp,
+        },
+      });
+      const inChat = createPreferenceSwitch(document, inChatId, inChatRow.description.id);
+      inChat.checked = readHarnessQuestionPlacement(ownerWindow) === "in-chat";
+      inChat.addEventListener("change", () => {
+        writeHarnessQuestionPlacement(ownerWindow, inChat.checked);
+      });
+      const syncInChat = (): void => {
+        inChat.checked = readHarnessQuestionPlacement(ownerWindow) === "in-chat";
+      };
+      ownerWindow.addEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, syncInChat);
+      inChatRow.item.append(inChat);
+      card.append(inChatRow.item);
+
       const softWrapId = preferenceId("reasoning-soft-wrap");
       const row = createPreferenceItem(document, {
         title: messages.reasoningSoftWrapTitle,
@@ -92,6 +119,7 @@ export function createAppearanceSettingsPage(
       );
       return () => {
         ownerWindow.removeEventListener(CODEX_USAGE_BANNER_CHANGE_EVENT, syncUsageBanner);
+        ownerWindow.removeEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, syncInChat);
         ownerWindow.removeEventListener(REASONING_SOFT_WRAP_CHANGE_EVENT, sync);
         disposeIdleRelease();
       };

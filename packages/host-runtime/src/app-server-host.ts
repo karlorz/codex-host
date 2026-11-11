@@ -18,11 +18,14 @@ import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
   THREAD_QUESTION_ACTIVITY_METHOD,
+  THREAD_QUESTION_RECORDS_LIST_METHOD,
   threadQuestionActivityParamsSchema,
   threadQuestionActivityResultSchema,
   threadQuestionsParamsSchema,
   threadQuestionsResultSchema,
   threadQuestionRespondParamsSchema,
+  threadQuestionRecordsResultSchema,
+  type QuestionRecordOutcome,
 } from "@codexhost/shared-contracts";
 import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
 import { NativeVoiceGateway } from "./native-voice-gateway.js";
@@ -209,6 +212,7 @@ import {
   usesSharedQuestionCard,
   validateSharedQuestionResponse,
 } from "./shared-question.js";
+import { QuestionRecordStore } from "./question-records.js";
 import {
   ExternalHistoryRequestError,
   listExternalItems,
@@ -459,6 +463,7 @@ interface PendingDesktopQuestion {
   thread: ExternalThread;
   interaction: HostQuestionInteraction;
   projection: CodexQuestionRequestProjection;
+  itemId: HostItemId;
   timeout: NodeJS.Timeout | null;
   extended: boolean;
 }
@@ -736,6 +741,8 @@ export class AppServerHost {
   #repository: ExternalThreadRepository;
   #pendingDesktopApprovals = new Map<HostApprovalRequestId, PendingDesktopApproval>();
   #pendingDesktopQuestions = new Map<HostQuestionRequestId, PendingDesktopQuestion>();
+  readonly #questionRecords = new QuestionRecordStore();
+  readonly #questionHistoryIngested = new WeakSet<object>();
   #nextApprovalRequestId = HOST_APPROVAL_REQUEST_ID_MAX;
   #nextQuestionRequestId = HOST_QUESTION_REQUEST_ID_MAX;
   #delegationCoordinator: HarnessDelegationCoordinator;
@@ -1593,7 +1600,8 @@ export class AppServerHost {
     if (
       request.method === THREAD_QUESTIONS_LIST_METHOD ||
       request.method === THREAD_QUESTION_RESPOND_METHOD ||
-      request.method === THREAD_QUESTION_ACTIVITY_METHOD
+      request.method === THREAD_QUESTION_ACTIVITY_METHOD ||
+      request.method === THREAD_QUESTION_RECORDS_LIST_METHOD
     ) {
       await this.#handleSharedQuestionRequest(request);
       return;
@@ -5851,8 +5859,10 @@ export class AppServerHost {
     if (event.type === "session.faulted") {
       this.#externalVoiceResults.observe(thread.id, event);
       for (const pending of [...this.#pendingDesktopQuestions.values()]) {
-        if (pending.extended && pending.thread === thread)
+        if (pending.extended && pending.thread === thread) {
+          this.#rememberQuestion(pending, "closedByHarness", {});
           this.#retireDesktopQuestion(pending.interaction.interactionId, thread);
+        }
       }
       this.#externalSteering.fault(thread.id, new Error(event.error.message));
       thread.stateObserver.fault(new Error(event.error.message));
@@ -5906,6 +5916,11 @@ export class AppServerHost {
     }
     const projection = this.#projectedTurn(thread, event.turnId);
     await this.#waitForTurnResponse(thread, event.turnId);
+    if (event.type === "item.started")
+      this.#questionRecords.ingest(thread, event.turnId, event.item);
+    if (event.type === "item.completed") {
+      this.#questionRecords.ingest(thread, event.turnId, event.snapshot.item);
+    }
     if (
       event.type === "item.completed" &&
       event.snapshot.item.type === "agentMessage" &&
@@ -5925,12 +5940,16 @@ export class AppServerHost {
           pending.extended &&
           pending.thread === thread &&
           pending.interaction.turnId === event.turnId
-        )
+        ) {
+          this.#rememberQuestion(pending, "turnEnded", {});
           this.#retireDesktopQuestion(pending.interaction.interactionId, thread);
+        }
       }
     }
     if (event.type === "interaction.closed") {
       await this.#resolveDesktopApproval(event.interactionId, thread);
+      const pending = this.#pendingQuestion(event.interactionId, thread);
+      if (pending) this.#rememberQuestion(pending, "closedByHarness", {});
       await this.#resolveDesktopQuestion(event.interactionId, thread);
     }
     const ephemeralTurn =
@@ -6348,8 +6367,10 @@ export class AppServerHost {
         await this.#resolveDesktopApproval(pending.interaction.interactionId, thread);
     }
     for (const pending of [...this.#pendingDesktopQuestions.values()]) {
-      if (pending.thread === thread)
+      if (pending.thread === thread) {
+        this.#rememberQuestion(pending, "closedByHarness", {});
         await this.#resolveDesktopQuestion(pending.interaction.interactionId, thread);
+      }
     }
   }
 
@@ -6378,6 +6399,50 @@ export class AppServerHost {
   }
 
   async #handleSharedQuestionRequest(request: JsonRpcRequest): Promise<void> {
+    if (request.method === THREAD_QUESTION_RECORDS_LIST_METHOD) {
+      const parsed = threadQuestionsParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        await this.#writer.json(rpcError(request, -32602, "Invalid question record list request"));
+        return;
+      }
+      const thread = this.#externalRuntime.get(parsed.data.threadId);
+      if (thread && !this.#questionHistoryIngested.has(thread)) {
+        const snapshot = await thread.session.readSnapshot();
+        if (snapshot.ok) {
+          this.#questionHistoryIngested.add(thread);
+          this.#questionRecords.ingestHistory(
+            thread,
+            snapshot.value.turns.flatMap((turn, index) => {
+              const turnId = thread.record.turnMappings[index]?.hostTurnId;
+              if (!turnId) return [];
+              return [{ turnId, items: turn.items.map((entry) => entry.item) }];
+            }),
+          );
+        }
+      }
+      const pendingAnchors = [...this.#pendingDesktopQuestions.values()].flatMap((pending) =>
+        pending.thread.id === parsed.data.threadId
+          ? [
+              {
+                interactionId: pending.interaction.interactionId,
+                turnId: pending.interaction.turnId,
+                itemId: pending.itemId,
+              },
+            ]
+          : [],
+      );
+      await this.#writer.json(
+        rpcEnvelope(request, {
+          result: jsonValueSchema.parse(
+            threadQuestionRecordsResultSchema.parse({
+              records: this.#questionRecords.list(thread),
+              pendingAnchors,
+            }),
+          ),
+        }),
+      );
+      return;
+    }
     if (request.method === THREAD_QUESTIONS_LIST_METHOD) {
       const parsed = threadQuestionsParamsSchema.safeParse(request.params);
       if (!parsed.success) {
@@ -6470,15 +6535,23 @@ export class AppServerHost {
             response,
           });
           if (!result.ok) {
-            if (result.error.code === "invalidState")
+            if (result.error.code === "invalidState") {
+              this.#rememberQuestion(pending, "closedByHarness", {});
               this.#retireDesktopQuestion(params.interactionId, pending.thread);
+            }
             await this.#writer.json(rpcError(request, -32080, result.error.message));
             return;
           }
+          this.#rememberQuestion(
+            pending,
+            response.cancelled ? "skipped" : "answered",
+            response.answers,
+          );
           this.#retireDesktopQuestion(params.interactionId, pending.thread);
           await this.#writer.json(rpcEnvelope(request, { result: { accepted: true } }));
         } catch (error) {
           // Delivery is ambiguous; do not allow the same answer to be written twice.
+          this.#rememberQuestion(pending, "closedByHarness", {});
           this.#retireDesktopQuestion(params.interactionId, pending.thread);
           await this.#writer.json(rpcError(request, -32080, errorMessage(error)));
         } finally {
@@ -6561,6 +6634,7 @@ export class AppServerHost {
       thread,
       interaction,
       projection: result.questionRequest,
+      itemId: result.itemId,
       timeout: null,
       extended: shared,
     };
@@ -6613,6 +6687,11 @@ export class AppServerHost {
         this.#diagnose(error);
         response = { type: "question" as const, answers: {}, cancelled: true as const };
       }
+      this.#rememberQuestion(
+        pending,
+        response.cancelled ? "skipped" : "answered",
+        response.answers,
+      );
       const result = await pending.thread.session.execute({
         type: "interaction.respond",
         interactionId: pending.interaction.interactionId,
@@ -6634,6 +6713,7 @@ export class AppServerHost {
         this.#externalRuntime.idleRelease.failure(pending.thread)
       )
         return;
+      this.#rememberQuestion(pending, "expired", {});
       await this.#resolveDesktopQuestion(pending.interaction.interactionId, pending.thread);
       if (pending.responding) return;
       const result = await pending.thread.session.execute({
@@ -6644,6 +6724,30 @@ export class AppServerHost {
       if (!result.ok && result.error.code !== "invalidState") {
         this.#diagnose(`Question expiry failed: ${result.error.message}`);
       }
+    });
+  }
+
+  #pendingQuestion(
+    interactionId: HostInteractionId,
+    thread: ExternalThread,
+  ): PendingDesktopQuestion | undefined {
+    for (const pending of this.#pendingDesktopQuestions.values()) {
+      if (pending.thread === thread && pending.interaction.interactionId === interactionId)
+        return pending;
+    }
+    return undefined;
+  }
+
+  #rememberQuestion(
+    pending: PendingDesktopQuestion,
+    outcome: QuestionRecordOutcome,
+    answers: Record<string, string[]>,
+  ): void {
+    this.#questionRecords.record(pending.thread, {
+      interaction: pending.interaction,
+      itemId: pending.itemId,
+      outcome,
+      answers,
     });
   }
 

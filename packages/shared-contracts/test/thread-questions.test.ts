@@ -5,6 +5,7 @@ import {
   questionAutoResolutionSchema,
   threadQuestionActivityParamsSchema,
   threadQuestionActivityResultSchema,
+  threadQuestionRecordsResultSchema,
 } from "../src/index.js";
 
 describe("shared question contracts", () => {
@@ -82,5 +83,44 @@ describe("shared question contracts", () => {
         questions: [{ ...base, questions: [{ ...base.questions[0], secret: false }] }],
       }).success,
     ).toBe(true);
+  });
+
+  it("keeps pending question lists closed and serves records on a new method", () => {
+    expect(threadQuestionsResultSchema.safeParse({ questions: [], records: [] }).success).toBe(
+      false,
+    );
+    const record = {
+      interactionId: "q",
+      turnId: "t",
+      itemId: "item",
+      questions: [
+        {
+          id: "letters",
+          type: "choice" as const,
+          prompt: "Letters?",
+          optional: false,
+          multiple: true,
+          allowOther: true,
+          options: [{ value: "a", label: "Alpha" }],
+        },
+      ],
+      outcome: "answered" as const,
+      answers: { letters: ["a"] },
+    };
+    expect(
+      threadQuestionRecordsResultSchema.parse({ records: [record], pendingAnchors: [] }),
+    ).toEqual({ records: [record], pendingAnchors: [] });
+    expect(
+      threadQuestionRecordsResultSchema.safeParse({
+        records: [{ ...record, outcome: "user" }],
+        pendingAnchors: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      threadQuestionRecordsResultSchema.safeParse({
+        records: [{ ...record, questions: [{ ...record.questions[0], secret: true }] }],
+        pendingAnchors: [],
+      }).success,
+    ).toBe(false);
   });
 });

@@ -21,7 +21,7 @@
 | [`architecture/harness-command-integration.md`](architecture/harness-command-integration.md) | Harness 原生命令的 Adapter、Host、Renderer 边界；新增命令能力时阅读。 |
 | [`architecture/harness-executable-discovery.md`](architecture/harness-executable-discovery.md) | Harness CLI 的跨平台发现、连接页安装指引和 DSH 特殊连接范围；修改安装指引、发现或启动逻辑时阅读。 |
 | [`architecture/harness-session-import.md`](architecture/harness-session-import.md) | 原生会话的本地/远程 Host 导入契约、Broker 转发和恢复边界；扩展导入能力时阅读。 |
-| [`architecture/harness-questions.md`](architecture/harness-questions.md) | 外部 Harness 多选提问卡片、原生单选分流、回答归属与生命周期；修改提问交互时阅读。 |
+| [`architecture/harness-questions.md`](architecture/harness-questions.md) | 外部 Harness 多选提问卡片、对话内默认位置与 Appearance 开关、只读回答记录、原生单选分流、回答归属与生命周期；修改提问交互时阅读。 |
 | [`architecture/external-thread-steering.md`](architecture/external-thread-steering.md) | 外部 Thread 按 Session 能力选择原生同轮插入或停止后重发；修改 steering 时阅读。 |
 | [`architecture/external-thread-queue.md`](architecture/external-thread-queue.md) | 外部 Thread 跟进消息的 Host 原生 `thread/queue/*`、自动推进与中断暂停；修改排队或 Turn 启动时阅读。 |
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
@@ -51,6 +51,7 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
+| [`harnesses/claude-code/claude-code-questions.md`](harnesses/claude-code/claude-code-questions.md) | Claude Code 原生 `AskUserQuestion`、共享卡片对话内/Composer 位置、以及重启后从原生历史恢复只读回答记录；修改提问显示或历史回放时阅读。 |
 | [`harnesses/claude-code/claude-code-plan-mode.md`](harnesses/claude-code/claude-code-plan-mode.md) | Claude Code 规划模式、计划退出确认与权限状态边界；修改 Plan Mode 时阅读。 |
 | [`harnesses/claude-code/claude-code-edit-recovery.md`](harnesses/claude-code/claude-code-edit-recovery.md) | 最后一条消息编辑后的独立 Session、空历史保留和关闭语义；修改编辑恢复时阅读。 |
 | [`harnesses/claude-code/claude-code-background-terminals.md`](harnesses/claude-code/claude-code-background-terminals.md) | Claude 后台命令作为 Desktop 后台终端：原生通知结算、实时输出、历史叠加与所有权；修改后台命令时阅读。 |
@@ -108,7 +109,7 @@
 | [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok native goal helpers, Subagent identity/status, final child transcripts and Desktop projection. |
 | [`harnesses/grok/background-activity.md`](harnesses/grok/background-activity.md) | Grok native processes and children, Loop schedules in the shared summary panel, controls and the verification matrix. |
 | [`harnesses/grok/generated-images.md`](harnesses/grok/generated-images.md) | Grok Imagine files project to Desktop `imageGeneration`; keep Markdown rewrite for videos and cited paths. |
-| [`harnesses/grok/questions.md`](harnesses/grok/questions.md) | Grok native ACP questions, shared choice/Other cards, Composer availability, native timeout countdowns, and grokgod limits. |
+| [`harnesses/grok/questions.md`](harnesses/grok/questions.md) | Grok native ACP questions, shared choice/Other cards, in-chat records, Composer availability, native timeout countdowns, and grokgod limits. |
 | [`harnesses/grok/mcp-elicitation.md`](harnesses/grok/mcp-elicitation.md) | Grok MCP consent forms project to Desktop approval, including offered Always allow; bounded empty forms only. |
 | [`harnesses/grok/computer-use-release.md`](harnesses/grok/computer-use-release.md) | Grok native turn-end Computer Use cleanup, Mac Sky bridge, failure behavior, and runtime limits. |
 | [`harnesses/grok/computer-use-settings.md`](harnesses/grok/computer-use-settings.md) | Grok `cua_repl` Computer Use and in-app browser (IAB) switches, surface matrix, IAB vs Computer Use vs Chrome extension, fail-closed binding. |

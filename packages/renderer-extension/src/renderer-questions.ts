@@ -2,12 +2,28 @@ import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
   THREAD_QUESTION_ACTIVITY_METHOD,
+  THREAD_QUESTION_RECORDS_LIST_METHOD,
   threadQuestionActivityResultSchema,
+  threadQuestionRecordsResultSchema,
   threadQuestionsResultSchema,
   threadQuestionRespondResultSchema,
+  type ThreadQuestion,
+  type ThreadQuestionPendingAnchor,
+  type ThreadQuestionRecord,
 } from "@codexhost/shared-contracts";
 import { createQuestionCard } from "./renderer-question-card.js";
 import { installQuestionActivity } from "./renderer-question-activity.js";
+import {
+  ensureQuestionHistorySlot,
+  findDisplayedTranscriptItem,
+  findTranscriptItem,
+  findVisibleHistoryMount,
+  transcriptItemContractPresent,
+} from "./renderer-question-anchors.js";
+import {
+  HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT,
+  readHarnessQuestionPlacement,
+} from "./renderer-question-placement-preference.js";
 import { isUnsupportedMethod, type RendererRequestOptions } from "./renderer-request-sender.js";
 
 export interface QuestionContext {
@@ -27,6 +43,35 @@ function same(a: QuestionContext | null, b: QuestionContext | null): boolean {
   );
 }
 
+function sharedCard(question: ThreadQuestion | undefined): question is ThreadQuestion {
+  return Boolean(
+    question?.questions.some(
+      (field) => field.type === "choice" && (field.multiple || field.allowOther),
+    ),
+  );
+}
+
+function createJumpPill(document: Document, onJump: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.codexhostQuestionJump = "";
+  button.textContent = "Question waiting — Jump";
+  button.addEventListener("click", onJump);
+  Object.assign(button.style, {
+    display: "block",
+    width: "100%",
+    margin: "0 0 8px",
+    minHeight: "28px",
+    border: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+    borderRadius: "999px",
+    background: "transparent",
+    color: "inherit",
+    font: "13px/1.4 system-ui, sans-serif",
+    cursor: "pointer",
+  });
+  return button;
+}
+
 /** Only the unambiguous visible external Composer can own a card. */
 export function installRendererQuestions(
   window: Window,
@@ -38,9 +83,17 @@ export function installRendererQuestions(
   let context: QuestionContext | null = null;
   let card: ReturnType<typeof createQuestionCard> | null = null;
   let cardKey: string | null = null;
+  let mountedPlacement: "in-chat" | "overlay" | "jump" | null = null;
+  let jump: HTMLButtonElement | null = null;
   let stopActivity: (() => void) | undefined;
   const unsupported = new WeakSet<object>();
+  const unsupportedRecords = new WeakSet<object>();
   const drafts = new Map<string, Record<string, string[]>>();
+  const records = new Map<string, ReturnType<typeof createQuestionCard>>();
+  const clearJump = () => {
+    jump?.remove();
+    jump = null;
+  };
   const clear = (retain = true) => {
     stopActivity?.();
     stopActivity = undefined;
@@ -52,12 +105,97 @@ export function installRendererQuestions(
     card?.dispose();
     card = null;
     cardKey = null;
+    mountedPlacement = null;
+    clearJump();
+  };
+  const clearRecords = () => {
+    for (const view of records.values()) view.dispose();
+    records.clear();
+  };
+  const resolveLivePlacement = (
+    document: Document,
+    itemId: string | undefined,
+  ): "in-chat" | "overlay" | "jump" => {
+    if (readHarnessQuestionPlacement(window) !== "in-chat") return "overlay";
+    if (itemId && findDisplayedTranscriptItem(document, itemId)) return "in-chat";
+    if (itemId && transcriptItemContractPresent(document)) return "jump";
+    return "overlay";
+  };
+  const placeLive = (
+    current: QuestionContext,
+    anchor: ThreadQuestionPendingAnchor | undefined,
+  ): "in-chat" | "overlay" | "jump" => {
+    const document = current.composer.ownerDocument;
+    const placement = resolveLivePlacement(document, anchor?.itemId);
+    if (!card) return placement;
+    if (placement === "in-chat" && anchor?.itemId) {
+      const row = findDisplayedTranscriptItem(document, anchor.itemId);
+      if (row) {
+        row.append(card.root);
+        return "in-chat";
+      }
+    }
+    if (placement === "jump" && anchor?.itemId) {
+      const itemId = anchor.itemId;
+      jump = createJumpPill(document, () => {
+        findTranscriptItem(document, itemId)?.scrollIntoView({ block: "nearest" });
+        void refresh();
+      });
+      current.composer.before(jump);
+      return "jump";
+    }
+    current.composer.before(card.root);
+    return "overlay";
+  };
+  const syncRecords = (
+    current: QuestionContext,
+    closed: ThreadQuestionRecord[],
+    liveId: string | undefined,
+  ) => {
+    const document = current.composer.ownerDocument;
+    const visible = new Set<string>();
+    for (const record of closed) {
+      if (record.interactionId === liveId) continue;
+      const mount = findVisibleHistoryMount(document, record.itemId, record.turnId);
+      if (!mount) continue;
+      const host = ensureQuestionHistorySlot(document, mount);
+      visible.add(record.interactionId);
+      const existing = records.get(record.interactionId);
+      if (existing?.root.isConnected && existing.root.parentElement === host) continue;
+      existing?.dispose();
+      const view = createQuestionCard(
+        document,
+        {
+          interactionId: record.interactionId,
+          turnId: record.turnId,
+          ...(record.title !== undefined ? { title: record.title } : {}),
+          questions: record.questions,
+        },
+        async () => undefined,
+        record.answers,
+        { outcome: record.outcome },
+      );
+      host.append(view.root);
+      records.set(record.interactionId, view);
+    }
+    for (const [id, view] of records) {
+      if (visible.has(id) && view.root.isConnected) continue;
+      view.dispose();
+      records.delete(id);
+    }
+    while (records.size > 50) {
+      const oldest = records.keys().next().value;
+      if (oldest === undefined) break;
+      records.get(oldest)?.dispose();
+      records.delete(oldest);
+    }
   };
   const refresh = async () => {
     if (disposed) return;
     const next = readContext();
     if (!same(context, next)) {
       clear();
+      clearRecords();
       context = next;
       revision++;
     }
@@ -66,38 +204,66 @@ export function installRendererQuestions(
     const startedRevision = revision;
     inFlight = true;
     try {
-      const raw = await current.route.sendRequest(
-        THREAD_QUESTIONS_LIST_METHOD,
-        { threadId: current.threadId },
-        { priority: "background", timeoutMs: 5000 },
-      );
+      const listParams = { threadId: current.threadId };
+      const listOptions = { priority: "background" as const, timeoutMs: 5000 };
+      const recordsPromise = unsupportedRecords.has(current.route)
+        ? Promise.resolve(undefined)
+        : Promise.resolve(
+            current.route.sendRequest(THREAD_QUESTION_RECORDS_LIST_METHOD, listParams, listOptions),
+          ).catch((error: unknown) => {
+            if (isUnsupportedMethod(error, THREAD_QUESTION_RECORDS_LIST_METHOD)) {
+              unsupportedRecords.add(current.route);
+            }
+            return undefined;
+          });
+      const [raw, recordRaw] = await Promise.all([
+        current.route.sendRequest(THREAD_QUESTIONS_LIST_METHOD, listParams, listOptions),
+        recordsPromise,
+      ]);
       if (disposed || revision !== startedRevision || !same(current, readContext())) return;
       const question = threadQuestionsResultSchema.parse(raw).questions[0];
-      if (
-        !question ||
-        !question.questions.some(
-          (field) => field.type === "choice" && (field.multiple || field.allowOther),
-        )
-      ) {
+      const live = sharedCard(question) ? question : undefined;
+      let closed: ThreadQuestionRecord[] = [];
+      let pendingAnchors: ThreadQuestionPendingAnchor[] = [];
+      if (recordRaw !== undefined) {
+        const parsed = threadQuestionRecordsResultSchema.safeParse(recordRaw);
+        if (parsed.success) {
+          closed = parsed.data.records;
+          pendingAnchors = parsed.data.pendingAnchors;
+        }
+      }
+      if (!live) {
         if (cardKey) drafts.delete(cardKey);
         clear(false);
+        syncRecords(current, closed, undefined);
         return;
       }
       const key = JSON.stringify([
         current.hostId,
         current.threadId,
-        question.turnId,
-        question.interactionId,
+        live.turnId,
+        live.interactionId,
       ]);
-      if (cardKey === key && card?.root.isConnected) {
-        card.updateAutoResolution(question.autoResolution);
-        return;
+      const anchor = pendingAnchors.find(
+        (candidate) => candidate.interactionId === live.interactionId,
+      );
+      const ownerDocument = current.composer.ownerDocument;
+      if (cardKey === key && mountedPlacement) {
+        const expected = resolveLivePlacement(ownerDocument, anchor?.itemId);
+        const stable =
+          mountedPlacement === expected &&
+          (expected === "jump" ? jump?.isConnected === true : card?.root.isConnected === true);
+        if (stable) {
+          card?.updateAutoResolution(live.autoResolution);
+          syncRecords(current, closed, live.interactionId);
+          return;
+        }
       }
       clear(cardKey === key);
       cardKey = key;
       card = createQuestionCard(
         current.composer.ownerDocument,
-        question,
+        live,
         async (answers, cancelled) => {
           if (disposed || !same(current, readContext()) || cardKey !== key)
             throw new Error("Question owner changed");
@@ -105,8 +271,8 @@ export function installRendererQuestions(
             THREAD_QUESTION_RESPOND_METHOD,
             {
               threadId: current.threadId,
-              turnId: question.turnId,
-              interactionId: question.interactionId,
+              turnId: live.turnId,
+              interactionId: live.interactionId,
               answers,
               cancelled,
             },
@@ -118,12 +284,12 @@ export function installRendererQuestions(
             // An older in-flight list must not resurrect an already answered card.
             revision++;
             if (cardKey === key) clear(false);
+            void refresh();
           }
         },
         drafts.get(key),
       );
-      // Keep question editors outside native Composer discovery and submission handlers.
-      current.composer.before(card.root);
+      mountedPlacement = placeLive(current, anchor);
       const mounted = card;
       stopActivity = installQuestionActivity(
         window,
@@ -137,8 +303,8 @@ export function installRendererQuestions(
             THREAD_QUESTION_ACTIVITY_METHOD,
             {
               threadId: current.threadId,
-              turnId: question.turnId,
-              interactionId: question.interactionId,
+              turnId: live.turnId,
+              interactionId: live.interactionId,
             },
             { priority: "background", timeoutMs: 4000 },
           );
@@ -147,9 +313,13 @@ export function installRendererQuestions(
           if (ack) mounted.updateAutoResolution(ack);
         },
       );
+      syncRecords(current, closed, live.interactionId);
     } catch (error) {
       if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
-      if (revision === startedRevision && same(current, context)) clear();
+      if (revision === startedRevision && same(current, context)) {
+        clear();
+        clearRecords();
+      }
     } finally {
       inFlight = false;
     }
@@ -157,17 +327,28 @@ export function installRendererQuestions(
   const timer = window.setInterval(() => {
     void refresh();
   }, 750);
+  const onPlacement = () => {
+    void refresh();
+  };
+  window.addEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, onPlacement);
   void refresh();
   return {
     refresh,
     refreshContext() {
       // Streaming DOM mutations must not turn the background poll into a request per token.
-      if (!same(context, readContext()) || (card && !card.root.isConnected)) void refresh();
+      if (
+        !same(context, readContext()) ||
+        (card && !card.root.isConnected) ||
+        jump?.isConnected === false
+      )
+        void refresh();
     },
     dispose() {
       disposed = true;
       window.clearInterval(timer);
+      window.removeEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, onPlacement);
       clear(false);
+      clearRecords();
       drafts.clear();
     },
   };

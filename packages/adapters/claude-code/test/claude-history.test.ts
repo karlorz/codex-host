@@ -776,6 +776,156 @@ describe("Claude history mapping", () => {
     });
   });
 
+  it("attaches AskUserQuestion records from native tool history", () => {
+    const snapshot = mapClaudeSnapshot(
+      [
+        message("user", "user-1", "ask"),
+        message("assistant", "assistant-1", [
+          {
+            type: "tool_use",
+            id: "ask-1",
+            name: "AskUserQuestion",
+            input: {
+              questions: [
+                {
+                  question: "Ship it?",
+                  header: "Release",
+                  options: [
+                    { label: "Yes", description: "Ship" },
+                    { label: "No", description: "Hold" },
+                  ],
+                },
+              ],
+            },
+          },
+        ]),
+        message("user", "tool-results", [
+          {
+            type: "tool_result",
+            tool_use_id: "ask-1",
+            content: JSON.stringify({ "Ship it?": "Yes" }),
+          },
+        ]),
+      ],
+      sessionId,
+    );
+    expect(snapshot.turns[0]?.items).toMatchObject([
+      {
+        item: {
+          type: "toolExecution",
+          toolName: "AskUserQuestion",
+          questionRecord: {
+            title: "Release",
+            outcome: "answered",
+            answers: { "question-1": ["Yes"] },
+            questions: [{ id: "question-1", prompt: "Ship it?", allowOther: true }],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("attaches AskUserQuestion records from native prose and toolUseResult answers", () => {
+    const questions = [
+      {
+        question: "Which letters?",
+        header: "Letters",
+        multiSelect: true,
+        options: [
+          { label: "Alpha", description: "First" },
+          { label: "Beta", description: "Second" },
+          { label: "Gamma", description: "Third" },
+        ],
+      },
+    ];
+    const snapshot = mapClaudeSnapshot(
+      [
+        message("user", "user-1", "ask"),
+        message("assistant", "assistant-1", [
+          {
+            type: "tool_use",
+            id: "ask-1",
+            name: "AskUserQuestion",
+            input: { questions },
+          },
+        ]),
+        {
+          ...message("user", "tool-results", [
+            {
+              type: "tool_result",
+              tool_use_id: "ask-1",
+              content:
+                'Your questions have been answered: "Which letters?"="Alpha, Beta". You can now continue with these answers in mind.',
+            },
+          ]),
+          toolUseResult: {
+            questions,
+            answers: { "Which letters?": "Alpha, Beta" },
+          },
+        },
+      ],
+      sessionId,
+    );
+    expect(snapshot.turns[0]?.items).toMatchObject([
+      {
+        item: {
+          type: "toolExecution",
+          toolName: "AskUserQuestion",
+          questionRecord: {
+            title: "Letters",
+            outcome: "answered",
+            answers: { "question-1": ["Alpha", "Beta"] },
+          },
+        },
+      },
+    ]);
+  });
+
+  it("attaches a skipped AskUserQuestion record when the user cancelled", () => {
+    const snapshot = mapClaudeSnapshot(
+      [
+        message("user", "user-1", "ask"),
+        message("assistant", "assistant-1", [
+          {
+            type: "tool_use",
+            id: "ask-1",
+            name: "AskUserQuestion",
+            input: {
+              questions: [
+                {
+                  question: "Ship it?",
+                  header: "Release",
+                  options: [{ label: "Yes" }, { label: "No" }],
+                },
+              ],
+            },
+          },
+        ]),
+        {
+          ...message("user", "tool-results", [
+            {
+              type: "tool_result",
+              tool_use_id: "ask-1",
+              content: "User cancelled the Question",
+              is_error: true,
+            },
+          ]),
+          toolUseResult: "Error: User cancelled the Question",
+        },
+      ],
+      sessionId,
+    );
+    expect(snapshot.turns[0]?.items).toMatchObject([
+      {
+        item: {
+          type: "toolExecution",
+          toolName: "AskUserQuestion",
+          questionRecord: { outcome: "skipped", answers: {} },
+        },
+      },
+    ]);
+  });
+
   it("rejects mismatched Sessions and duplicate native message identities", () => {
     const wrongSession = { ...message("user", "user-1", "first"), session_id: "other" };
     expect(() => mapClaudeSnapshot([wrongSession], sessionId)).toThrow("invalid message identity");

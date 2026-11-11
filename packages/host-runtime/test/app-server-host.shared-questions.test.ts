@@ -3,7 +3,9 @@ import type { HostChoiceQuestion } from "@codexhost/harness-adapter";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
+  THREAD_QUESTION_RECORDS_LIST_METHOD,
   threadQuestionsResultSchema,
+  threadQuestionRecordsResultSchema,
   type JsonObject,
 } from "@codexhost/shared-contracts";
 import {
@@ -215,5 +217,47 @@ describe("shared multi-select Questions", () => {
       result: { questions: [] },
     });
     expect(forward).not.toHaveBeenCalled();
+    expect(
+      await rpc(THREAD_QUESTION_RECORDS_LIST_METHOD, { threadId: "official-thread" }),
+    ).toMatchObject({ result: { records: [], pendingAnchors: [] } });
+    expect(forward).not.toHaveBeenCalled();
+  });
+
+  it("records answered shared cards and does not treat Host expiry as a user answer", async () => {
+    const answered = await setup();
+    const pending = threadQuestionRecordsResultSchema.parse(
+      (await answered.rpc(THREAD_QUESTION_RECORDS_LIST_METHOD, { threadId: answered.threadId }))
+        .result,
+    );
+    expect(pending.pendingAnchors).toEqual([
+      expect.objectContaining({
+        interactionId: answered.interactionId,
+        turnId: answered.turnId,
+        itemId: expect.any(String),
+      }),
+    ]);
+    expect(await answered.respond()).toMatchObject({ result: { accepted: true } });
+    expect(
+      threadQuestionRecordsResultSchema.parse(
+        (await answered.rpc(THREAD_QUESTION_RECORDS_LIST_METHOD, { threadId: answered.threadId }))
+          .result,
+      ).records,
+    ).toEqual([
+      expect.objectContaining({
+        interactionId: answered.interactionId,
+        outcome: "answered",
+        answers: { platform: ["mac", "win"] },
+        itemId: pending.pendingAnchors[0]?.itemId,
+      }),
+    ]);
+
+    const expired = await setup({ expiresInMs: 500 });
+    await vi.waitFor(async () => expect(await expired.list()).toEqual([]));
+    expect(
+      threadQuestionRecordsResultSchema.parse(
+        (await expired.rpc(THREAD_QUESTION_RECORDS_LIST_METHOD, { threadId: expired.threadId }))
+          .result,
+      ).records,
+    ).toEqual([expect.objectContaining({ outcome: "expired", answers: {} })]);
   });
 });

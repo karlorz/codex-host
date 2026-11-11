@@ -1,7 +1,10 @@
 import { REASONING_TRANSCRIPT_COMMAND } from "@codexhost/shared-contracts";
 
 export const TRANSCRIPT_ITEM_SELECTOR = "[data-local-conversation-item-target-ids]";
+/** Host Item ids published on transcript rows; live in-chat question cards mount here. */
 export const TRANSCRIPT_ITEM_IDS_ATTRIBUTE = "data-local-conversation-item-target-ids";
+/** Desktop turn node that remains after thinking/tool rows fold. */
+export const TRANSCRIPT_TURN_KEY_ATTRIBUTE = "data-content-search-turn-key";
 export const TRANSCRIPT_TEXT_BODY_SELECTOR = '[data-testid="exec-shell-body"]';
 export const REASONING_SOFT_WRAP_STORAGE_KEY = "codexhost.reasoning-soft-wrap.v1";
 export const REASONING_SOFT_WRAP_CHANGE_EVENT = "codexhost:reasoning-soft-wrap-changed";

@@ -31,7 +31,7 @@
 | B7 | 回滚最后一轮 / checkpoint | 原生有则必做 | P1 | 受限 | src/grok-rewind.ts、src/grok-adapter.ts | test/grok-rewind.test.ts、test/grok-adapter.test.ts |  |
 | B8 | 工具、命令、文件内容 | 原生有则必做 | P0 | 支持 | src/grok-tool-output.ts、src/grok-file-change.ts、src/grok-adapter.ts | test/grok-tool-output.test.ts、test/grok-file-change.test.ts |  |
 | B9 | 审批 | 原生有则必做 | P0 | 支持 | src/grok-adapter.ts、src/acp-transport.ts | test/grok-adapter.test.ts | ACP request_permission |
-| B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts | test/grok-questions.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 面试 Chat about this / Skip interview 不投影；真实 Desktop 已验收单选与文本 |
+| B10 | 提问 | 原生有则必做 | P0 | 受限 | src/acp-transport.ts、src/grok-questions.ts、src/grok-adapter.ts、src/grok-history.ts、src/grok-question-record.ts | test/grok-questions.test.ts、test/grok-question-record.test.ts、test/grok-history.test.ts、test/grok-acp-elicitation.test.ts、test/grok-adapter.test.ts；原生 AskUserQuestionExtRequest / AskUserQuestionExtResponse | 单选、Other、预览文本与取消；多选由共享 Renderer 卡片承载，真机已回传 Alpha + Beta，用户认可卡片样式；对话内默认放置与只读记录依赖 Host/Renderer 公共路径，历史回放映射 native AskUserQuestion `UserAnswered`；倒计时另需 0027 原生元数据；活动重置与倒计时同步需 0028 及原生配置开启；Plan 面试 Chat about this / Skip interview 不投影；真实 Desktop 已验收单选与文本；安装版对话内放置与重启后只读记录已验收 |
 | B11 | 原生 Subagent | 原生有则必做 | P2 | 支持 | src/grok-subagent.ts、src/grok-subagent-lifecycle.ts、src/grok-goal-helpers.ts | test/grok-subagent.test.ts、test/grok-adapter.test.ts、test/grok-goal-helpers.test.ts | Five completed goal helper histories readable through installed Host after restart; attended Reveal/header checks remain; streaming unclaimed |
 | B12 | 自主 Turn | 原生有则必做 | P1 | 受限 | src/grok-adapter.ts | test/grok-adapter.test.ts、test/grok-goal-history.test.ts | Installed goal completion and restart history verified; full pause/resume/Stop/budget matrix pending |
 | B13 | 会话用量 | 原生有则必做 | P1 | 支持 | src/grok-usage.ts、src/grok-adapter.ts | test/grok-usage.test.ts、test/grok-acp-usage.test.ts |  |
@@ -61,7 +61,7 @@
 - Installed Desktop 26.1027.30824 completion and restart-history acceptance passed after Karl's manual restart. Further installation/restart remains user-controlled; running sessions must not be stopped automatically.
 
 - B3：Grok 1.0.67 的权限扩展没有 RPC 回执，`session/info` 和 `configOptions` 不包含权限。Ask/Auto/Always approve 生效确认必须取自原生权限管理器的实际状态，不能由发送结果推断。仅在无活动 Turn 或压缩操作时切换；通知作用于独立进程内的匹配会话。原生受管策略和 Auto 功能开关始终生效。Plan 使用 ACP `session/set_mode`，与 YOLO/auto 独立；`exit_plan_mode` 投影为 Review plan（Stay / Approve and implement / Exit without implementing）。Picker 跟随 `current_mode_update`。面试题 Chat about this / Skip interview 仍不投影。
-- B10：原生超时仍由 grokgod 管理，Host 不合成计时器或自动选择。原生撤回通知没有区分超时原因，Host 仅记录取消。多选复用 Host multiple 与答案数组，通过共享 Renderer 卡片承载；原生 Desktop 卡片仍无多选字段。Plan 面试专属按钮不投影。活动重置通过可选 questionActivity 与原生确认同步，需补丁 0028 及原生配置开启。
+- B10：原生超时仍由 grokgod 管理，Host 不合成计时器或自动选择。原生撤回通知没有区分超时原因，Host 仅记录取消。多选复用 Host multiple 与答案数组，通过共享 Renderer 卡片承载（默认对话内，Appearance 可改回 Composer 上方）；原生 Desktop 卡片仍无多选字段。Plan 面试专属按钮不投影。活动重置通过可选 questionActivity 与原生确认同步，需补丁 0028 及原生配置开启。安装版对话内放置与重启后只读记录已验收。
 - 倒计时与 Desktop 活动转发仅在共享提问卡片上提供；纯文本问题组仍走原生 Desktop 卡片，矩阵对这两项标为部分支持。
 - B12、B14、B15、B16：范围见表中备注；自主 Turn 与委派能力保留既有边界。
 

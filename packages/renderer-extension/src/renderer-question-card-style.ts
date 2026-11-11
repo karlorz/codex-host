@@ -27,9 +27,11 @@ export const QUESTION_CARD_CSS = `
   }
   .title { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin: 0 6px 14px; color: var(--question-muted); font-weight: 400; }
   .question-icon { display: inline-flex; justify-content: center; align-items: center; width: 16px; height: 16px; flex-shrink: 0; }
-  .countdown { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+  .countdown, .outcome { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
   .countdown[hidden] { display: none; }
   .countdown:not([hidden]) + .dismiss { margin-left: 0; }
+  .card.record .option { cursor: default; }
+  .card.record :disabled { cursor: default; opacity: 1; }
   svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .body { min-height: 0; overflow: auto; }
   fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 14px; }

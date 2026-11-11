@@ -24,6 +24,7 @@ import type {
   NativeSessionRef,
   NativeTurnRef,
   QuestionAutoResolution,
+  QuestionRecordOutcome,
 } from "@codexhost/shared-contracts";
 
 import type { HostUsage, HostUsageRequest } from "./usage.js";
@@ -379,6 +380,15 @@ export interface HostToolOutput {
   truncated?: boolean;
 }
 
+/** Native history evidence for a closed Question; Host filters secrets before RPC. */
+export interface HostQuestionRecordEvidence {
+  interactionId?: HostInteractionId;
+  title?: string;
+  questions: HostQuestion[];
+  outcome: QuestionRecordOutcome;
+  answers: Record<string, string[]>;
+}
+
 export interface HostToolExecutionItem {
   type: "toolExecution";
   itemId: HostItemId;
@@ -387,6 +397,7 @@ export interface HostToolExecutionItem {
   arguments: JsonValue;
   output?: HostToolOutput;
   durationMs?: number;
+  questionRecord?: HostQuestionRecordEvidence;
 }
 
 export interface HostFileChange {

@@ -135,16 +135,21 @@ contract investigation before release acceptance.
   See the README Live voice chat row and
   [External Harness voice](../../operations/cpa-live-voice-desktop-hook.md#external-harness-voice-local-development-build).
 - Native `cursor/ask_question` is mapped to a Host Question when ACP sends it.
-  Single-choice groups (`allowOther` is always false) use Desktop
-  `item/tool/requestUserInput`; `allowMultiple` uses the shared checkbox card.
-  Installed CLI `2026.11.05-86047df` initialize only reads
-  `_meta.parameterizedModelPicker` and `subagents` / `_meta.subagents`. There is
-  no question client capability, so Host does not advertise one. ACP sessions
-  set `x-cursor-client-type: acp` and do not offer the AskQuestion model tool, so
-  the extension is not sent and no Desktop card appears. Cursor Ask mode is a
-  read-only execution mode, not a question card. If the tool later arrives, the
-  native handler first calls `cursor/ask_question`, then falls back to
-  `session/request_permission` for single-choice only.
+  Placement follows the existing shared-card rules, not a Cursor setting:
+  `allowMultiple` uses the shared checkbox card in the transcript by default, or
+  above the Composer when Appearance overlay is on; single-choice groups keep
+  `allowOther: false` and stay on Desktop `item/tool/requestUserInput`, so the
+  Appearance switch does not move them. Installed CLI `2026.11.05-86047df`
+  initialize only reads `_meta.parameterizedModelPicker` and `subagents` /
+  `_meta.subagents`. There is no question client capability, so Host does not
+  advertise one. ACP sessions set `x-cursor-client-type: acp` and do not offer
+  the AskQuestion model tool, so the extension is not sent and neither the
+  in-chat card nor the Composer overlay appears. Cursor Ask mode is a read-only
+  execution mode, not a question card. If the tool later arrives, the native
+  handler first calls `cursor/ask_question`, then falls back to
+  `session/request_permission` for single-choice only. ACP `session/load` replay
+  and the native store decoder carry no answered-question payload, so reopen
+  cannot restore a read-only record from Cursor history.
 - Interactive `cursor-agent` advertises `/goal` as a TUI command that continues
   while idle and as a builtin skill that calls `CreateGoal`/`UpdateGoal`. Goal
   state lives in the conversation store. Idle continuation is TUI-only.
@@ -262,7 +267,7 @@ native extensions, not fabricated RPC methods.
 | Fork / edit previous message | ACP has no Fork or rollback operation. A native CLI `/fork` + conversation-only `/rewind` bridge supports historical Fork and edit previous message on macOS/Linux at available native anchors. |
 | Context compaction | The interactive CLI command is not part of the ACP slash-command handler; no native ACP compaction operation is implemented. Sending `/compact` as plain model text is not compaction. |
 | Native goals | Interactive CLI `/goal` (builtin skill, `CreateGoal`/`UpdateGoal`, TUI idle continuation). ACP has no goal method. Host exposes a curated `/goal` skill that forwards this Turn only. Desktop Goal mode is not a Host-exposed Cursor capability; the shared panel is hidden and `thread/goal/*` fails closed. |
-| Native questions | Documented blocking `cursor/ask_question` is implemented. Current ACP sessions do not offer AskQuestion, so the method is not emitted and Desktop cards do not appear. Host initialize keeps `_meta.parameterizedModelPicker` only; a fabricated question flag is not advertised. |
+| Native questions | Documented blocking `cursor/ask_question` is implemented. Current ACP sessions do not offer AskQuestion, so the method is not emitted and neither the in-chat shared card nor the Composer overlay appears. Host initialize keeps `_meta.parameterizedModelPicker` only; a fabricated question flag is not advertised. Reopen has no native answered-question history to map. |
 
 The model catalog comes from native configuration, including each model's own
 Thinking parameter choices. Multiple `thought_level` parameters remain a complete
