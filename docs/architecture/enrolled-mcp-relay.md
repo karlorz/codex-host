@@ -261,7 +261,7 @@ Cloudflare Origin CA for `codexhost.karldigi.dev` is issued in the **karldigi.de
 
 ## Live path
 
-The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place.
+The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place. Fork prod `v0.17.4-6` is GitHub latest and npm `@karlorz/codexhost-cli@latest`. Next unused fork tag is `0.17.4-7`.
 
 Muse adds the custom connector from a Muse chat (`custom-connector-setup`). Settings Connected then lists Codex Host for `https://codexhost.karldigi.dev/mcp`. A connected Muse chat sees `tools/list` of the four tools; `enroll_status` reports `clientId=muse`, `pairing=machine`, `link=online`, and `runtime=reachable` while the Mac link is up.
 
@@ -271,6 +271,15 @@ Live checks that stay true:
 - `mac_link_offline` with an empty relay store when the link is down.
 - Desktop restart (Runtime port change) reconnects without hop config changes.
 - Unauthenticated public `POST /mcp` is 401 with `resource_metadata`.
+- Allowlisted `thread_read` and unauthorized UUID `UNAUTHORIZED_TARGET` from Muse.
+- Idle `thread_send` starts a Turn. `--view messages` pages oldest-first (default 25, max 100); `nextCursor` reaches the user text for those Turns.
+- Hop `dist/` `cli.js`, `whois.js`, `jsonl.js`, and `oauth-http.js` match tagged `v0.17.4-6`. `oauth-store.js`, `listen.js`, `mcp-http.js`, `relay.js`, and `link-server.js` differ by `omitRecord` / `bindListeningPort` simplifications; send forwarding and `THREAD_BUSY` mapping are unchanged. Leave the hop running until a planned `0.17.4-7` bounce.
+
+Open live checks:
+
+- `THREAD_BUSY` through Path 3. Official allowlisted Threads that are not loaded in this Runtime cannot be used as the target. Do not send further into a live grok ops Thread to prove busy.
+- `thread_wait` from Muse.
+- Grant-revoke as a planned cutover. `revokeClient` exists on the hop OAuth store with no operator CLI caller; `/revoke` needs the token Muse holds. Mac `enroll revoke` rotates the key.
 
 ## Product boundary
 
