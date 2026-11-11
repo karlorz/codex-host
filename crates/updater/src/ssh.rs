@@ -123,7 +123,9 @@ fn arguments(request: &Request, script: &str) -> Vec<String> {
         "-o".into(),
         "BatchMode=yes".into(),
         "-o".into(),
-        "ConnectTimeout=10".into(),
+        // Overlay VPNs such as Tailscale can take tens of seconds to become
+        // reachable after a peer address change. Inspect must outlast this wait.
+        "ConnectTimeout=45".into(),
         "-o".into(),
         "StrictHostKeyChecking=yes".into(),
     ];
@@ -204,7 +206,7 @@ pub fn apply() -> Result<(), Box<dyn Error>> {
     let stdout = child.stdout.take().ok_or("SSH output unavailable")?;
     let output = thread::spawn(move || read_output_tail(stdout));
     let start = Instant::now();
-    let limit = if request.action != "inspect" { 300 } else { 20 };
+    let limit = if request.action != "inspect" { 300 } else { 75 };
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;

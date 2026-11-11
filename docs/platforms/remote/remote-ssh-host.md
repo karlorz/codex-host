@@ -129,6 +129,7 @@ This applies to external Harness conversations created in SSH projects. Other lo
 | --- | --- |
 | A specific tool (Node.js, npm or Codex CLI) is not detected over SSH | Install the named tool on the remote computer, or add its existing installation to the login shell PATH, then retry. This message does not prove the tool is uninstalled. Codex CLI is the command-line tool; remote Codex Desktop is not required. |
 | The connection fails or disconnects shortly afterward | Check that SSH login works, then choose **Check again**. If the service is missing, choose **Install and connect**. If needed, follow the manual update steps and reconnect. |
+| SSH reports `Operation timed out` to a Tailscale host | Confirm `ssh <alias>` from a terminal, then **Reconnect**. After a tailnet address change the first TCP connect can outlast a short `ConnectTimeout`; Host inspect waits 45 seconds for that path. |
 | A Harness is missing | Confirm the tool is installed and signed in on the remote computer, then click **Run connection diagnostics** on codexhost's **Connections** page. |
 | Remote version information is missing or the service is outdated | Choose **Update remote service**. If it is unavailable or fails, follow **When you need to update manually** above. |
 | An update fails | Check the remote computer's internet connection and retry. If it still fails, follow the manual update steps. |

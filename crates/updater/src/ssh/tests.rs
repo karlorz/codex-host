@@ -278,6 +278,7 @@ codexhost(){
 fn passes_identity_and_destination_as_separate_arguments() {
     let r = request();
     let args = arguments(&r, &script(&r).unwrap());
+    assert!(args.windows(2).any(|a| a == ["-o", "ConnectTimeout=45"]));
     assert!(args.windows(2).any(|a| a == ["-i", "/tmp/key with spaces"]));
     assert!(args.windows(2).any(|a| a == ["--", "user@host"]));
 }
