@@ -49,11 +49,48 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8").trim();
 }
 
+function requireAbsoluteStateDir(argv: readonly string[]): string {
+  const dir = option(argv, "--oauth-state-dir");
+  if (!dir || !path.isAbsolute(dir)) {
+    throw new Error("--oauth-state-dir must be an absolute path");
+  }
+  return dir;
+}
+
 export async function runEnrolledMcpRelayCli(argv: readonly string[]): Promise<void> {
   if (argv[0] === "hash-password") {
     const password = await readStdin();
     if (!password) throw new Error("password is required on stdin");
     process.stdout.write(`${hashPassword(password)}\n`);
+    return;
+  }
+
+  if (argv[0] === "list-clients") {
+    const store = new RelayOAuthStore(requireAbsoluteStateDir(argv));
+    process.stdout.write(`${JSON.stringify({ clients: store.listClients() })}\n`);
+    return;
+  }
+
+  if (argv[0] === "revoke-client") {
+    const store = new RelayOAuthStore(requireAbsoluteStateDir(argv));
+    const all = argv.includes("--all");
+    const clientId = option(argv, "--client-id");
+    if (all === Boolean(clientId)) {
+      throw new Error("revoke-client requires exactly one of --client-id or --all");
+    }
+    const revoked = all
+      ? store
+          .listClients()
+          .flatMap((client) => (store.revokeClient(client.clientId) ? [client.clientId] : []))
+      : clientId && store.revokeClient(clientId)
+        ? [clientId]
+        : [];
+    if (revoked.length === 0) {
+      throw new Error(
+        all ? "no OAuth clients to revoke" : `OAuth client ${clientId} is not in the store`,
+      );
+    }
+    process.stdout.write(`${JSON.stringify({ revoked })}\n`);
     return;
   }
 

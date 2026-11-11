@@ -235,7 +235,7 @@ The hop serves public metadata and token endpoints on the MCP loopback server (t
 
 Unauthenticated or wrong/expired/`aud` mismatch (including a SkillWiki or grok-search token this hop does not hold) on `/mcp` returns 401 with `WWW-Authenticate` `resource_metadata`. Tokens are bound to this relay's resource (`https://codexhost.karldigi.dev/mcp` in production). A token request whose `resource` is another service is `invalid_target`.
 
-Production CLI requires `--public-origin`, `--password-hash-file` (mode 600 scrypt hash), and `--oauth-state-dir` when `--link-listen` is not loopback. `codexhost-relay hash-password` reads the operator password from stdin and writes the hash. Loopback-only `--listen 127.0.0.1` may omit OAuth for local tailnet-slice tests.
+Production CLI requires `--public-origin`, `--password-hash-file` (mode 600 scrypt hash), and `--oauth-state-dir` when `--link-listen` is not loopback. `codexhost-relay hash-password` reads the operator password from stdin and writes the hash. Operator cutover uses `list-clients` and `revoke-client --client-id <id>` or `revoke-client --all` with `--oauth-state-dir` (JSON client ids and names only; no tokens). The running hop loads OAuth state at start, so file revoke takes effect on the next hop process start. Loopback-only `--listen 127.0.0.1` may omit OAuth for local tailnet-slice tests.
 
 Issuer and resource are distinct from SkillWiki and grok-search. Revoking the grant on the hop cuts Muse off. Revoking the Mac enrollment cuts every tool (`ENROLLMENT_INVALID`). The hop holds no Host Runtime token and no enrollment token. Muse DCR for this hostname is unproven; SkillWiki and grok-search connectors on Muse are precedent only. First public Muse install is the live check.
 
@@ -273,13 +273,13 @@ Live checks that stay true:
 - Unauthenticated public `POST /mcp` is 401 with `resource_metadata`.
 - Allowlisted `thread_read` and unauthorized UUID `UNAUTHORIZED_TARGET` from Muse.
 - Idle `thread_send` starts a Turn. `--view messages` pages oldest-first (default 25, max 100); `nextCursor` reaches the user text for those Turns.
-- Hop `dist/` `cli.js`, `whois.js`, `jsonl.js`, and `oauth-http.js` match tagged `v0.17.4-6`. `oauth-store.js`, `listen.js`, `mcp-http.js`, `relay.js`, and `link-server.js` differ by `omitRecord` / `bindListeningPort` simplifications; send forwarding and `THREAD_BUSY` mapping are unchanged. Leave the hop running until a planned `0.17.4-7` bounce.
+- Enrolled `THREAD_BUSY` on an already-running grok Thread returns `authorized`/`notStarted` and starts no Turn. Bounded `thread_wait` returns `timedOut` while that Turn is still running.
+- Hop operator `list-clients` / `revoke-client` cut the Muse OAuth grant. File revoke plus one hop restart loads the revoked store. Unauthenticated `POST /mcp` stays 401 with `resource_metadata`; a revoked bearer is 401 without it. Mac enrollment is unchanged. Karl reconnects the Muse connector after cutover.
 
 Open live checks:
 
-- `THREAD_BUSY` through Path 3. Official allowlisted Threads that are not loaded in this Runtime cannot be used as the target. Do not send further into a live grok ops Thread to prove busy.
-- `thread_wait` from Muse.
-- Grant-revoke as a planned cutover. `revokeClient` exists on the hop OAuth store with no operator CLI caller; `/revoke` needs the token Muse holds. Mac `enroll revoke` rotates the key.
+- Mac `enroll revoke` stays planned-only, because it rotates the key.
+- Annotated tag `v0.17.4-7` is held until Release Notes confirmation. GitHub latest would prompt Desktop; hop deploy does not require that tag.
 
 ## Product boundary
 

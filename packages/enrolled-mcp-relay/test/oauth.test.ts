@@ -27,7 +27,7 @@ function pkce(): { verifier: string; challenge: string } {
   };
 }
 
-async function startOauthRelay() {
+async function startOauthRelay(store = new RelayOAuthStore()) {
   const relay = await startEnrolledMcpRelay({
     listen: "127.0.0.1",
     linkPort: 0,
@@ -35,13 +35,16 @@ async function startOauthRelay() {
     expectedNodeId: NODE_ID,
     linkSecretHash: sha256Hex(SECRET),
     whois: async () => NODE_ID,
-    oauth: { passwordHash, store: new RelayOAuthStore() },
+    oauth: { passwordHash, store },
   });
   cleanup.push(() => relay.close());
-  return relay;
+  return { relay, store };
 }
 
-async function issueAccessToken(origin: string, resource = `${origin}/mcp`): Promise<string> {
+async function issueAccessClient(
+  origin: string,
+  resource = `${origin}/mcp`,
+): Promise<{ access: string; clientId: string }> {
   const pair = pkce();
   const registered = await fetch(`${origin}/register`, {
     method: "POST",
@@ -85,12 +88,16 @@ async function issueAccessToken(origin: string, resource = `${origin}/mcp`): Pro
   });
   expect(token.status).toBe(200);
   const issued = (await token.json()) as { access_token: string };
-  return issued.access_token;
+  return { access: issued.access_token, clientId: client.client_id };
+}
+
+async function issueAccessToken(origin: string, resource = `${origin}/mcp`): Promise<string> {
+  return (await issueAccessClient(origin, resource)).access;
 }
 
 describe("enrolled MCP relay OAuth", () => {
   it("returns 401 with resource_metadata until a resource-bound token is presented", async () => {
-    const relay = await startOauthRelay();
+    const { relay } = await startOauthRelay();
     const origin = relay.mcpOrigin;
     const unauth = await fetch(`${origin}/mcp`, {
       method: "POST",
@@ -141,7 +148,7 @@ describe("enrolled MCP relay OAuth", () => {
   });
 
   it("rejects a SkillWiki resource and returns 401 without resource_metadata after revoke", async () => {
-    const relay = await startOauthRelay();
+    const { relay } = await startOauthRelay();
     const origin = relay.mcpOrigin;
     const authorize = await fetch(`${origin}/authorize`, {
       method: "POST",
@@ -164,6 +171,41 @@ describe("enrolled MCP relay OAuth", () => {
       body: new URLSearchParams({ token: access }),
     });
     expect(revoked.status).toBe(200);
+    const again = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${access}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(again.status).toBe(401);
+    expect(again.headers.get("www-authenticate") ?? "").not.toContain("resource_metadata=");
+  });
+
+  it("operator revokeClient marks the access token revoked", async () => {
+    const { relay, store } = await startOauthRelay();
+    const origin = relay.mcpOrigin;
+    const { access, clientId } = await issueAccessClient(origin);
+    expect(store.listClients()).toEqual([
+      expect.objectContaining({
+        clientId,
+        clientName: "muse-test",
+        accessTokenCount: 1,
+        revokedAccessTokenCount: 0,
+        refreshTokenCount: 1,
+      }),
+    ]);
+    expect(store.revokeClient(clientId)).toBe(true);
+    expect(store.revokeClient(clientId)).toBe(false);
+    expect(store.listClients()).toEqual([
+      expect.objectContaining({
+        clientId,
+        accessTokenCount: 1,
+        revokedAccessTokenCount: 1,
+        refreshTokenCount: 0,
+      }),
+    ]);
     const again = await fetch(`${origin}/mcp`, {
       method: "POST",
       headers: {

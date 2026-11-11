@@ -33,6 +33,14 @@ export interface OAuthRefreshToken {
   scope?: string;
 }
 
+export interface OAuthClientPublicView {
+  clientId: string;
+  clientName?: string;
+  accessTokenCount: number;
+  revokedAccessTokenCount: number;
+  refreshTokenCount: number;
+}
+
 interface PersistedState {
   clients: Record<string, OAuthClient>;
   authCodes: Record<string, OAuthAuthCode>;
@@ -157,7 +165,39 @@ export class RelayOAuthStore {
     return "refresh";
   }
 
-  revokeClient(clientId: string): void {
+  listClients(): OAuthClientPublicView[] {
+    const ids = new Set<string>([
+      ...Object.keys(this.state.clients),
+      ...Object.values(this.state.accessTokens).map((token) => token.clientId),
+      ...Object.values(this.state.refreshTokens).map((token) => token.clientId),
+    ]);
+    return [...ids].sort().map((clientId) => {
+      const client = this.state.clients[clientId];
+      const access = Object.values(this.state.accessTokens).filter(
+        (token) => token.clientId === clientId,
+      );
+      const refresh = Object.values(this.state.refreshTokens).filter(
+        (token) => token.clientId === clientId,
+      );
+      return {
+        clientId,
+        ...(client?.clientName ? { clientName: client.clientName } : {}),
+        accessTokenCount: access.length,
+        revokedAccessTokenCount: access.filter((token) => token.revoked).length,
+        refreshTokenCount: refresh.length,
+      };
+    });
+  }
+
+  revokeClient(clientId: string): boolean {
+    const existed =
+      Boolean(this.state.clients[clientId]) ||
+      Object.values(this.state.refreshTokens).some((token) => token.clientId === clientId) ||
+      Object.values(this.state.authCodes).some((code) => code.clientId === clientId) ||
+      Object.values(this.state.accessTokens).some(
+        (token) => token.clientId === clientId && !token.revoked,
+      );
+    if (!existed) return false;
     this.commit(() => {
       this.state.clients = omitRecord(this.state.clients, clientId);
       this.state.authCodes = omitWhere(this.state.authCodes, (code) => code.clientId === clientId);
@@ -171,6 +211,7 @@ export class RelayOAuthStore {
         }
       }
     });
+    return true;
   }
 
   private load(): PersistedState {

@@ -5,3 +5,11 @@
 `/etc/codexhost-relay` must be `750 root:codexhost-relay`. Hash files inside are mode `600` owned by `codexhost-relay`. A root-only directory makes `stat` fail under `ProtectSystem=strict` (`EACCES` on the hash files). OAuth state is `/var/lib/codexhost-relay`. Do not put the operator password or the raw link secret on sg01; only the scrypt password hash and the SHA-256 of the link secret.
 
 Templates: `Caddyfile.site`, `codexhost-relay.service`. Sync hop `dist/` with `rsync --checksum`; size-only rsync can leave a stale `whois.js` on sg01.
+
+Operator OAuth cutover (no tokens in output). The running unit loads `oauth-store.json` at start, so revoke the file then restart once:
+
+```bash
+node /opt/codexhost-relay/dist/cli.js list-clients --oauth-state-dir /var/lib/codexhost-relay
+node /opt/codexhost-relay/dist/cli.js revoke-client --oauth-state-dir /var/lib/codexhost-relay --all
+systemctl restart codexhost-relay.service
+```
