@@ -12,6 +12,7 @@ Host injects Runtime endpoint and token only into processes it started. An unman
 | `enroll status [--client <id>] [--enrolled-client <id>]` | Show the local store and selected authentication source without printing the token |
 | `enroll revoke [--client <id>] [--enrolled-client <id>]` | Revoke at Runtime and delete the local store |
 | `enroll serve --client <id> --listen <tailscale-ipv4> [--port 4398] --export-file <absolute-path>` | Expose one existing enrollment over Tailscale |
+| `enroll relay-link --client muse --hop <tailscale-ipv4> [--port 4401] --link-secret-file <absolute-path>` | Connect out to the enrolled MCP hop; token stays on this Mac |
 
 `--client grok-bot` is the v1 client id. `--allow` is optional and defaults to empty besides the newly issued Thread (`read`, `watch`, `send`, `cancel`). A parent Thread such as `70afcd8a-2124-44e3-aa9d-9a7d4695f97c` is reachable only when that id is listed; the fixture allowlist is `read,watch` only. `send` does not grant `cancel`.
 
@@ -129,7 +130,7 @@ Desktop Settings and the local console share an **Enrollment** page. It lists ac
 
 ## Out of scope
 
-- Direct Linux VM access to Mac loopback, general Web/Relay, and general remote Host routing. The outbound enrolled MCP relay (Mac connects out; hop OAuth; client `muse` only) is in product scope as specified in [enrolled-mcp-relay.md](enrolled-mcp-relay.md) and is not implemented. That scope does not include inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, enroll revoke through the relay, `delegate start`, or multi-client relay.
+- Direct Linux VM access to Mac loopback, general Web/Relay, and general remote Host routing. The outbound enrolled MCP relay (Mac connects out; hop OAuth; client `muse` only) is in product scope as specified in [enrolled-mcp-relay.md](enrolled-mcp-relay.md). The Mac link, tailnet hop process, split listen, hop public OAuth, Origin CA, sg01 Caddy site, and Muse Codex Host connector are in place. Unauthenticated public `POST /mcp` returns 401 with `resource_metadata`. That scope does not include inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, enroll revoke through the relay, `delegate start`, or multi-client relay.
 - Copying `CODEXHOST_*` from Cursor/parent processes, launchd, or shared files
 - Attaching a client to a parent Thread id as if it were that chat
 - Unattended first pairing, a daemon, or `launchctl setenv`

@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { build as esbuildBuild } from "esbuild";
 
 const forbiddenInputFragments = [
+  "/packages/enrolled-mcp-relay/",
   "/packages/adapters/",
   "/node_modules/@codexhost/adapter-",
   "/node_modules/@anthropic-ai/",

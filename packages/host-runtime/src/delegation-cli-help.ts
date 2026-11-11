@@ -72,6 +72,10 @@ Accepts only that client's token and forwards read/send/status/revoke to the liv
 Writes a new mode-600 handoff record in a user-owned mode-700 directory; refuses existing files.
 Transfer only this client's record over SSH into its remote enrollment store. Set CODEXHOST_ENROLL_CLIENT to select it.
 Runs until SIGINT/SIGTERM. Session pairing also stops the listener at token expiry. Machine pairing stays until revoke.`,
+  "enroll relay-link": `codexhost enroll relay-link --client muse --hop <tailscale-ipv4> [--port 4401] --link-secret-file <absolute-path>
+Connect out to the enrolled MCP hop over the tailnet. The enrollment token stays on this Mac.
+Forwards status, read, wait, and send to the live loopback Runtime. Does not expose revoke, cancel, watch, or delegate.
+The hop authenticates this Mac with Tailscale WhoIs and the hashed link secret. Runs until SIGINT/SIGTERM.`,
 } as const;
 
 export type DelegationCliCommand = keyof typeof COMMAND_HELP;
@@ -98,6 +102,7 @@ export const DELEGATION_HELP = `usage:
   codexhost enroll status
   codexhost enroll revoke
   codexhost enroll serve --client <id> --listen <tailscale-ipv4> --export-file <path>
+  codexhost enroll relay-link --client muse --hop <tailscale-ipv4> --link-secret-file <path>
 
 Use <command> --help for its options. Use harness list to discover targets.
 ${COMMON_HELP}
@@ -133,7 +138,8 @@ export function delegationCliHelp(arguments_: readonly string[]): string | undef
     command &&
     command !== "status" &&
     command !== "revoke" &&
-    command !== "serve"
+    command !== "serve" &&
+    command !== "relay-link"
   ) {
     if (hasHelpOption([command, ...rest])) return groupHelp("enroll");
   }

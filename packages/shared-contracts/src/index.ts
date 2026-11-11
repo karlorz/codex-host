@@ -10,6 +10,7 @@ export * from "./usage-statistics.js";
 export * from "./thread-prewarm.js";
 export * from "./realtime-call.js";
 export * from "./enrollment.js";
+export * from "./enrolled-mcp-relay.js";
 export {
   CONSOLE_HOST_METHODS,
   CONSOLE_OPEN_METHOD,

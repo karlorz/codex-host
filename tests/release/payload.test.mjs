@@ -113,6 +113,7 @@ describe("release Payload", () => {
       );
       expect(paths).toContain("libexec/codexhost-updater");
       expect(paths).toContain("app/codexhost-distribution.json");
+      expect(paths.join("\n")).not.toContain("enrolled-mcp-relay");
       expect(paths).not.toContain("release-manifest.json");
       expect(paths).not.toContain("SHA256SUMS.txt");
       await writeFile(path.join(root, "app/host-runtime.js.map"), "unexpected");

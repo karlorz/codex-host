@@ -1,0 +1,20 @@
+# --- codexhost-relay Path 3 ---
+http://codexhost.karldigi.dev {
+	handle /health {
+		respond "sg01-codexhost-ok" 200
+	}
+	reverse_proxy 127.0.0.1:4400 {
+		flush_interval -1
+	}
+}
+
+https://codexhost.karldigi.dev {
+	tls /etc/caddy/origin-ca/codexhost.karldigi.dev.crt /etc/caddy/origin-ca/codexhost.karldigi.dev.key
+
+	handle /health {
+		respond "sg01-codexhost-ok" 200
+	}
+	reverse_proxy 127.0.0.1:4400 {
+		flush_interval -1
+	}
+}

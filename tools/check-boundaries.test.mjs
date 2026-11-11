@@ -153,6 +153,30 @@ describe("source boundary checks", () => {
     expect(violations[0]).toContain("cross-package source import");
   });
 
+  it("rejects Host Runtime importing the enrolled MCP relay", () => {
+    const violations = findSourceBoundaryViolations({
+      filePath: "/repo/packages/host-runtime/src/client-enrollment-relay-link.ts",
+      packageRoot: "/repo/packages/host-runtime",
+      packagesDirectory,
+      rendererDirectory,
+      sourceText: 'import { startEnrolledMcpRelay } from "@codexhost/enrolled-mcp-relay";',
+    });
+    expect(violations[0]).toContain("Host Runtime must not import");
+  });
+
+  it("rejects enrolled MCP relay importing Host Runtime", () => {
+    const violations = findSourceBoundaryViolations({
+      filePath: "/repo/packages/enrolled-mcp-relay/src/relay.ts",
+      packageRoot: "/repo/packages/enrolled-mcp-relay",
+      packagesDirectory,
+      rendererDirectory,
+      sourceText: 'import { runEnrollmentRelayLink } from "@codexhost/host-runtime";',
+    });
+    expect(violations[0]).toContain(
+      "enrolled MCP relay can depend on @codexhost/shared-contracts only",
+    );
+  });
+
   it("allows imports through public Workspace package names", () => {
     const violations = findSourceBoundaryViolations({
       filePath: "/repo/packages/protocol-core/src/index.ts",

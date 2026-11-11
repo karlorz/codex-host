@@ -4,6 +4,7 @@ import type { Writable } from "node:stream";
 import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-help.js";
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
+import { runEnrollmentRelayLink } from "./client-enrollment-relay-link.js";
 import { runEnrollmentTailnetServe } from "./client-enrollment-tailnet.js";
 import {
   ENROLLED_CLIENT_OPTION,
@@ -196,6 +197,23 @@ export async function runDelegationCli(input: {
           environment,
           parsed,
           output,
+        });
+        return 0;
+      }
+      if (command === "relay-link") {
+        const parsed = parseDelegationArguments(rest);
+        rejectUnknown(parsed, ["--client", "--hop", "--port", "--link-secret-file"]);
+        if (parsed.positionals.length > 0) {
+          throw new DelegationControlError(
+            "INVALID_ARGUMENT",
+            "enroll relay-link accepts no positional arguments",
+          );
+        }
+        await runEnrollmentRelayLink({
+          environment,
+          parsed,
+          output,
+          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         });
         return 0;
       }

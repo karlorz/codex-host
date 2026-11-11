@@ -239,6 +239,12 @@ export function assertNotParentIdentity(threadId: string): void {
   }
 }
 
+export function isTailscaleIPv4(value: string): boolean {
+  const octets = value.split(".").map(Number);
+  const second = octets[1] ?? -1;
+  return isIPv4(value) && octets[0] === 100 && second >= 64 && second <= 127;
+}
+
 export function assertTailnetHttpUrl(value: string): URL {
   let url: URL;
   try {
@@ -250,16 +256,7 @@ export function assertTailnetHttpUrl(value: string): URL {
       "non_loopback_endpoint",
     );
   }
-  const octets = url.hostname.split(".").map(Number);
-  const secondOctet = octets[1] ?? -1;
-  if (
-    url.protocol !== "http:" ||
-    !isIPv4(url.hostname) ||
-    octets[0] !== 100 ||
-    secondOctet < 64 ||
-    secondOctet > 127 ||
-    isDecoratedHttpOrigin(url)
-  ) {
+  if (url.protocol !== "http:" || !isTailscaleIPv4(url.hostname) || isDecoratedHttpOrigin(url)) {
     throw enrollmentError(
       "ENROLLMENT_INVALID",
       "Tailnet endpoint must be a root HTTP URL on an explicit Tailscale IPv4 address (100.64.0.0/10)",

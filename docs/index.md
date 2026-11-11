@@ -29,7 +29,7 @@
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/client-enrollment.md`](architecture/client-enrollment.md) | Unmanaged CLI enrollment, Host-session machine pairing, `--enrolled-client` send, `THREAD_BUSY` wait, distinct `cancel` grant, one Tailscale listener per client, allowlist enforcement, and Settings/console list and revoke. |
-| [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Planned outbound enrolled MCP relay (Mac connects out; hop OAuth; muse only). Not implemented. This shape is in product scope; general Web/Relay is not. |
+| [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Outbound enrolled MCP relay (Mac connects out; hop OAuth; muse only). Four-tool hop, public 401, Mac link, and Muse Codex Host connector are in place. This shape is in product scope; general Web/Relay is not. |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
 | [`architecture/turn-activity-folding.md`](architecture/turn-activity-folding.md) | 回合完成后过程折叠的 Desktop 条件与 `final_answer` 推断规则；修改 Agent 消息阶段投影或排查过程无法收起时阅读。 |

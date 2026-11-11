@@ -963,6 +963,7 @@ describe("npm package release", () => {
         root: "/repo/source",
       });
       expect(paths).toEqual(expectedNpmPackagePaths(target));
+      expect(paths.join("\n")).not.toContain("enrolled-mcp-relay");
       expect(paths).toContain("licenses/OpenCode-SDK-LICENSE.txt");
       expect(paths).not.toContain("runtime/node");
       expect(paths).toContain("bin/codexhost");

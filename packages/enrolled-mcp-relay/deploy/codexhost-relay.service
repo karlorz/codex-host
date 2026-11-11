@@ -1,0 +1,26 @@
+[Unit]
+Description=Codex Host enrolled MCP relay (Path 3 hop)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+# /etc/codexhost-relay must be 750 root:codexhost-relay so this user can stat mode-600 hashes.
+
+[Service]
+Type=simple
+User=codexhost-relay
+Group=codexhost-relay
+WorkingDirectory=/opt/codexhost-relay
+ExecStart=/usr/bin/node /opt/codexhost-relay/dist/cli.js --mcp-listen 127.0.0.1 --mcp-port 4400 --link-listen 100.118.12.90 --link-port 4401 --node-id nbXrpeDAZd11CNTRL --link-secret-hash-file /etc/codexhost-relay/link-secret.hash --public-origin https://codexhost.karldigi.dev --password-hash-file /etc/codexhost-relay/password.hash --oauth-state-dir /var/lib/codexhost-relay
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/var/lib/codexhost-relay
+
+[Install]
+WantedBy=multi-user.target

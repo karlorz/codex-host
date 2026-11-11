@@ -1,6 +1,6 @@
 # Outbound enrolled MCP relay
 
-This document is a **planned** contract. It is not implemented. Current enrollment remains local CLI plus optional Tailscale `enroll serve` ([client enrollment](client-enrollment.md)).
+This document is the contract for the outbound enrolled MCP relay. Mac `enroll relay-link` and the sg01 hop process (`@codexhost/enrolled-mcp-relay`) implement the four-tool tailnet slice, split listen (MCP loopback vs tailnet link), and public OAuth (401 with `resource_metadata`, DCR, PKCE S256, operator-password consent). Cloudflare Origin CA plus sg01 Caddy terminate `https://codexhost.karldigi.dev`; unauthenticated `POST /mcp` returns 401 with `resource_metadata`. Muse Settings Connected lists Codex Host for that URL; `tools/list` is the four tools. Current enrollment also remains local CLI plus optional Tailscale `enroll serve` ([client enrollment](client-enrollment.md)).
 
 Attended product scope covers **this outbound shape only**: Mac `enroll relay-link` connects out over the tailnet; sg01 `codexhost-relay` terminates Muse OAuth; client `muse`; four tools. General Web/Relay, inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, `delegate start`, and multi-client relay stay out of product scope.
 
@@ -13,7 +13,7 @@ The relay lets a Muse custom connector call Codex Host as enrolled collaborator 
 | Mac relay link CLI | `packages/host-runtime` next to `enroll serve` | Reads the local muse enrollment store, follows the live loopback bootstrap, and is the only process that holds the enrollment token |
 | Link and MCP tool types that a browser or connector may see | `packages/shared-contracts` | Browser-safe public schemas; no Node or enrollment secrets |
 | sg01 `codexhost-relay` | `@codexhost/enrolled-mcp-relay` at `packages/enrolled-mcp-relay` | Private workspace package. Workspace dependency is `@codexhost/shared-contracts` only. Must not import Host Runtime, Harness adapters, Desktop, `protocol-core`, `mapping-store`, or `harness-broker`. `tools/check-boundaries.mjs` applies. Third-party MCP and OAuth libraries are allowed. Excluded from the Desktop app payload and the npm `codexhost` tarball; deployed to sg01 on its own |
-| Public HTTPS + OAuth | Cloudflare (karldigi.dev account) → sg01 Caddy → relay loopback | Same product shape as SkillWiki; hostname `codexhost.karldigi.dev`; distinct issuer and resource |
+| Public HTTPS + OAuth | Hop process on loopback; Cloudflare (karldigi.dev account) → sg01 Caddy in front | RFC 9728 / RFC 8414 metadata, DCR, PKCE S256, operator-password consent (scrypt), resource-bound tokens. Hostname `codexhost.karldigi.dev`; issuer and resource distinct from SkillWiki and grok-search. Caddy and Origin CA are operator |
 
 v1 serves one enrollment client: `muse`. Copying another client's store or handoff does not authorize this relay.
 
@@ -209,7 +209,7 @@ The Mac CLI command is `codexhost enroll relay-link`. It is a foreground process
 6. Resolve the live loopback origin from the enroll bootstrap (same follow-the-new-port rule as `enroll serve`). POST with `Authorization: Bearer <muse enrollment token>`. Redirects disabled. Body cap 2 MiB. Upstream deadline 30 s, and never longer than `deadlineMs` from the relay.
 7. Return `{ requestId, status, body }` or `{ requestId, error }`. If the upstream POST has started and the link or deadline fails before a complete response, the Mac reports `outcome_unknown` to the relay; the relay reports the same to Muse.
 
-The hop link listener binds only the tailnet IPv4. It is not published on the public IP or hostname.
+The hop uses two sockets. MCP (`--mcp-listen`, default `127.0.0.1`, port 4400) is loopback-only so Caddy is the public path. The link listener (`--link-listen`, default `100.118.12.90`, port 4401) binds only that tailnet IPv4. Loopback is allowed for both in tests. `--listen` is loopback-only and sets both addresses; a shared non-loopback listen is rejected. The link listener is not published on the public IP or hostname.
 
 No-queue rule: a disconnected link drops in-flight frames. A later reconnect does not replay them. Muse re-issues `thread_read` / `thread_wait` / `thread_send`. Automatic retry of `thread_send` is forbidden in the relay and in the Mac link.
 
@@ -219,22 +219,29 @@ Both of the following must succeed. Rotating the link secret does not rotate the
 
 | Check | Rule |
 | --- | --- |
-| Tailscale WhoIs | Hop asks local tailscaled. Source must be karlmac-mini's **stable node ID**, not its CGNAT IPv4. The relay system user must call that local API without running as root |
+| Tailscale WhoIs | Hop asks local tailscaled over `/var/run/tailscale/tailscaled.sock` with HTTP Host `local-tailscaled.sock` (localhost is 403). Source must be karlmac-mini's **stable node ID**, not its CGNAT IPv4. The relay system user must call that local API without running as root |
 | Link secret | Operator-generated. Mac CLI reads it from a mode-600 file (not Host Runtime env). Hop stores only a hash. Compare is fail-closed |
 
 ## OAuth
 
-Public metadata follows the SkillWiki / grok-search template: RFC 9728 resource metadata and RFC 8414 authorization-server metadata, DCR, PKCE S256, operator-password consent (scrypt hash), short-lived access tokens, rotating refresh tokens.
+The hop serves public metadata and token endpoints on the MCP loopback server (the same process Caddy reverse-proxies):
 
-- Consent text names "muse enrollment on karlmac-mini".
-- Issuer and resource are distinct from SkillWiki and grok-search. Tokens are resource-bound.
-- Revoking the grant on the hop cuts Muse off. Revoking the Mac enrollment cuts every tool (`ENROLLMENT_INVALID`).
-- The hop holds no Host Runtime token and no enrollment token.
-- Muse DCR for this hostname is unproven. SkillWiki and grok-search connectors on Muse are precedent only. First public Muse install is the live check.
+- `GET /.well-known/oauth-protected-resource` and `GET /.well-known/oauth-protected-resource/mcp` (RFC 9728)
+- `GET /.well-known/oauth-authorization-server` (RFC 8414)
+- `POST /register` (RFC 7591 DCR; https or loopback redirect URIs)
+- `GET|POST /authorize` with operator-password consent (scrypt hash). Consent text names "muse enrollment on karlmac-mini"
+- `POST /token` (authorization_code + PKCE S256, rotating refresh tokens, 1-hour access tokens)
+- `POST /revoke` (RFC 7009). A revoked access token gets HTTP 401 without `resource_metadata`
+
+Unauthenticated or wrong/expired/`aud` mismatch (including a SkillWiki or grok-search token this hop does not hold) on `/mcp` returns 401 with `WWW-Authenticate` `resource_metadata`. Tokens are bound to this relay's resource (`https://codexhost.karldigi.dev/mcp` in production). A token request whose `resource` is another service is `invalid_target`.
+
+Production CLI requires `--public-origin`, `--password-hash-file` (mode 600 scrypt hash), and `--oauth-state-dir` when `--link-listen` is not loopback. `codexhost-relay hash-password` reads the operator password from stdin and writes the hash. Loopback-only `--listen 127.0.0.1` may omit OAuth for local tailnet-slice tests.
+
+Issuer and resource are distinct from SkillWiki and grok-search. Revoking the grant on the hop cuts Muse off. Revoking the Mac enrollment cuts every tool (`ENROLLMENT_INVALID`). The hop holds no Host Runtime token and no enrollment token. Muse DCR for this hostname is unproven; SkillWiki and grok-search connectors on Muse are precedent only. First public Muse install is the live check.
 
 ## Public hostname
 
-`https://codexhost.karldigi.dev/mcp`. The proxied A record exists (`codexhost` → `161.118.205.111`). Until the Origin CA and Caddy site exist, Cloudflare returns 525 (origin TLS handshake failed).
+`https://codexhost.karldigi.dev/mcp`. The proxied A record exists (`codexhost` → `161.118.205.111`). Cloudflare Origin CA for this hostname is issued (SAN `codexhost.karldigi.dev` only; not the wiki cert). sg01 Caddy presents that certificate; Cloudflare Full (strict) TLS works. Unauthenticated `POST /mcp` returns 401 with `WWW-Authenticate` `resource_metadata`. `GET /.well-known/oauth-protected-resource` and `GET /.well-known/oauth-authorization-server` return 200. `GET /health` returns `sg01-codexhost-ok`. The hop MCP listen is `127.0.0.1:4400`; the link listen is `100.118.12.90:4401`.
 
 | Field | Value |
 | --- | --- |
@@ -248,18 +255,22 @@ Public metadata follows the SkillWiki / grok-search template: RFC 9728 resource 
 
 Do not use `termolo.com` for this hop. Do not install `cloudflared` on sg01.
 
-## First slice
+### Origin CA (this hostname only)
 
-Tailnet-only, no public hostname, no OAuth:
+Cloudflare Origin CA for `codexhost.karldigi.dev` is issued in the **karldigi.dev** account (NS `surina`/`alfred`): `origin-rsa`, SAN that name only, valid through 2041-11-07. sg01 Caddy uses `/etc/caddy/origin-ca/codexhost.karldigi.dev.{crt,key}` (`root:caddy`, key mode 640), same layout as the wiki site. Access apps for the account are empty. SSL/TLS is Full (strict). DNS is the proxied A record above. The wiki certificate (SAN `wiki.karldigi.dev` only) is not used. Do not install `cloudflared`. Hop hashes live in `/etc/codexhost-relay` (directory `750 root:codexhost-relay`, files mode 600 owned by `codexhost-relay`). OAuth state is `/var/lib/codexhost-relay`. The systemd unit is `codexhost-relay.service`.
 
-- Mac `enroll relay-link` connects out.
-- Hop listener bound to the hop tailnet IPv4.
-- Tools: `enroll_status` and `thread_read` only.
-- Test client is an MCP client on the tailnet.
+## Live path
 
-That slice must show: outbound-only Mac, enrollment token absent from hop state/env/logs (digest compare, true/false only), and `mac_link_offline` with an empty relay store when the link is down. Desktop restart (Runtime port change) reconnects without hop config changes.
+The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place.
 
-`thread_wait`, `thread_send`, public hostname, and OAuth follow that slice.
+Muse adds the custom connector from a Muse chat (`custom-connector-setup`). Settings Connected then lists Codex Host for `https://codexhost.karldigi.dev/mcp`. A connected Muse chat sees `tools/list` of the four tools; `enroll_status` reports `clientId=muse`, `pairing=machine`, `link=online`, and `runtime=reachable` while the Mac link is up.
+
+Live checks that stay true:
+
+- Outbound-only Mac; enrollment token absent from hop state/env/logs (digest compare, true/false only).
+- `mac_link_offline` with an empty relay store when the link is down.
+- Desktop restart (Runtime port change) reconnects without hop config changes.
+- Unauthenticated public `POST /mcp` is 401 with `resource_metadata`.
 
 ## Product boundary
 

@@ -101,6 +101,22 @@ export function findSourceBoundaryViolations({
         `${filePath}: Host Runtime must load installed plugins, not import '${specifier}'`,
       );
     }
+    if (
+      isInside(filePath, resolve(packagesDirectory, "host-runtime", "src")) &&
+      isPackageOrSubpath(specifier, "@codexhost/enrolled-mcp-relay")
+    ) {
+      violations.push(`${filePath}: Host Runtime must not import '${specifier}'`);
+    }
+    if (isInside(filePath, resolve(packagesDirectory, "enrolled-mcp-relay"))) {
+      if (
+        specifier.startsWith("@codexhost/") &&
+        !isPackageOrSubpath(specifier, "@codexhost/shared-contracts")
+      ) {
+        violations.push(
+          `${filePath}: enrolled MCP relay can depend on @codexhost/shared-contracts only, not '${specifier}'`,
+        );
+      }
+    }
     if (isInside(filePath, rendererDirectory) && isForbiddenLocalRuntimeImport(specifier)) {
       violations.push(`${filePath}: Renderer cannot import '${specifier}'`);
     }
