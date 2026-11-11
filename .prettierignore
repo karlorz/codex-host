@@ -1,6 +1,7 @@
 **/*.md
 **/*.wxs
 .pi/
+/ops/
 # Local browser automation snapshots.
 .playwright-cli/
 # Local-only design scratch files.

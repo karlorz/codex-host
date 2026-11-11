@@ -1,6 +1,9 @@
 # Local-only references, private documentation, and agent state
 /docsp/
 /reference/
+# Fleet-board / Orca operator dumps. Live box path is /workspace/ops/uat.
+# Do not store those cards in this product tree.
+/ops/
 /.pi/
 /downloads/
 /.codexhost/
