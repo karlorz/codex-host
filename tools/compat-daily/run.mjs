@@ -107,7 +107,10 @@ export function evaluate(pins, latest) {
   };
 }
 
-/** One open tracker per surface while the pin is unchanged; Sparkle bumps comment there. */
+/**
+ * Exact title: comment in place. Same pin, newer Sparkle: open a new issue
+ * and close these previous trackers. One open issue remains per surface.
+ */
 export function livePinIssue(finding, issues, pins) {
   if (!finding?.surface || typeof finding.title !== "string") return undefined;
   const pin = finding.surface === "chat-voice" ? pins?.chatVersion : pins?.workVersion;
@@ -117,11 +120,17 @@ export function livePinIssue(finding, issues, pins) {
     (issue) =>
       !issue.pull_request && typeof issue.title === "string" && issue.title.startsWith(prefix),
   );
+  const previous = matches
+    .filter((issue) => issue.title !== finding.title)
+    .slice()
+    .sort((left, right) => left.number - right.number)
+    .map((issue) => ({ number: issue.number, title: issue.title }));
   const exact = matches.find((issue) => issue.title === finding.title);
-  if (exact) return { number: exact.number, title: exact.title, kind: "exact" };
-  if (matches.length === 0) return undefined;
-  const live = matches.slice().sort((left, right) => left.number - right.number)[0];
-  return { number: live.number, title: live.title, kind: "same-pin" };
+  if (exact) {
+    return { number: exact.number, title: exact.title, kind: "exact", previous };
+  }
+  if (previous.length === 0) return undefined;
+  return { kind: "supersede", previous };
 }
 
 /** Matching pins clear version drift, independently of live voice acceptance. */

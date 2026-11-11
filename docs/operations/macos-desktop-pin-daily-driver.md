@@ -32,13 +32,14 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 
 ## Daily driver
 
-The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Sparkle
-**26.1103.41825** stays skipped. Pin-drift [#35](https://github.com/karlorz/codex-host/issues/35)
-and [#36](https://github.com/karlorz/codex-host/issues/36) remain the live
-alerts, not a queue to install that feed. Operator production use of that
-bundle is the acceptance for ordinary Work/Chat voice on this pin. Open
-`compat-broken` issues and [#4](https://github.com/karlorz/codex-host/issues/4)
-dogfood items do not withhold that baseline. Live voice, Composer, and hook debug attach to that
+The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Unaudited
+Sparkle builds stay skipped, including **26.1103.41825**. Open `compat-broken`
+pin-drift issues are live alerts, not a queue to install the public feed. A
+newer public Desktop opens a new issue per surface and closes the previous
+tracker as superseded. Operator production use of that bundle is the
+acceptance for ordinary Work/Chat voice on this pin. Open `compat-broken`
+issues and [#4](https://github.com/karlorz/codex-host/issues/4) dogfood items
+do not withhold that baseline. Live voice, Composer, and hook debug attach to that
 already-running Desktop. Leave `app.asar` unchanged.
 
 Only the operator may quit or restart `/Applications/ChatGPT.app`. Agents must
@@ -73,10 +74,10 @@ public macOS feed to the pins. They do not download ChatGPT.app, query the
 per-installation updater, or test microphone/conversation behavior. Local runs
 print JSON and do not open issues. On non-PR default-branch runs, pin-drift
 findings open or comment `compat-broken` issues; operational errors skip issue
-updates. Each surface keeps one live issue while its pin is unchanged; later
-Sparkle versions comment and retitle that issue instead of opening a new pair.
-Matching pins add a recovery comment but leave issues open for live acceptance
-review.
+updates. Each surface keeps one open issue. A later Sparkle version opens a
+new issue and closes the previous tracker as superseded. The same Sparkle
+version comments on the existing issue. Matching pins add a recovery comment
+but leave issues open for live acceptance review.
 
 Microphone-release, interruption/mute, and spontaneous-close checks stay
 opportunistic dogfood on [#4](https://github.com/karlorz/codex-host/issues/4);

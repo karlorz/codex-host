@@ -22,8 +22,10 @@ pins were **26.1013.40934** against Sparkle **26.1016.61520**. As of fork
 **26.1027.61615**. Karl's decision is to keep that daily driver; do not
 install or re-pin Sparkle **26.1103.41825**. Compat Daily reports that feed
 as pin-drift on [#35](https://github.com/karlorz/codex-host/issues/35) /
-[#36](https://github.com/karlorz/codex-host/issues/36). Those issues are the
-live alert pair, not a qualification queue. A scratch copy of 26.1103.41825
+[#36](https://github.com/karlorz/codex-host/issues/36). Those issues tracked
+that Sparkle snapshot; later public Desktop versions open a new pair and
+close the previous trackers as superseded. They are alerts, not a
+qualification queue. A scratch copy of 26.1103.41825
 (build 25679) was inspected under ignored
 `.codexhost/update-impact/26.1103.41825/`; named 26.1027.61615 voice assets
 are absent, and its Chromium product is 157.0.8103.39 versus production

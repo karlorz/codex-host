@@ -2,7 +2,9 @@ name: Compat Daily
 
 # Compare the public macOS release feed to Renderer voice pins.
 # This does not check installation-specific update offers or live voice behavior.
-# Opens one GitHub issue per surface when a pin is behind. Does not download the .app.
+# Opens one GitHub issue per surface when a pin is behind. A newer Sparkle
+# version opens a new issue and closes the previous tracker as superseded.
+# Does not download the .app.
 
 on:
   schedule:
@@ -96,8 +98,30 @@ jobs:
               labels: 'compat-broken',
               per_page: 100,
             });
+            const closeSuperseded = async (previous, successorNumber, surface) => {
+              for (const issue of previous) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  body: [
+                    `Superseded by #${successorNumber}. macOS Sparkle latest is now \`${report.latest?.version ?? 'unknown'}\` (this issue tracked \`${issue.title}\`). The ${surface} pin is unchanged. A newer public Desktop opens a new issue; one remains open per surface.`,
+                    '',
+                    `- Checked commit: \`${context.sha}\` (\`${context.ref}\`)`,
+                    `- Run: ${runUrl}`,
+                  ].join('\n'),
+                });
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                });
+              }
+            };
             for (const finding of findings) {
               const live = livePinIssue(finding, open, report.pins);
+              const previous = Array.isArray(live?.previous) ? live.previous : [];
               const body = [
                 finding.detail,
                 '',
@@ -128,24 +152,20 @@ jobs:
                   issue_number: live.number,
                   body: `macOS pin drift re-failed ${new Date().toISOString().slice(0, 10)} — ${runUrl}\n\nChecked commit: \`${context.sha}\` (\`${context.ref}\`)`,
                 });
+                await closeSuperseded(previous, live.number, finding.surface);
               } else {
-                await github.rest.issues.update({
+                const createdIssue = await github.rest.issues.create({
                   owner,
                   repo,
-                  issue_number: live.number,
                   title: finding.title,
+                  labels: ['compat-broken', 'bug'],
+                  body,
                 });
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: live.number,
-                  body: [
-                    `macOS Sparkle latest is now \`${report.latest?.version ?? 'unknown'}\` (this issue previously tracked \`${live.title}\`). The ${finding.surface} pin is unchanged. No new issue: one live tracker per surface while the pin stays the same.`,
-                    '',
-                    `- Checked commit: \`${context.sha}\` (\`${context.ref}\`)`,
-                    `- Run: ${runUrl}`,
-                  ].join('\n'),
-                });
+                const successorNumber = createdIssue.data.number;
+                if (!successorNumber) {
+                  throw new Error(`compat-daily created ${finding.surface} issue without a number`);
+                }
+                await closeSuperseded(previous, successorNumber, finding.surface);
               }
             }
 
@@ -171,7 +191,7 @@ jobs:
               if (comments.some(comment => comment.user?.type === 'Bot' && comment.body?.includes(marker))) continue;
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issue.number,
-                body: `${marker}\nThe macOS ${issue.surface} pin is now ${issue.version}, matching this issue's tracked Desktop target or the current macOS Sparkle release. Current macOS Sparkle: ${report.latest.version}. Newer Sparkle versions comment on this live issue while the pin is unchanged. This check does not verify microphone capture, connected audio or conversation lifecycle; the issue remains open for acceptance review.\n\nChecked commit: \`${context.sha}\` (\`${context.ref}\`)\nRun: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+                body: `${marker}\nThe macOS ${issue.surface} pin is now ${issue.version}, matching this issue's tracked Desktop target or the current macOS Sparkle release. Current macOS Sparkle: ${report.latest.version}. A newer Sparkle version opens a new issue and closes this one as superseded. This check does not verify microphone capture, connected audio or conversation lifecycle; the issue remains open for acceptance review.\n\nChecked commit: \`${context.sha}\` (\`${context.ref}\`)\nRun: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
               });
             }
 
