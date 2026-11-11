@@ -33,7 +33,11 @@ const { outputFiles } = await build({
       questions:[{id:'letters',type:'choice',prompt:'Which letters?',multiple:true,allowOther:true,optional:false,
        options:[{value:'alpha',label:'Alpha'},{value:'beta',label:'Beta'}]}],
       outcome:'skipped',answers:{}};
-    const state={questions:[question],records:[record,folded,skipped,narrow,pending],pendingAnchors:[{interactionId:'ask-1',turnId:'turn-1',itemId:'item-live'}],
+    const rowish = {interactionId:'ask-rowish',turnId:'turn-rowish',itemId:'item-rowish',title:'Letters',
+      questions:[{id:'letters',type:'choice',prompt:'Which letters?',multiple:true,allowOther:true,optional:false,
+       options:[{value:'alpha',label:'Alpha'},{value:'beta',label:'Beta'}]}],
+      outcome:'answered',answers:{letters:['alpha']}};
+    const state={questions:[question],records:[record,folded,skipped,narrow,pending,rowish],pendingAnchors:[{interactionId:'ask-1',turnId:'turn-1',itemId:'item-live'}],
       thread:'thread-1',host:'local',calls:[],recordsUnsupported:false};
     const route={async sendRequest(method,params){
       state.calls.push({method,params});
@@ -96,6 +100,10 @@ test.beforeEach(async ({ page }) => {
       <div data-local-conversation-item-target-ids="item-pending" style="width:0;height:0;overflow:hidden">tool</div>
     </div>
   </div>
+  <div id="turn-rowish" data-content-search-turn-key="turn-rowish" style="display:flex;flex-direction:row;width:800px;height:160px">
+    <div data-local-conversation-item-target-ids="item-rowish" style="width:80px;height:140px">tool</div>
+    <div id="rowish-reply" style="flex:1;width:400px;height:140px">You picked Alpha</div>
+  </div>
 </div>
 <form id="composer"><div contenteditable="true" role="textbox" aria-label="Chat message">chat draft</div></form>`,
     }),
@@ -147,7 +155,7 @@ test("overlay mode moves only the live picker above the Composer", async ({ page
     page.locator('[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]'),
   ).toHaveCount(0);
   await expect(live.getByRole("checkbox", { name: "Windows", exact: true })).toBeChecked();
-  await expect(page.locator("[data-codexhost-question-record]")).toHaveCount(5);
+  await expect(page.locator("[data-codexhost-question-record]")).toHaveCount(6);
 });
 
 test("shows a jump pill when the transcript contract exists but the row is unmounted", async ({
@@ -160,6 +168,50 @@ test("shows a jump pill when the transcript contract exists but the row is unmou
   });
   await expect(page.getByRole("button", { name: "Question waiting — Jump" })).toBeVisible();
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+});
+
+test("jump click opens the overlay when the transcript row stays hidden", async ({ page }) => {
+  await page.evaluate(async () => {
+    const state = Reflect.get(window, "fixture");
+    state.pendingAnchors[0].itemId = "item-missing";
+    await Reflect.get(window, "controller").refresh();
+  });
+  await page.getByRole("button", { name: "Question waiting — Jump" }).click();
+  const live = page.locator("[data-codexhost-question]");
+  await expect(live).toHaveCount(1);
+  await expect
+    .poll(async () => live.evaluate((node) => node.nextElementSibling?.id === "composer"))
+    .toBe(true);
+});
+
+test("jump click selects this chat tab when another window tab is active", async ({ page }) => {
+  await page.evaluate(async () => {
+    const bar = document.createElement("div");
+    bar.setAttribute("role", "tablist");
+    bar.setAttribute("aria-label", "Chat tabs");
+    bar.innerHTML =
+      '<button type="button" role="tab" aria-label="Ask user to choose letters" aria-selected="false" id="chat-tab">Ask user to choose letters</button>' +
+      '<button type="button" role="tab" aria-label="ORCA BURN LOOP" aria-selected="true" id="other-tab">ORCA BURN LOOP</button>';
+    for (const tab of bar.querySelectorAll('[role="tab"]')) {
+      tab.addEventListener("click", () => {
+        for (const node of bar.querySelectorAll('[role="tab"]')) {
+          node.setAttribute("aria-selected", node === tab ? "true" : "false");
+        }
+      });
+    }
+    const row = document.createElement("div");
+    row.setAttribute("data-app-action-sidebar-thread-row", "");
+    row.setAttribute("data-app-action-sidebar-thread-id", "local:thread-1");
+    row.setAttribute("aria-current", "page");
+    row.textContent = "UnreadAsk user to choose letters";
+    document.body.prepend(bar, row);
+    const state = Reflect.get(window, "fixture");
+    state.pendingAnchors[0].itemId = "item-missing";
+    await Reflect.get(window, "controller").refresh();
+  });
+  await page.getByRole("button", { name: "Question waiting — Jump" }).click();
+  await expect(page.locator("#chat-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#other-tab")).toHaveAttribute("aria-selected", "false");
 });
 
 test("parks a folded record on the turn's visible reply", async ({ page }) => {
@@ -258,6 +310,34 @@ test("keeps a skipped card visible while the turn is still working with no reply
       }),
     )
     .toBe(true);
+});
+
+test("keeps a history slot inside a flex-row turn instead of beside it in the transcript", async ({
+  page,
+}) => {
+  const card = page.locator('[data-codexhost-question-record="ask-rowish"]');
+  await expect(card).toHaveCount(1);
+  await expect
+    .poll(async () =>
+      page.locator("#turn-rowish").evaluate((turn) => {
+        const slot = turn.querySelector("[data-codexhost-question-history]");
+        const card = turn.ownerDocument.querySelector(
+          '[data-codexhost-question-record="ask-rowish"]',
+        );
+        return (
+          slot?.parentElement === turn &&
+          turn.contains(card) &&
+          turn.parentElement?.querySelector(":scope > [data-codexhost-question-history]") == null
+        );
+      }),
+    )
+    .toBe(true);
+  await page.evaluate(async () => {
+    await Reflect.get(window, "controller").refresh();
+    await Reflect.get(window, "controller").refresh();
+  });
+  await expect(page.locator("#turn-rowish > [data-codexhost-question-history]")).toHaveCount(1);
+  await expect(page.locator("#transcript > [data-codexhost-question-history]")).toHaveCount(0);
 });
 
 test("keeps pending cards when records list is method-not-found", async ({ page }) => {

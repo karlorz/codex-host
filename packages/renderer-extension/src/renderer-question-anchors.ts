@@ -194,20 +194,46 @@ function isHorizontalLayout(node: Element): boolean {
   return isFlexRow(node) || childrenLaidOutInRow(node);
 }
 
+/** Highest node a history slot may join: the turn, or the item row when no turn is present. */
+export function questionHistorySlotCeiling(mount: Element): Element {
+  return (
+    mount.closest(`[${TRANSCRIPT_TURN_KEY_ATTRIBUTE}]`) ??
+    mount.closest(TRANSCRIPT_ITEM_SELECTOR) ??
+    mount
+  );
+}
+
+function insertBeforeSafe(parent: Element, node: Node, before: Element | null): void {
+  try {
+    if (before && before.parentNode === parent) parent.insertBefore(node, before);
+    else parent.append(node);
+  } catch {
+    try {
+      parent.append(node);
+    } catch {
+      return;
+    }
+  }
+}
+
 /** Full-width stack host when the reply sits in a row beside a still-open tool column. */
 function rowStackInsert(mount: Element): { parent: Element; before: Element } | null {
+  const ceiling = questionHistorySlotCeiling(mount);
+  if (mount === ceiling) return null;
   const full = containingBlockWidth(mount);
   const mountWidth = mount.getBoundingClientRect().width;
   const parent = mount.parentElement;
+  if (!parent || !ceiling.contains(parent)) return null;
   const needsLift =
     isFlexRow(mount) ||
-    Boolean(parent && isHorizontalLayout(parent)) ||
+    Boolean(isHorizontalLayout(parent)) ||
     (full > 0 && mountWidth < full * 0.7);
   if (!needsLift) return null;
 
   let before: Element = mount;
-  let host = parent;
-  while (host) {
+  let host: Element | null = parent;
+  while (host && ceiling.contains(host)) {
+    if (host === ceiling) return { parent: host, before };
     const style = getComputedStyle(host);
     const contents = style.display === "contents";
     const row = !contents && isHorizontalLayout(host);
@@ -229,23 +255,25 @@ function applyHistorySlotLayout(slot: HTMLElement): void {
 
 export function ensureQuestionHistorySlot(document: Document, mount: Element): Element {
   const insert = rowStackInsert(mount);
-  if (insert) {
-    const sibling = insert.before.previousElementSibling;
-    if (sibling?.hasAttribute(QUESTION_HISTORY_SLOT_ATTRIBUTE)) return sibling;
-  }
-  for (const child of mount.children) {
-    if (child.getAttribute(QUESTION_HISTORY_SLOT_ATTRIBUTE) === null) continue;
-    if (insert) {
-      insert.parent.insertBefore(child, insert.before);
-      applyHistorySlotLayout(child as HTMLElement);
-      return child;
-    }
+  const host = insert?.parent ?? mount;
+  for (const child of host.children) {
+    if (!child.hasAttribute(QUESTION_HISTORY_SLOT_ATTRIBUTE)) continue;
+    applyHistorySlotLayout(child as HTMLElement);
     return child;
+  }
+  const ceiling = questionHistorySlotCeiling(mount);
+  const parked = ceiling.querySelector(`[${QUESTION_HISTORY_SLOT_ATTRIBUTE}]`);
+  if (parked) {
+    if (insert && parked.parentElement !== insert.parent) {
+      insertBeforeSafe(insert.parent, parked, insert.before);
+    }
+    applyHistorySlotLayout(parked as HTMLElement);
+    return parked;
   }
   const slot = document.createElement("div");
   slot.setAttribute(QUESTION_HISTORY_SLOT_ATTRIBUTE, "");
   applyHistorySlotLayout(slot);
-  if (insert) insert.parent.insertBefore(slot, insert.before);
+  if (insert) insertBeforeSafe(insert.parent, slot, insert.before);
   else mount.prepend(slot);
   return slot;
 }

@@ -16,10 +16,10 @@ import { installQuestionActivity } from "./renderer-question-activity.js";
 import {
   ensureQuestionHistorySlot,
   findDisplayedTranscriptItem,
-  findTranscriptItem,
   findVisibleHistoryMount,
   transcriptItemContractPresent,
 } from "./renderer-question-anchors.js";
+import { jumpRevealsQuestionRow } from "./renderer-question-jump.js";
 import {
   HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT,
   readHarnessQuestionPlacement,
@@ -56,9 +56,16 @@ function createJumpPill(document: Document, onJump: () => void): HTMLButtonEleme
   button.type = "button";
   button.dataset.codexhostQuestionJump = "";
   button.textContent = "Question waiting — Jump";
-  button.addEventListener("click", onJump);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onJump();
+  });
   Object.assign(button.style, {
     display: "block",
+    position: "relative",
+    zIndex: "4",
+    pointerEvents: "auto",
     width: "100%",
     margin: "0 0 8px",
     minHeight: "28px",
@@ -84,6 +91,7 @@ export function installRendererQuestions(
   let card: ReturnType<typeof createQuestionCard> | null = null;
   let cardKey: string | null = null;
   let mountedPlacement: "in-chat" | "overlay" | "jump" | null = null;
+  let preferOverlay = false;
   let jump: HTMLButtonElement | null = null;
   let stopActivity: (() => void) | undefined;
   const unsupported = new WeakSet<object>();
@@ -117,7 +125,11 @@ export function installRendererQuestions(
     itemId: string | undefined,
   ): "in-chat" | "overlay" | "jump" => {
     if (readHarnessQuestionPlacement(window) !== "in-chat") return "overlay";
-    if (itemId && findDisplayedTranscriptItem(document, itemId)) return "in-chat";
+    if (itemId && findDisplayedTranscriptItem(document, itemId)) {
+      preferOverlay = false;
+      return "in-chat";
+    }
+    if (preferOverlay) return "overlay";
     if (itemId && transcriptItemContractPresent(document)) return "jump";
     return "overlay";
   };
@@ -131,14 +143,16 @@ export function installRendererQuestions(
     if (placement === "in-chat" && anchor?.itemId) {
       const row = findDisplayedTranscriptItem(document, anchor.itemId);
       if (row) {
-        row.append(card.root);
+        ensureQuestionHistorySlot(document, row).append(card.root);
         return "in-chat";
       }
     }
     if (placement === "jump" && anchor?.itemId) {
       const itemId = anchor.itemId;
       jump = createJumpPill(document, () => {
-        findTranscriptItem(document, itemId)?.scrollIntoView({ block: "nearest" });
+        if (!jumpRevealsQuestionRow(document, current.hostId, current.threadId, itemId)) {
+          preferOverlay = true;
+        }
         void refresh();
       });
       current.composer.before(jump);
@@ -190,10 +204,22 @@ export function installRendererQuestions(
       records.delete(oldest);
     }
   };
+  const syncRecordsSafe = (
+    current: QuestionContext,
+    closed: ThreadQuestionRecord[],
+    liveId: string | undefined,
+  ) => {
+    try {
+      syncRecords(current, closed, liveId);
+    } catch {
+      return;
+    }
+  };
   const refresh = async () => {
     if (disposed) return;
     const next = readContext();
     if (!same(context, next)) {
+      preferOverlay = false;
       clear();
       clearRecords();
       context = next;
@@ -235,7 +261,7 @@ export function installRendererQuestions(
       if (!live) {
         if (cardKey) drafts.delete(cardKey);
         clear(false);
-        syncRecords(current, closed, undefined);
+        syncRecordsSafe(current, closed, undefined);
         return;
       }
       const key = JSON.stringify([
@@ -255,7 +281,7 @@ export function installRendererQuestions(
           (expected === "jump" ? jump?.isConnected === true : card?.root.isConnected === true);
         if (stable) {
           card?.updateAutoResolution(live.autoResolution);
-          syncRecords(current, closed, live.interactionId);
+          syncRecordsSafe(current, closed, live.interactionId);
           return;
         }
       }
@@ -313,12 +339,11 @@ export function installRendererQuestions(
           if (ack) mounted.updateAutoResolution(ack);
         },
       );
-      syncRecords(current, closed, live.interactionId);
+      syncRecordsSafe(current, closed, live.interactionId);
     } catch (error) {
       if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
       if (revision === startedRevision && same(current, context)) {
         clear();
-        clearRecords();
       }
     } finally {
       inFlight = false;

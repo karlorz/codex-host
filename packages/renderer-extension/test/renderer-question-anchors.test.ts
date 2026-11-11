@@ -9,6 +9,7 @@ import {
   findVisibleReplyColumn,
   findWorkingColumn,
   historyMountIsItemRow,
+  questionHistorySlotCeiling,
   transcriptItemContractPresent,
 } from "../src/renderer-question-anchors.js";
 import {
@@ -95,6 +96,9 @@ function node(init: {
       let current: FakeNode | null = created;
       while (current) {
         if (selector === `[${TRANSCRIPT_TURN_KEY_ATTRIBUTE}]` && current.turnKey) {
+          return current as unknown as Element;
+        }
+        if (selector === TRANSCRIPT_ITEM_SELECTOR && current.ids) {
           return current as unknown as Element;
         }
         current = current.parentElement;
@@ -216,5 +220,31 @@ describe("Renderer question transcript anchors", () => {
     expect(
       findVisibleHistoryMount(turn as unknown as ParentNode, "item-pending", "turn-pending"),
     ).toBe(workingCol as unknown as Element);
+  });
+
+  it("caps a history slot at the turn instead of the surrounding transcript", () => {
+    const reply = node({ height: 80, text: "You picked Alpha" });
+    const tool = node({ height: 80, ids: "item-rowish", text: "tool" });
+    const turn = node({
+      height: 80,
+      turnKey: "turn-rowish",
+      children: [tool, reply],
+    });
+    const transcript = node({ height: 400, text: "transcript", children: [turn] });
+    expect(questionHistorySlotCeiling(reply as unknown as Element)).toBe(
+      turn as unknown as Element,
+    );
+    expect(questionHistorySlotCeiling(reply as unknown as Element)).not.toBe(
+      transcript as unknown as Element,
+    );
+  });
+
+  it("caps a history slot at the item row when the turn node is absent", () => {
+    const row = node({ height: 40, ids: "item-record", text: "record row" });
+    const transcript = node({ height: 400, text: "transcript", children: [row] });
+    expect(questionHistorySlotCeiling(row as unknown as Element)).toBe(row as unknown as Element);
+    expect(questionHistorySlotCeiling(row as unknown as Element)).not.toBe(
+      transcript as unknown as Element,
+    );
   });
 });
