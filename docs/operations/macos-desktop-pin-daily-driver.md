@@ -33,8 +33,11 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 ## Daily driver
 
 The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Unaudited
-Sparkle builds stay skipped, including **26.1103.41825**. Open `compat-broken`
-pin-drift issues are live alerts, not a queue to install the public feed. A
+Sparkle builds stay skipped, including **26.1106.51428** and **26.1103.41825**.
+Open `compat-broken` pin-drift issues ([#37](https://github.com/karlorz/codex-host/issues/37),
+[#38](https://github.com/karlorz/codex-host/issues/38)) are live alerts, not a
+queue to install the public feed. Upstream `v0.18.0` Desktop 26.1106 support is
+the 24/25-slot draft Model memo layout, not a Live Voice qualification. A
 newer public Desktop opens a new issue per surface and closes the previous
 tracker as superseded. Operator production use of that bundle is the
 acceptance for ordinary Work/Chat voice on this pin. Open `compat-broken`
