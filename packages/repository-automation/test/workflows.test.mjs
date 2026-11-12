@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { format } from "prettier";
 import { describe, expect, it } from "vitest";
+import { parseDocument } from "yaml";
 import { CI_JOBS } from "../src/policy.mjs";
 
 const root = path.resolve(import.meta.dirname, "../../..");
@@ -16,8 +17,11 @@ describe("workflow and form contracts", () => {
     ".github/ISSUE_TEMPLATE/feature_request.yml",
     ".github/ISSUE_TEMPLATE/question.yml",
     ".github/ISSUE_TEMPLATE/config.yml",
-  ])("parses %s as YAML", async (file) => {
-    await expect(format(await read(file), { parser: "yaml" })).resolves.toBeTypeOf("string");
+  ])("parses %s as YAML with unique mapping keys", async (file) => {
+    const source = await read(file);
+    await expect(format(source, { parser: "yaml" })).resolves.toBeTypeOf("string");
+    const document = parseDocument(source, { uniqueKeys: true });
+    expect(document.errors).toEqual([]);
   });
 
   it("retains human-readable Issue forms with unique field IDs", async () => {

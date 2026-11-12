@@ -76,9 +76,8 @@ jobs:
         id: release
         env:
           RECOVERY_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_run_id || '' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
           SKIP_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_ci }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             if (context.eventName === 'workflow_dispatch' && context.ref !== `refs/heads/${context.payload.repository.default_branch}`) {
