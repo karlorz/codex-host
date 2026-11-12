@@ -110,10 +110,10 @@ describe("release Payload", () => {
       const paths = await validatePayload({ payloadRoot: root, target, root: "/repo/source" });
       expect(paths).toEqual(expectedPayloadPaths(target));
       expect(paths).toHaveLength(
-        33 + preinstalledHarnessPluginPaths().length + expectedWebPaths(target).length,
+        34 + preinstalledHarnessPluginPaths().length + expectedWebPaths(target).length,
       );
       expect(expectedPayloadPaths(releaseTarget("windows-x64"))).toHaveLength(
-        35 +
+        36 +
           preinstalledHarnessPluginPaths().length +
           expectedWebPaths(releaseTarget("windows-x64")).length,
       );

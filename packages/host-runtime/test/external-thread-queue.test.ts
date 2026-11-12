@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { ExternalThreadQueue } from "../src/external-thread-queue.js";
 
 it("retains source identity across editing, reordering and pending starts without exposing it", () => {
@@ -27,19 +27,18 @@ it("retains source identity across editing, reordering and pending starts withou
   expect(queue.head("thread")?.sourceHostId).toBeNull();
 });
 
-it("peeks the queue head without removing it", async () => {
-  const queue = new ExternalThreadQueue({
-    notifyChanged: vi.fn(async () => {}),
-    createId: () => "head",
-  });
-  await queue.add("thread", [{ type: "text", text: "later" }], "message");
+it("peeks the queue head without removing it", () => {
+  const queue = new ExternalThreadQueue();
+  const added = queue.add("thread", [{ type: "text", text: "later" }], "message");
   expect(queue.peek("thread")).toEqual({
-    id: "head",
+    id: added.id,
     input: [{ type: "text", text: "later" }],
     clientUserMessageId: "message",
+    presentationInput: null,
+    sourceHostId: null,
   });
   expect(queue.has("thread")).toBe(true);
-  expect(queue.take("thread").submission.id).toBe("head");
+  expect(queue.take("thread").submission.id).toBe(added.id);
   expect(queue.peek("thread")).toBeUndefined();
 });
 

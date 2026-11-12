@@ -107,6 +107,9 @@ async function fixture() {
       setLaunchPath: async () => {
         throw new Error("not available");
       },
+      setGrokComputerUse: async () => {
+        throw new Error("not available");
+      },
     },
     announcement: async () => null,
     inspect: async () => ({

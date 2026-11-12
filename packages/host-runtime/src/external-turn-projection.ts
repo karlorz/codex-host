@@ -33,7 +33,8 @@ export type TurnScopedEvent = Exclude<
       | "usage.history"
       | "subagent.state.changed"
       | "subagent.transcript.changed"
-      | "session.faulted";
+      | "session.faulted"
+      | "goal.changed";
   }
 >;
 

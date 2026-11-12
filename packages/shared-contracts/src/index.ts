@@ -3,6 +3,7 @@ export * from "./goals.js";
 export * from "./realtime-call.js";
 export * from "./enrollment.js";
 export * from "./enrolled-mcp-relay.js";
+export * from "./grok-computer-use.js";
 export * from "./client-channel.js";
 export * from "./thread-catalog.js";
 export * from "./voice.js";

@@ -588,7 +588,7 @@ describe("delegation CLI", () => {
         error: {
           code: "RUNTIME_UNREACHABLE",
           message:
-            'CODEXHOST_RUNTIME_ENDPOINT and CODEXHOST_RUNTIME_TOKEN are required. If this command runs inside native Codex, shell_environment_policy may have filtered the Host-provided CODEXHOST_* variables. Prefer inherit = "all" with ignore_default_excludes = true and a narrow include_only allowlist that contains "CODEXHOST_RUNTIME_ENDPOINT" and "CODEXHOST_RUNTIME_TOKEN" plus the variables required by the platform and invoked tools; do not use unconstrained inherit = "all".',
+            "No local CLI credentials were found. Start or update the local Host with its external listener enabled, or configure an external client token.",
           details: {
             reason: "missing_runtime_environment",
             missingEnvironmentVariables: [
@@ -604,6 +604,10 @@ describe("delegation CLI", () => {
                   DELEGATION_RUNTIME_TOKEN_ENV,
                 ],
               },
+            },
+            externalClient: {
+              environmentVariables: ["CODEXHOST_CLIENT_TOKEN", "CODEXHOST_CLIENT_TOKEN_FILE"],
+              register: "codexhost client add <name>",
             },
           },
         },

@@ -19,6 +19,7 @@ function overview(
     startup: [],
     controller: null,
     launchAvailable: true,
+    liveVoice: { inject: true, envOverride: null },
     summary: { state, detail: null },
     issueUrl: "",
     hostAvailable,

@@ -96,11 +96,7 @@ import { HarnessDisplaySettingsStore } from "./harness-display-settings.js";
 import type { EnrollmentAuthority } from "./client-enrollment-authority.js";
 import { handleEnrollmentHostRequest, isEnrollmentHostMethod } from "./client-enrollment-host.js";
 import { isModelPriceOverridesMethod } from "./model-price-overrides-file.js";
-import {
-  HARNESS_DISPLAY_CHANGED_METHOD,
-  HARNESS_DISPLAY_GET_METHOD,
-  HARNESS_DISPLAY_SET_METHOD,
-} from "@codexhost/shared-contracts";
+import { HARNESS_DISPLAY_CHANGED_METHOD } from "@codexhost/shared-contracts";
 import {
   rewriteDelegationMentionInput,
   rewriteDelegationMentionText,
@@ -158,7 +154,6 @@ import {
   harnessWebUiOpenParamsSchema,
   harnessWebUiOpenResultSchema,
   harnessModelSelectionStateSchema,
-  catalogModelForRef,
   harnessThinkingOptionIdSchema,
   hostItemIdSchema,
   hostThreadIdSchema,
@@ -316,7 +311,13 @@ import {
 } from "./external-turn-projection.js";
 import { DesktopControlRequests } from "./desktop-control-requests.js";
 import { DesktopThreadRouting } from "./desktop-thread-routing.js";
-import { errorMessage, rpcEnvelope, rpcError, type HostRequestOrigin } from "./desktop-rpc.js";
+import {
+  errorMessage,
+  rpcEnvelope,
+  rpcError,
+  routingParams,
+  type HostRequestOrigin,
+} from "./desktop-rpc.js";
 import { ThreadListTiming } from "./thread-list-timing.js";
 import { allocateProjectlessWorkspace } from "./projectless-workspace.js";
 import {

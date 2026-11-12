@@ -8,7 +8,6 @@ import {
   type DelegationControlApi,
   type DelegationThreadSnapshot,
   type DelegationThreadStatus,
-  type ThreadWatchEntry,
   type ThreadWatchInput,
   type ThreadWatchListResult,
   type ThreadWatchOutcome,
