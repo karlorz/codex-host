@@ -31,8 +31,26 @@ const release = releaseFor("1.1.0");
 
 async function writeWaitingForExit(statusPath: string): Promise<void> {
   const status = JSON.parse(await readFile(statusPath, "utf8"));
-  await writeFile(`${statusPath}.tmp`, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
-  await rename(`${statusPath}.tmp`, statusPath);
+  const temporary = `${statusPath}.tmp`;
+  await writeFile(temporary, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
+  const delays = [10, 30, 70, 150, 300] as const;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(temporary, statusPath);
+      return;
+    } catch (error) {
+      const delay = delays[attempt];
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        process.platform !== "win32" ||
+        delay === undefined ||
+        (code !== "EACCES" && code !== "EBUSY" && code !== "EPERM")
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 async function npmLayout(platform: NodeJS.Platform = process.platform, version = "1.0.0") {
@@ -304,11 +322,9 @@ describe("console updates", () => {
     const call = spawnUpdater.mock.calls[0];
     if (!call) throw new Error("Updater was not spawned");
     const request = JSON.parse(await readFile(call[1], "utf8"));
-    const status = JSON.parse(await readFile(request.status_path, "utf8"));
-    // Match the real updater's atomic publication while readiness polling is active.
-    const readyStatus = `${request.status_path}.fixture-ready.tmp`;
-    await writeFile(readyStatus, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
-    await rename(readyStatus, request.status_path);
+    // Match the real updater: atomic status replace while readiness polling is
+    // active, retrying Windows sharing violations on the destination file.
+    await writeWaitingForExit(request.status_path);
     await expect(retry).resolves.toMatchObject({ status: { phase: "waiting-for-exit" } });
     await expect(updates.status()).resolves.toMatchObject({
       status: { phase: "waiting-for-exit", error: null },
