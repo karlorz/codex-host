@@ -8,6 +8,7 @@ import type { ExternalThreadStore } from "./external-thread-repository.js";
 import type { PreparedLocalCodex } from "./native-account-host.js";
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import type { RemoteAppServerSession, RemoteAppServerSessionStreams } from "./remote-app-server.js";
+import type { EnrollmentAuthority } from "./client-enrollment-authority.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
 import {
   DELEGATION_RUNTIME_ENDPOINT_ENV,
@@ -72,7 +73,11 @@ export function sharedHostDesktop(
     prices: ModelPriceCatalog;
     updateCoordinator?: HostUpdateCoordinator;
     delegation(): DelegationControlRegistration | undefined;
-    register(api: DelegationControlRegistration): (() => void) | undefined;
+    register(
+      api: DelegationControlRegistration,
+      extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
+    ): (() => void) | undefined;
+    enrollment: EnrollmentAuthority;
     connected: Set<AppServerHost>;
     running: Set<Promise<number>>;
   },
@@ -127,6 +132,7 @@ export function sharedHostDesktop(
       ? { consoleOpener: createHostConsoleOpener({ entrypoint: entry, environment }) }
       : {}),
     ...(webOpener ? { webOpener } : {}),
+    enrollment: options.enrollment,
     onDelegationApi: options.register,
   });
   return {

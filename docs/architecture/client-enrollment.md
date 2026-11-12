@@ -126,7 +126,7 @@ The listener stops on SIGINT/SIGTERM. Session pairing also stops it at token exp
 
 ## Settings and console
 
-Desktop Settings and the local console share an **Enrollment** page. It lists active Runtime records (client id, pairing, expiry, allowlist, executable) and can revoke one enrollment. Machine pairing shows the recorded expiry, valid until that date unless revoked earlier. Tokens are never shown. The page does not start or stop `enroll serve`; that remains a foreground CLI. Listing and revoke go through Host methods `codexhost/enrollment/list` and `codexhost/enrollment/revoke`, which the console may call only while the local Host is running.
+Desktop Settings and the local console share an **Enrollment** page. It lists active Runtime records (client id, pairing, expiry, allowlist, executable) and can revoke one enrollment. The shared Host and each Desktop session use that Runtime enrollment authority, so persisted machine pairings in `enroll/runtime-records.json` remain listed without a new enroll. Machine pairing shows the recorded expiry, valid until that date unless revoked earlier. Tokens are never shown. The page does not start or stop `enroll serve`; that remains a foreground CLI. Listing and revoke go through Host methods `codexhost/enrollment/list` and `codexhost/enrollment/revoke`, which the console may call only while the local Host is running.
 
 ## Out of scope
 

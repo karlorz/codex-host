@@ -113,7 +113,7 @@ export async function runSharedHostService(
   try {
     return await prepareDelegationRuntime({
       environment: env,
-      createHost: async (delegationEnvironment, _register, registry) => {
+      createHost: async (delegationEnvironment, _register, registry, enrollment) => {
         const remote = createRemoteControlAppServerPlan({
           arguments: ["app-server"],
           environment: delegationEnvironment,
@@ -163,9 +163,10 @@ export async function runSharedHostService(
           ...(values.plugins
             ? { pluginRoots: [values.plugins, ...installed.pluginRoots.slice(1)] }
             : {}),
-          onDelegationApi: (api) => {
+          enrollment,
+          onDelegationApi: (api, extras) => {
             delegation = api;
-            return registry.register(api, { harnessCatalog: true });
+            return registry.register(api, { ...extras, harnessCatalog: true });
           },
         });
         const running = host.run();
@@ -185,9 +186,13 @@ export async function runSharedHostService(
           owner,
           store,
           prices,
+          enrollment,
           ...(updateCoordinator ? { updateCoordinator } : {}),
           delegation: () => delegation,
-          register: (api: DelegationControlRegistration) => registry.register(api),
+          register: (
+            api: DelegationControlRegistration,
+            extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
+          ) => registry.register(api, extras),
           connected: desktops,
           running: desktopRuns,
         };

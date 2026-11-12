@@ -1834,6 +1834,7 @@ export class AppServerHost {
         // Settings requests from Web clients; the shared service owns these handlers too.
         request.method.startsWith("codexhost/account/") ||
         request.method.startsWith("codexhost/update/") ||
+        isEnrollmentHostMethod(request.method) ||
         isModelPriceOverridesMethod(request.method)
       )
     ) {
