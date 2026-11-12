@@ -16,7 +16,7 @@ const question={interactionId:'ask-1',turnId:'turn-1',title:'Grok',questions:[
 const state={questions:[question],calls:[],thread:'thread-1',host:'local',fail:false,hold:false,defer:null,listHold:false,listDefer:null,activityHold:false,activityDefer:null,activityFail:false,activityAck:null};
 const route={async sendRequest(method,params){state.calls.push({method,params});
  if(method.endsWith('question-records/list'))return {records:[],pendingAnchors:[]};
- if(method.endsWith('/list')){if(state.listHold)await new Promise(r=>state.listDefer=r);return {questions:state.questions};}
+ if(method.endsWith('/list')){if(params?.unobserved)return {questions:[]};if(state.listHold)await new Promise(r=>state.listDefer=r);return {questions:state.questions};}
  if(method.endsWith('/activity')){if(state.activityHold)await new Promise(r=>state.activityDefer=r);if(state.activityFail)throw Error('activity failed');return {autoResolution:state.activityAck};}
  if(!method.endsWith('/respond'))throw Error('Unused fixture RPC');
  if(state.hold)await new Promise(r=>state.defer=r);
@@ -378,6 +378,32 @@ test("ignores late results after Host/Thread switch and after disposal", async (
   });
   await page.waitForTimeout(900);
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+});
+
+test("covers a sibling native Desktop question card so the shared picker stays the answer UI", async ({
+  page,
+}) => {
+  await expect(page.getByRole("checkbox", { name: "Alpha", exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const composer = document.querySelector("#composer");
+    if (!(composer instanceof HTMLElement)) throw new Error("missing composer");
+    const native = document.createElement("div");
+    native.id = "native-question";
+    native.setAttribute("data-codex-composer-request-navigation", "");
+    native.textContent = "Waiting for your answer";
+    composer.before(native);
+    Reflect.get(window, "controller").refreshContext();
+  });
+  await expect(page.locator("#native-question")).toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+    "",
+  );
+  await page.evaluate(() => Reflect.get(window, "controller").refresh());
+  await expect(page.locator("#native-question")).toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+    "",
+  );
+  await expect(page.getByRole("checkbox", { name: "Alpha", exact: true })).toBeVisible();
 });
 
 test("recovers a card removed by a native rerender without losing the draft", async ({ page }) => {

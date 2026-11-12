@@ -32,6 +32,38 @@ export const QUESTION_CARD_CSS = `
   .countdown:not([hidden]) + .dismiss { margin-left: 0; }
   .card.record .option { cursor: default; }
   .card.record :disabled { cursor: default; opacity: 1; }
+  .card.record.compact { padding: 12px 12px 10px; }
+  .card.record.compact .title { margin-bottom: 8px; }
+  .card.record.compact fieldset { margin-bottom: 8px; }
+  .card.record.compact legend { margin-bottom: 8px; }
+  .answers { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 6px; }
+  .answer {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 4px 10px 4px 6px;
+    border-radius: 999px;
+    background: var(--question-selected);
+    overflow-wrap: anywhere;
+  }
+  .answer-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: var(--question-primary);
+    color: var(--question-primary-text);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 18px;
+  }
+  .answer-mark svg { width: 12px; height: 12px; stroke: currentColor; }
+  .answer-label { min-width: 0; }
   svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .body { min-height: 0; overflow: auto; }
   fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 14px; }

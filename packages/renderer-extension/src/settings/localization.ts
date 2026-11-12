@@ -46,6 +46,10 @@ export interface RendererSettingsMessages {
   readonly harnessQuestionInChatDescription: string;
   readonly harnessQuestionInChatHelpLabel: string;
   readonly harnessQuestionInChatHelp: readonly string[];
+  readonly harnessQuestionHistorySelectedTitle: string;
+  readonly harnessQuestionHistorySelectedDescription: string;
+  readonly harnessQuestionHistorySelectedHelpLabel: string;
+  readonly harnessQuestionHistorySelectedHelp: readonly string[];
   readonly loadedSessions: {
     title: string;
     description: string;
@@ -359,6 +363,15 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "Answered questions remain after reopening a chat only if the Harness's own history records them.",
     "Desktop still folds thinking and tool calls. The answered card stays visible as full-width history during the turn, then with the visible reply.",
     "Update both the Host and the Desktop extension, including remote Hosts.",
+  ]),
+  harnessQuestionHistorySelectedTitle: "Keep only selected answers in question history",
+  harnessQuestionHistorySelectedDescription:
+    "On by default. After you answer an in-chat Harness question, history keeps the chosen answers and hides the other options. Turn this off to keep every option in the record.",
+  harnessQuestionHistorySelectedHelpLabel: "About Harness question history",
+  harnessQuestionHistorySelectedHelp: Object.freeze([
+    "Live pickers still show every option until you send or skip.",
+    "Skipped, expired, and closed questions keep the prompt and outcome without listing unused options.",
+    "This is per viewer. It does not change how answers are stored.",
   ]),
   loadedSessions: {
     title: "Loaded sessions",
@@ -739,6 +752,15 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "只有 Harness 自己的历史记录了提问和答案时，重新打开会话才会再次显示已回答的提问。",
     "Desktop 仍会折叠思考和工具调用。已回答的卡片在回合进行中也保持全宽历史，随后留在可见回复处。",
     "Host 和 Desktop 扩展需要一起更新，包括远程 Host。",
+  ]),
+  harnessQuestionHistorySelectedTitle: "提问历史只保留已选答案",
+  harnessQuestionHistorySelectedDescription:
+    "默认开启。在对话中回答 Harness 提问后，历史只留下所选答案，并隐藏其他选项。关闭后，记录会保留全部选项。",
+  harnessQuestionHistorySelectedHelpLabel: "Harness 提问历史说明",
+  harnessQuestionHistorySelectedHelp: Object.freeze([
+    "未发送或跳过前，进行中的选择卡片仍显示全部选项。",
+    "跳过、过期或由 Harness 关闭的提问保留题干和结果，不再列出未使用的选项。",
+    "此设置为当前查看器本地偏好，不改变答案的存储方式。",
   ]),
   loadedSessions: {
     title: "已加载会话",

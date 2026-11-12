@@ -20,6 +20,7 @@ const { outputFiles } = await build({
       state.calls.push({method,params});
       if(method.endsWith('question-records/list')) return {records:[],pendingAnchors:[]};
       if(method.endsWith('/list')) {
+        if(params?.unobserved) return {questions:[]};
         const snapshot=structuredClone(state.questions);
         if(state.listHold) await new Promise(resolve=>state.releaseList=resolve);
         if(state.listFail) throw Error('Disconnected');
@@ -143,6 +144,15 @@ test("preserves drafts across switching and remounts, but not across owners", as
     await Reflect.get(window, "controller").refresh();
   });
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        Reflect.get(window, "fixture").calls.filter(
+          (c: { method: string; params?: { threadId?: string; unobserved?: boolean } }) =>
+            c.method.endsWith("questions/list") && c.params?.unobserved === true,
+        ).length,
+    ),
+  ).toBeGreaterThan(0);
   await page.evaluate(async () => {
     Reflect.get(window, "fixture").thread = "thread-1";
     await Reflect.get(window, "controller").refresh();
@@ -218,7 +228,7 @@ test("mounts through the real binding probe outside the chat Composer and follow
       const nativeRoute=window.route;
       window.__codexhostHostRoutingV1={forHost:()=>({hostId:'local',manager:nativeRoute})};
       const editor=document.querySelector('[contenteditable]');
-      Object.defineProperty(editor,'__reactFiber$test',{value:{memoizedProps:{isOrbit:false},return:null}});
+      Object.defineProperty(editor,'__reactFiber$test',{configurable:true,value:{memoizedProps:{isOrbit:false},return:null}});
       const binding=installRendererBindingProbe({enabledAgents:['codex','pi'],defaultAgent:'pi'});
       const transportModelId=encodeHarnessPluginRoute({harnessId:'pi',model:{id:'test'}});
       const client=new Proxy({}, {get:(_,key)=>{
@@ -259,18 +269,58 @@ test("mounts through the real binding probe outside the chat Composer and follow
     (node as HTMLElement).hidden = false;
   });
   await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("keep draft");
-  // Native question/approval surfaces temporarily own the Composer; do not stack a shared card.
+  // Desktop's native question card is covered so the shared card stays the answer UI.
   await page
     .locator("#composer")
     .evaluate((node) => node.setAttribute("data-codex-composer-request", ""));
-  await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(1);
+  await expect(page.locator("#composer")).not.toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+  );
+  await expect(page.locator("#composer")).not.toHaveAttribute("hidden");
   await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(0);
   await page
     .locator("#composer")
     .evaluate((node) => node.removeAttribute("data-codex-composer-request"));
   await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("keep draft");
+  await page.evaluate(() => {
+    const composer = document.querySelector("#composer");
+    if (!(composer instanceof HTMLElement)) throw new Error("missing composer");
+    const native = document.createElement("div");
+    native.id = "native-question";
+    native.setAttribute("data-codex-composer-request-navigation", "");
+    native.textContent = "Waiting for your answer";
+    composer.before(native);
+    composer.setAttribute("data-codexhost-cover-scan", "");
+  });
+  await expect(page.locator("#native-question")).toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+    "",
+  );
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(1);
   await page.evaluate(() => Reflect.get(window, "binding").dispose());
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+  await page.evaluate(() => {
+    const composer = document.querySelector("#composer");
+    if (!(composer instanceof HTMLElement)) throw new Error("missing composer");
+    composer.setAttribute("data-codex-composer-request", "");
+    if (!document.getElementById("native-question")) {
+      const native = document.createElement("div");
+      native.id = "native-question";
+      native.setAttribute("data-codex-composer-request-navigation", "");
+      native.textContent = "Waiting for your answer";
+      composer.before(native);
+    }
+  });
+  await page.addScriptTag({ content: fullBundle });
+  await expect(page.getByRole("checkbox", { name: "macOS", exact: true })).toBeVisible();
+  await expect(page.locator("#native-question")).toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+    "",
+  );
+  await expect(page.locator("#composer")).not.toHaveAttribute(
+    "data-codexhost-shared-question-cover",
+  );
 });
 
 for (const scheme of ["light", "dark"]) {

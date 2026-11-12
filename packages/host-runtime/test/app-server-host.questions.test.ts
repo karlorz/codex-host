@@ -200,6 +200,10 @@ describe("shared multi-select questions", () => {
       expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
         false,
       );
+      await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "foreign" });
+      expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
+        true,
+      );
       const params = {
         threadId,
         turnId,
@@ -246,6 +250,9 @@ describe("shared multi-select questions", () => {
       expect(await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "foreign" })).toMatchObject({
         result: { questions: [] },
       });
+      expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
+        true,
+      );
       const params = { threadId, turnId, interactionId, answers: { letters: ["a", "g"] } };
       expect(
         await rpc(THREAD_QUESTION_RESPOND_METHOD, { ...params, threadId: "foreign" }),

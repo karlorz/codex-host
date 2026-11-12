@@ -1,4 +1,5 @@
 import type { HostQuestion, HostQuestionRecordEvidence } from "@codexhost/harness-adapter";
+import { toGrokHostQuestions, type GrokQuestionRequest } from "./grok-questions.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -16,8 +17,8 @@ function isAskUserQuestionName(name: string): boolean {
 function questionsFromInput(rawInput: unknown): HostQuestion[] | null {
   const questions = isRecord(rawInput) ? rawInput.questions : undefined;
   if (!Array.isArray(questions) || questions.length === 0) return null;
-  const mapped: HostQuestion[] = [];
-  for (const [index, value] of questions.entries()) {
+  const native: GrokQuestionRequest["questions"] = [];
+  for (const value of questions) {
     if (!isRecord(value) || typeof value.question !== "string" || value.question.length === 0) {
       return null;
     }
@@ -26,40 +27,22 @@ function questionsFromInput(rawInput: unknown): HostQuestion[] | null {
           if (!isRecord(option) || typeof option.label !== "string" || option.label.length === 0) {
             return [];
           }
-          const description = [option.description, option.preview]
-            .filter((part): part is string => typeof part === "string" && part.length > 0)
-            .join("\n\n");
           return [
             {
-              value: option.label,
               label: option.label,
-              ...(description ? { description } : {}),
+              description: typeof option.description === "string" ? option.description : "",
+              ...(typeof option.preview === "string" ? { preview: option.preview } : {}),
             },
           ];
         })
       : [];
-    mapped.push(
-      options.length
-        ? {
-            id: `q${index}`,
-            type: "choice",
-            prompt: value.question,
-            options,
-            multiple: value.multiSelect === true || value.multi_select === true,
-            allowOther: true,
-            optional: true,
-          }
-        : {
-            id: `q${index}`,
-            type: "text",
-            prompt: value.question,
-            multiline: true,
-            secret: false,
-            optional: true,
-          },
-    );
+    native.push({
+      question: value.question,
+      options,
+      multiple: value.multiSelect === true || value.multi_select === true,
+    });
   }
-  return mapped;
+  return toGrokHostQuestions(native);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

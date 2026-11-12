@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   elementIsDisplayed,
+  elementIsShown,
   findDisplayedTranscriptItem,
   findTranscriptItem,
   findTranscriptTurn,
+  findLiveQuestionMount,
   findVisibleHistoryMount,
   findVisibleReplyColumn,
   findWorkingColumn,
-  historyMountIsItemRow,
   questionHistorySlotCeiling,
-  transcriptItemContractPresent,
 } from "../src/renderer-question-anchors.js";
 import {
   TRANSCRIPT_ITEM_IDS_ATTRIBUTE,
@@ -18,8 +18,8 @@ import {
   TRANSCRIPT_TURN_KEY_ATTRIBUTE,
 } from "../src/renderer-transcript-dom.js";
 
-function list<T>(values: T[]): NodeListOf<T & Node> {
-  return values as unknown as NodeListOf<T & Node>;
+function list(values: unknown[]): NodeListOf<Element> {
+  return values as unknown as NodeListOf<Element>;
 }
 
 function rect(height: number) {
@@ -39,9 +39,9 @@ interface FakeNode {
   parentElement: FakeNode | null;
   children: FakeNode[];
   textContent: string;
-  ariaExpanded?: string;
-  ids?: string;
-  turnKey?: string;
+  ariaExpanded: string | undefined;
+  ids: string | undefined;
+  turnKey: string | undefined;
   getBoundingClientRect(): { width: number; height: number };
   getAttribute(name: string): string | null;
   contains(node: FakeNode): boolean;
@@ -125,14 +125,18 @@ describe("Renderer question transcript anchors", () => {
         selector === TRANSCRIPT_ITEM_SELECTOR ? list([missing, row]) : list([]),
     } as unknown as ParentNode;
 
-    expect(transcriptItemContractPresent(root)).toBe(true);
     expect(findTranscriptItem(root, "item-live")).toBe(row);
     expect(findTranscriptItem(root, "missing")).toBeNull();
   });
 
   it("treats a zero-size folded row as not displayed", () => {
     const hidden = node({ height: 0, ids: "item-live", text: "ask user question" });
+    const card = node({ height: 80, text: "picker" });
+    hidden.children.push(card);
+    card.parentElement = hidden;
     expect(elementIsDisplayed(hidden as unknown as Element)).toBe(false);
+    expect(elementIsDisplayed(card as unknown as Element)).toBe(true);
+    expect(elementIsShown(card as unknown as Element)).toBe(false);
     const root = {
       querySelectorAll: (selector: string) =>
         selector === TRANSCRIPT_ITEM_SELECTOR ? list([hidden]) : list([]),
@@ -166,7 +170,6 @@ describe("Renderer question transcript anchors", () => {
     expect(findVisibleHistoryMount(turn as unknown as ParentNode, "item-folded", "turn-1")).toBe(
       reply as unknown as Element,
     );
-    expect(historyMountIsItemRow(reply as unknown as Element, "item-folded")).toBe(false);
   });
 
   it("prefers the visible reply over a still-displayed tool row", () => {
@@ -200,7 +203,6 @@ describe("Renderer question transcript anchors", () => {
     expect(findVisibleHistoryMount(turn as unknown as ParentNode, "item-live", "turn-1")).toBe(
       reply as unknown as Element,
     );
-    expect(historyMountIsItemRow(reply as unknown as Element, "item-live")).toBe(false);
   });
 
   it("keeps a record on the working column before any reply exists", () => {
@@ -237,6 +239,49 @@ describe("Renderer question transcript anchors", () => {
     expect(questionHistorySlotCeiling(reply as unknown as Element)).not.toBe(
       transcript as unknown as Element,
     );
+  });
+
+  it("keeps a live picker on the displayed item row instead of the reply", () => {
+    const fold = node({ height: 20, text: "fold", ariaExpanded: "true" });
+    const toolRow = node({ height: 80, ids: "item-live", text: "ask user question" });
+    const foldCol = node({ height: 100, text: "fold", children: [fold, toolRow] });
+    const reply = node({ height: 40, text: "You picked Alpha" });
+    const turn = node({
+      height: 160,
+      turnKey: "turn-1",
+      children: [foldCol, reply],
+    });
+    expect(findLiveQuestionMount(turn as unknown as ParentNode, "item-live", "turn-1")).toBe(
+      toolRow as unknown as Element,
+    );
+    expect(findVisibleHistoryMount(turn as unknown as ParentNode, "item-live", "turn-1")).toBe(
+      reply as unknown as Element,
+    );
+  });
+
+  it("parks a folded live picker on the working column", () => {
+    const fold = node({ height: 20, text: "Working for 4s", ariaExpanded: "false" });
+    const hiddenRow = node({ height: 0, ids: "item-live", text: "Waiting for your answer" });
+    const workingCol = node({ height: 20, text: "working", children: [fold, hiddenRow] });
+    const user = node({ height: 40, text: "You said" });
+    const turn = node({
+      height: 80,
+      turnKey: "turn-pending",
+      children: [user, workingCol],
+    });
+    expect(findLiveQuestionMount(turn as unknown as ParentNode, "item-live", "turn-pending")).toBe(
+      workingCol as unknown as Element,
+    );
+  });
+
+  it("does not park a live picker when the item row is missing or has no turn", () => {
+    const orphan = node({ height: 0, ids: "item-live", text: "Waiting for your answer" });
+    const root = {
+      querySelectorAll: (selector: string) =>
+        selector === TRANSCRIPT_ITEM_SELECTOR ? list([orphan]) : list([]),
+    } as unknown as ParentNode;
+    expect(findLiveQuestionMount(root, "item-live", "turn-1")).toBeNull();
+    expect(findLiveQuestionMount(root, "item-missing", "turn-1")).toBeNull();
   });
 
   it("caps a history slot at the item row when the turn node is absent", () => {

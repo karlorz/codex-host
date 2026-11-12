@@ -11,7 +11,10 @@ export const THREAD_QUESTION_RESPOND_METHOD = "codexhost/thread/question/respond
 export const THREAD_QUESTION_ACTIVITY_METHOD = "codexhost/thread/question/activity";
 export const THREAD_QUESTION_RECORDS_LIST_METHOD = "codexhost/thread/question-records/list";
 
-export const threadQuestionsParamsSchema = z.strictObject({ threadId: hostThreadIdSchema });
+export const threadQuestionsParamsSchema = z.strictObject({
+  threadId: hostThreadIdSchema,
+  unobserved: z.literal(true).optional(),
+});
 const field = { id: z.string().min(1), prompt: z.string(), optional: z.boolean() };
 export const questionAutoResolutionSchema = z.strictObject({
   deadlineUnixMs: z.number().int().min(0).max(8_640_000_000_000_000),

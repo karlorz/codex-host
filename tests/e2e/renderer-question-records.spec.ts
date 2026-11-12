@@ -8,6 +8,7 @@ const { outputFiles } = await build({
   stdin: {
     contents: `
     import { installRendererQuestions } from './packages/renderer-extension/src/renderer-questions.ts';
+    import { writeHarnessQuestionHistory } from './packages/renderer-extension/src/renderer-question-history-preference.ts';
     import { writeHarnessQuestionPlacement } from './packages/renderer-extension/src/renderer-question-placement-preference.ts';
     const question = {interactionId:'ask-1',turnId:'turn-1',title:'Question',questions:[
       {id:'platform',type:'choice',prompt:'Choose platforms',multiple:true,allowOther:true,optional:false,
@@ -15,8 +16,8 @@ const { outputFiles } = await build({
     ]};
     const record = {interactionId:'ask-old',turnId:'turn-0',itemId:'item-record',title:'Earlier',
       questions:[{id:'platform',type:'choice',prompt:'Choose platforms',multiple:true,allowOther:true,optional:false,
-       options:[{value:'mac',label:'macOS'},{value:'win',label:'Windows'}]}],
-      outcome:'answered',answers:{platform:['mac']}};
+       options:[{value:'mac',label:'macOS'},{value:'win',label:'Windows'},{value:'linux',label:'Linux'}]}],
+      outcome:'answered',answers:{platform:['mac','linux']}};
     const folded = {interactionId:'ask-folded',turnId:'turn-folded',itemId:'item-folded',title:'Letters',
       questions:[{id:'letters',type:'choice',prompt:'Which letters?',multiple:true,allowOther:true,optional:false,
        options:[{value:'alpha',label:'Alpha'},{value:'beta',label:'Beta'}]}],
@@ -45,14 +46,14 @@ const { outputFiles } = await build({
         if(state.recordsUnsupported) throw Object.assign(new Error('method not found'), {code:-32601});
         return {records:structuredClone(state.records),pendingAnchors:structuredClone(state.pendingAnchors)};
       }
-      if(method.endsWith('/list')) return {questions:structuredClone(state.questions)};
+      if(method.endsWith('/list')) return {questions:params?.unobserved?[]:structuredClone(state.questions)};
       if(!method.endsWith('/respond')) throw Error('Unused fixture RPC');
       state.questions=[]; return {accepted:true};
     }};
     const controller=installRendererQuestions(window,()=>state.thread?{
       hostId:state.host,threadId:state.thread,composer:document.querySelector('#composer'),route
     }:null);
-    Object.assign(window,{fixture:state,controller,writeHarnessQuestionPlacement});
+    Object.assign(window,{fixture:state,controller,writeHarnessQuestionHistory,writeHarnessQuestionPlacement});
   `,
     resolveDir: path.resolve(import.meta.dirname, "../.."),
     loader: "ts",
@@ -121,25 +122,34 @@ test("mounts the live picker in the transcript row and keeps the Composer free",
   ).toHaveCount(1);
   await expect(page.locator("#composer [data-codexhost-question]")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Chat message" })).toHaveText("chat draft");
-  await expect(
-    page.locator(
-      '[data-local-conversation-item-target-ids="item-record"] [data-codexhost-question-record] .outcome',
-    ),
-  ).toHaveText("Answered");
-  await expect(
-    page
-      .locator(
-        '[data-local-conversation-item-target-ids="item-record"] [data-codexhost-question-record]',
-      )
-      .getByRole("checkbox", { name: "macOS" }),
-  ).toBeDisabled();
-  await expect(
-    page
-      .locator(
-        '[data-local-conversation-item-target-ids="item-record"] [data-codexhost-question-record]',
-      )
-      .getByRole("button", { name: "Send" }),
-  ).toHaveCount(0);
+  const record = page.locator(
+    '[data-local-conversation-item-target-ids="item-record"] [data-codexhost-question-record]',
+  );
+  await expect(record.locator(".outcome")).toHaveText("Answered");
+  await expect(record).toHaveAttribute("data-history", "selected");
+  await expect(record.getByText("macOS", { exact: true })).toBeVisible();
+  await expect(record.getByText("Linux", { exact: true })).toBeVisible();
+  await expect(record.locator("[data-option-order]")).toHaveText(["1", "3"]);
+  await expect(record.getByText("Windows", { exact: true })).toHaveCount(0);
+  await expect(record.getByRole("checkbox")).toHaveCount(0);
+  await expect(record.getByRole("button", { name: "Send" })).toHaveCount(0);
+});
+
+test("Appearance can restore every option in question history", async ({ page }) => {
+  const record = page.locator(
+    '[data-local-conversation-item-target-ids="item-record"] [data-codexhost-question-record]',
+  );
+  await page.evaluate(() => {
+    Reflect.get(window, "writeHarnessQuestionHistory")(window, false);
+  });
+  await expect(record).toHaveAttribute("data-history", "all");
+  await expect(record.getByRole("checkbox", { name: "macOS", exact: true })).toBeDisabled();
+  await expect(record.getByRole("checkbox", { name: "Windows", exact: true })).toBeDisabled();
+  await page.evaluate(() => {
+    Reflect.get(window, "writeHarnessQuestionHistory")(window, true);
+  });
+  await expect(record).toHaveAttribute("data-history", "selected");
+  await expect(record.getByText("Windows", { exact: true })).toHaveCount(0);
 });
 
 test("overlay mode moves only the live picker above the Composer", async ({ page }) => {
@@ -158,6 +168,38 @@ test("overlay mode moves only the live picker above the Composer", async ({ page
   await expect(page.locator("[data-codexhost-question-record]")).toHaveCount(6);
 });
 
+test("keeps the live picker in-chat when the item row is folded", async ({ page }) => {
+  await page.evaluate(async () => {
+    const row = document.querySelector('[data-local-conversation-item-target-ids="item-live"]');
+    const transcript = document.querySelector("#transcript");
+    if (!(row instanceof HTMLElement) || !transcript) throw new Error("live row missing");
+    const turn = document.createElement("div");
+    turn.setAttribute("data-content-search-turn-key", "turn-1");
+    turn.setAttribute("style", "width:800px");
+    const col = document.createElement("div");
+    col.id = "live-col";
+    col.setAttribute("style", "width:800px;height:80px");
+    const fold = document.createElement("button");
+    fold.setAttribute("aria-expanded", "false");
+    fold.setAttribute("style", "width:160px;height:24px");
+    fold.textContent = "Working for 44s";
+    row.style.width = "0px";
+    row.style.height = "0px";
+    row.style.overflow = "hidden";
+    col.append(fold, row);
+    turn.append(col);
+    transcript.prepend(turn);
+    await Reflect.get(window, "controller").refresh();
+  });
+  await expect(page.getByRole("button", { name: "Question waiting — Jump" })).toHaveCount(0);
+  await expect(page.locator("#live-col [data-codexhost-question]")).toBeVisible();
+  await expect(
+    page.locator('[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]'),
+  ).toHaveCount(0);
+  await expect(page.locator("#composer [data-codexhost-question]")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Chat message" })).toHaveText("chat draft");
+});
+
 test("shows a jump pill when the transcript contract exists but the row is unmounted", async ({
   page,
 }) => {
@@ -170,18 +212,29 @@ test("shows a jump pill when the transcript contract exists but the row is unmou
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
 });
 
-test("jump click opens the overlay when the transcript row stays hidden", async ({ page }) => {
+test("jump click keeps the reminder when the transcript row stays hidden", async ({ page }) => {
   await page.evaluate(async () => {
     const state = Reflect.get(window, "fixture");
     state.pendingAnchors[0].itemId = "item-missing";
     await Reflect.get(window, "controller").refresh();
   });
   await page.getByRole("button", { name: "Question waiting — Jump" }).click();
-  const live = page.locator("[data-codexhost-question]");
-  await expect(live).toHaveCount(1);
-  await expect
-    .poll(async () => live.evaluate((node) => node.nextElementSibling?.id === "composer"))
-    .toBe(true);
+  await expect(page.getByRole("button", { name: "Question waiting — Jump" })).toBeVisible();
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+});
+
+test("shows jump instead of the overlay when the transcript is hidden", async ({ page }) => {
+  await page.evaluate(async () => {
+    for (const node of document.querySelectorAll("[data-local-conversation-item-target-ids]")) {
+      node.remove();
+    }
+    for (const node of document.querySelectorAll("[data-content-search-turn-key]")) {
+      node.remove();
+    }
+    await Reflect.get(window, "controller").refresh();
+  });
+  await expect(page.getByRole("button", { name: "Question waiting — Jump" })).toBeVisible();
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
 });
 
 test("jump click selects this chat tab when another window tab is active", async ({ page }) => {
@@ -212,13 +265,16 @@ test("jump click selects this chat tab when another window tab is active", async
   await page.getByRole("button", { name: "Question waiting — Jump" }).click();
   await expect(page.locator("#chat-tab")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#other-tab")).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("button", { name: "Question waiting — Jump" })).toBeVisible();
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
 });
 
 test("parks a folded record on the turn's visible reply", async ({ page }) => {
   const folded = page.locator('[data-codexhost-question-record="ask-folded"]');
   await expect(folded).toHaveCount(1);
   await expect(folded.locator(".outcome")).toHaveText("Answered");
-  await expect(folded.getByRole("checkbox", { name: "Alpha", exact: true })).toBeDisabled();
+  await expect(folded.getByText("Alpha", { exact: true })).toBeVisible();
+  await expect(folded.getByText("Beta", { exact: true })).toHaveCount(0);
   await expect(page.locator("#composer [data-codexhost-question-record]")).toHaveCount(0);
   await expect
     .poll(async () =>
@@ -237,6 +293,8 @@ test("keeps a skipped card full width above a still-open tool row", async ({ pag
   const skipped = page.locator('[data-codexhost-question-record="ask-skipped"]');
   await expect(skipped).toHaveCount(1);
   await expect(skipped.locator(".outcome")).toHaveText("Skipped (you cancelled)");
+  await expect(skipped.getByText("Alpha", { exact: true })).toHaveCount(0);
+  await expect(skipped.getByText("Beta", { exact: true })).toHaveCount(0);
   await expect(
     page.locator(
       '[data-local-conversation-item-target-ids="item-working"] [data-codexhost-question-record]',

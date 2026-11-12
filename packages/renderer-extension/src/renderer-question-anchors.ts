@@ -7,13 +7,19 @@ import {
 /** Holds answered cards in the transcript: working column while the turn is open, then the visible reply. */
 export const QUESTION_HISTORY_SLOT_ATTRIBUTE = "data-codexhost-question-history";
 
-export function transcriptItemContractPresent(root: ParentNode): boolean {
-  return root.querySelector(TRANSCRIPT_ITEM_SELECTOR) !== null;
-}
-
 export function elementIsDisplayed(node: Element): boolean {
   const rect = node.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
+}
+
+/** True when the node and every ancestor still occupy layout space. */
+export function elementIsShown(node: Element): boolean {
+  let current: Element | null = node;
+  while (current) {
+    if (!elementIsDisplayed(current)) return false;
+    current = current.parentElement;
+  }
+  return true;
 }
 
 function itemIds(node: Element): string[] {
@@ -152,8 +158,17 @@ export function findVisibleHistoryMount(
   return turn ? findWorkingColumn(turn) : null;
 }
 
-export function historyMountIsItemRow(mount: Element, itemId: string): boolean {
-  return itemIds(mount).includes(itemId);
+/** Live in-chat picker: the displayed item row, or the turn's history mount when that row is folded. */
+export function findLiveQuestionMount(
+  root: ParentNode,
+  itemId: string,
+  turnId: string,
+): Element | null {
+  const displayed = findDisplayedTranscriptItem(root, itemId);
+  if (displayed) return displayed;
+  const row = findTranscriptItem(root, itemId);
+  if (!row?.closest(`[${TRANSCRIPT_TURN_KEY_ATTRIBUTE}]`)) return null;
+  return findVisibleHistoryMount(root, itemId, turnId);
 }
 
 function isFlexRow(node: Element): boolean {
@@ -165,14 +180,14 @@ function isFlexRow(node: Element): boolean {
 }
 
 function childrenLaidOutInRow(parent: Element): boolean {
-  const kids = [...parent.children].filter((el) => elementIsDisplayed(el));
-  for (let i = 0; i < kids.length; i++) {
-    for (let j = i + 1; j < kids.length; j++) {
-      const left = kids[i];
-      const right = kids[j];
-      if (!left || !right) continue;
-      const a = left.getBoundingClientRect();
-      const b = right.getBoundingClientRect();
+  const rects = [...parent.children]
+    .map((child) => child.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i];
+      const b = rects[j];
+      if (!a || !b) continue;
       const separateX = a.right <= b.left + 1 || b.right <= a.left + 1;
       const overlapY = a.top < b.bottom - 4 && b.top < a.bottom - 4;
       if (separateX && overlapY) return true;
@@ -267,8 +282,9 @@ export function ensureQuestionHistorySlot(document: Document, mount: Element): E
   const ceiling = questionHistorySlotCeiling(mount);
   const parked = ceiling.querySelector(`[${QUESTION_HISTORY_SLOT_ATTRIBUTE}]`);
   if (parked) {
-    if (insert && parked.parentElement !== insert.parent) {
-      insertBeforeSafe(insert.parent, parked, insert.before);
+    if (parked.parentElement !== host && !elementIsShown(parked)) {
+      if (insert) insertBeforeSafe(insert.parent, parked, insert.before);
+      else host.prepend(parked);
     }
     applyHistorySlotLayout(parked as HTMLElement);
     return parked;

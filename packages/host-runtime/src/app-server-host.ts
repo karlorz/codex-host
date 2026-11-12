@@ -466,6 +466,7 @@ interface PendingDesktopQuestion {
   itemId: HostItemId;
   timeout: NodeJS.Timeout | null;
   extended: boolean;
+  desktopNotified: boolean;
 }
 
 type ExternalThreadStatus = { type: "active"; activeFlags: [] } | { type: "idle" };
@@ -5867,7 +5868,7 @@ export class AppServerHost {
       for (const pending of [...this.#pendingDesktopQuestions.values()]) {
         if (pending.extended && pending.thread === thread) {
           this.#rememberQuestion(pending, "closedByHarness", {});
-          this.#retireDesktopQuestion(pending.interaction.interactionId, thread);
+          await this.#resolveDesktopQuestion(pending.interaction.interactionId, thread);
         }
       }
       this.#externalSteering.fault(thread.id, new Error(event.error.message));
@@ -5948,7 +5949,7 @@ export class AppServerHost {
           pending.interaction.turnId === event.turnId
         ) {
           this.#rememberQuestion(pending, "turnEnded", {});
-          this.#retireDesktopQuestion(pending.interaction.interactionId, thread);
+          await this.#resolveDesktopQuestion(pending.interaction.interactionId, thread);
         }
       }
     }
@@ -6484,6 +6485,9 @@ export class AppServerHost {
             this.#isCurrentSharedQuestion(pending),
         )
         .map(({ interaction }) => sharedQuestion(interaction));
+      await this.#syncDesktopQuestionNotifiers(
+        parsed.data.unobserved ? null : parsed.data.threadId,
+      );
       await this.#writer.json(
         rpcEnvelope(request, {
           result: jsonValueSchema.parse(threadQuestionsResultSchema.parse({ questions })),
@@ -6564,7 +6568,7 @@ export class AppServerHost {
           if (!result.ok) {
             if (result.error.code === "invalidState") {
               this.#rememberQuestion(pending, "closedByHarness", {});
-              this.#retireDesktopQuestion(params.interactionId, pending.thread);
+              await this.#resolveDesktopQuestion(params.interactionId, pending.thread);
             }
             await this.#writer.json(rpcError(request, -32080, result.error.message));
             return;
@@ -6574,12 +6578,12 @@ export class AppServerHost {
             response.cancelled ? "skipped" : "answered",
             response.answers,
           );
-          this.#retireDesktopQuestion(params.interactionId, pending.thread);
+          await this.#resolveDesktopQuestion(params.interactionId, pending.thread);
           await this.#writer.json(rpcEnvelope(request, { result: { accepted: true } }));
         } catch (error) {
           // Delivery is ambiguous; do not allow the same answer to be written twice.
           this.#rememberQuestion(pending, "closedByHarness", {});
-          this.#retireDesktopQuestion(params.interactionId, pending.thread);
+          await this.#resolveDesktopQuestion(params.interactionId, pending.thread);
           await this.#writer.json(rpcError(request, -32080, errorMessage(error)));
         } finally {
           pending.responding = false;
@@ -6654,8 +6658,6 @@ export class AppServerHost {
     for (const message of result.messages) await this.#writer.json(message);
 
     const requestId = this.#allocateQuestionRequestId();
-    const expiresAtMs = interaction.expiresAt ? Date.parse(interaction.expiresAt) : Number.NaN;
-    const timeoutMs = Number.isFinite(expiresAtMs) ? Math.max(0, expiresAtMs - Date.now()) : null;
     const pending: PendingDesktopQuestion = {
       responding: false,
       thread,
@@ -6664,27 +6666,73 @@ export class AppServerHost {
       itemId: result.itemId,
       timeout: null,
       extended: shared,
+      desktopNotified: false,
     };
-    if (timeoutMs !== null) {
-      pending.timeout = setTimeout(() => {
-        void this.#cancelExpiredQuestion(requestId).catch((error) => this.#diagnose(error));
-      }, timeoutMs);
-    }
     this.#pendingDesktopQuestions.set(requestId, pending);
-    if (pending.extended) return;
+    this.#scheduleQuestionTimeout(requestId, pending);
+    if (shared) return;
+    await this.#notifyDesktopQuestion(requestId, pending);
+  }
+
+  async #notifyDesktopQuestion(
+    requestId: HostQuestionRequestId,
+    pending: PendingDesktopQuestion,
+  ): Promise<void> {
+    if (pending.desktopNotified) return;
+    pending.desktopNotified = true;
     try {
-      await this.#writer.json({ id: requestId, ...result.questionRequest.request });
+      await this.#writer.json({ id: requestId, ...pending.projection.request });
     } catch (error) {
-      this.#retireDesktopQuestion(interaction.interactionId, thread);
-      await thread.session
+      pending.desktopNotified = false;
+      await this.#resolveDesktopQuestion(pending.interaction.interactionId, pending.thread);
+      await pending.thread.session
         .execute({
           type: "interaction.respond",
-          interactionId: interaction.interactionId,
+          interactionId: pending.interaction.interactionId,
           response: { type: "question", answers: {}, cancelled: true },
         })
         .catch(() => undefined);
       throw error;
     }
+  }
+
+  async #armDesktopQuestionNotifiers(visibleThreadId: string | null): Promise<void> {
+    for (const [requestId, pending] of this.#pendingDesktopQuestions) {
+      if (
+        !pending.extended ||
+        pending.desktopNotified ||
+        (visibleThreadId !== null && pending.thread.id === visibleThreadId)
+      )
+        continue;
+      if (!this.#isCurrentSharedQuestion(pending)) continue;
+      try {
+        await this.#notifyDesktopQuestion(requestId, pending);
+      } catch (error) {
+        this.#diagnose(error);
+      }
+    }
+  }
+
+  async #releaseDesktopQuestionNotifier(visibleThreadId: string): Promise<void> {
+    for (const [requestId, pending] of [...this.#pendingDesktopQuestions]) {
+      if (!pending.extended || !pending.desktopNotified) continue;
+      if (pending.thread.id !== visibleThreadId) continue;
+      if (!this.#isCurrentSharedQuestion(pending)) continue;
+      pending.desktopNotified = false;
+      this.#pendingDesktopQuestions.delete(requestId);
+      const nextId = this.#allocateQuestionRequestId();
+      this.#pendingDesktopQuestions.set(nextId, pending);
+      this.#scheduleQuestionTimeout(nextId, pending);
+      await this.#writer.json({
+        method: "serverRequest/resolved",
+        params: { threadId: pending.thread.id, requestId },
+      });
+    }
+  }
+
+  async #syncDesktopQuestionNotifiers(visibleThreadId: string | null): Promise<void> {
+    if (visibleThreadId !== null) await this.#releaseDesktopQuestionNotifier(visibleThreadId);
+    await this.#armDesktopQuestionNotifiers(visibleThreadId);
   }
 
   async #handleDesktopQuestionResponse(value: JsonValue): Promise<boolean> {
@@ -6778,15 +6826,6 @@ export class AppServerHost {
     });
   }
 
-  #retireDesktopQuestion(interactionId: HostInteractionId, thread: ExternalThread): void {
-    for (const [requestId, pending] of this.#pendingDesktopQuestions) {
-      if (pending.thread !== thread || pending.interaction.interactionId !== interactionId)
-        continue;
-      if (pending.timeout) clearTimeout(pending.timeout);
-      this.#pendingDesktopQuestions.delete(requestId);
-    }
-  }
-
   async #resolveDesktopQuestion(
     interactionId: HostInteractionId,
     thread: ExternalThread,
@@ -6796,7 +6835,7 @@ export class AppServerHost {
         continue;
       if (pending.timeout) clearTimeout(pending.timeout);
       this.#pendingDesktopQuestions.delete(requestId);
-      if (pending.extended) continue;
+      if (pending.extended && !pending.desktopNotified) continue;
       await this.#writer.json({
         method: "serverRequest/resolved",
         params: { threadId: pending.thread.id, requestId },
@@ -6811,6 +6850,24 @@ export class AppServerHost {
     const requestId = this.#nextQuestionRequestId;
     this.#nextQuestionRequestId -= 1;
     return requestId;
+  }
+
+  #scheduleQuestionTimeout(
+    requestId: HostQuestionRequestId,
+    pending: PendingDesktopQuestion,
+  ): void {
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+      pending.timeout = null;
+    }
+    const expiresAtMs = pending.interaction.expiresAt
+      ? Date.parse(pending.interaction.expiresAt)
+      : Number.NaN;
+    const timeoutMs = Number.isFinite(expiresAtMs) ? Math.max(0, expiresAtMs - Date.now()) : null;
+    if (timeoutMs === null) return;
+    pending.timeout = setTimeout(() => {
+      void this.#cancelExpiredQuestion(requestId).catch((error) => this.#diagnose(error));
+    }, timeoutMs);
   }
 
   async #setThreadStatus(thread: ExternalThread, status: ExternalThreadStatus): Promise<void> {

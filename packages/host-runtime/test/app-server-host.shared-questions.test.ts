@@ -72,23 +72,55 @@ async function setup(options: { expiresInMs?: number } = {}) {
 }
 
 describe("shared multi-select Questions", () => {
-  it("returns Host values, avoids a duplicate native card, and rejects replay", async () => {
+  it("returns Host values, notifies Desktop, and rejects replay", async () => {
     const { fixture, session, list, respond, rpc, threadId } = await setup();
     expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
       false,
     );
     expect((await list())[0]?.questions[0]).toEqual(choice);
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "other-visible-thread" });
+    expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
+      true,
+    );
     // A guessed legacy native response ID cannot consume a shared card.
     writeRequest(fixture.desktopInput, { id: -1, result: { answers: {} } });
     await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId });
     expect(session.interactionResponses).toHaveLength(0);
     expect(await respond()).toMatchObject({ result: { accepted: true } });
+    expect(fixture.collector.messages.some((m) => method(m, "serverRequest/resolved"))).toBe(true);
     expect(session.interactionResponses).toMatchObject([
       { response: { answers: { platform: ["mac", "win"] }, cancelled: false } },
     ]);
     expect(await list()).toEqual([]);
     expect(await respond()).toHaveProperty("error");
     expect(session.interactionResponses).toHaveLength(1);
+  });
+
+  it("sends requestUserInput once after the viewer leaves the asking Thread", async () => {
+    const { fixture, rpc, threadId, list } = await setup();
+    const notified = () =>
+      fixture.collector.messages.filter((m) => method(m, "item/tool/requestUserInput"));
+    expect(notified()).toHaveLength(0);
+    expect(await list()).toHaveLength(1);
+    expect(notified()).toHaveLength(0);
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId, unobserved: true });
+    expect(notified()).toHaveLength(1);
+    const firstId = notified()[0]?.id;
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "other-visible-thread" });
+    expect(notified()).toHaveLength(1);
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId });
+    expect(notified()).toHaveLength(1);
+    expect(
+      fixture.collector.messages.filter((message) => method(message, "serverRequest/resolved")),
+    ).toEqual([
+      expect.objectContaining({
+        method: "serverRequest/resolved",
+        params: expect.objectContaining({ threadId, requestId: firstId }),
+      }),
+    ]);
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId, unobserved: true });
+    expect(notified()).toHaveLength(2);
+    expect(notified()[1]?.id).not.toBe(firstId);
   });
 
   it("rejects wrong owners, undeclared, missing and duplicate answers without consuming the card", async () => {
@@ -187,15 +219,19 @@ describe("shared multi-select Questions", () => {
     expect(session.interactionResponses).toHaveLength(0);
   });
 
-  it("honors Host expiry without emitting a native server-request resolution", async () => {
-    const { fixture, list, respond, session } = await setup({
+  it("honors Host expiry and dismisses the native question notifier", async () => {
+    const { fixture, list, respond, session, rpc, threadId } = await setup({
       expiresInMs: 500,
     });
+    await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId, unobserved: true });
+    expect(fixture.collector.messages.some((m) => method(m, "item/tool/requestUserInput"))).toBe(
+      true,
+    );
     await vi.waitFor(async () => expect(await list()).toEqual([]));
     await vi.waitFor(() => expect(session.interactionResponses).toHaveLength(1));
     expect(session.interactionResponses[0]?.response).toMatchObject({ cancelled: true });
     expect(await respond()).toHaveProperty("error");
-    expect(fixture.collector.messages.some((m) => method(m, "serverRequest/resolved"))).toBe(false);
+    expect(fixture.collector.messages.some((m) => method(m, "serverRequest/resolved"))).toBe(true);
   });
 
   it("removes cards when the Session faults", async () => {

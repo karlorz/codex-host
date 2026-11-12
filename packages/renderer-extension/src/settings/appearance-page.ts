@@ -4,6 +4,11 @@ import {
   writeCodexUsageBannerPreference,
 } from "../renderer-codex-usage-banner-preference.js";
 import {
+  HARNESS_QUESTION_HISTORY_CHANGE_EVENT,
+  readHarnessQuestionHistory,
+  writeHarnessQuestionHistory,
+} from "../renderer-question-history-preference.js";
+import {
   HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT,
   readHarnessQuestionPlacement,
   writeHarnessQuestionPlacement,
@@ -93,6 +98,28 @@ export function createAppearanceSettingsPage(
       inChatRow.item.append(inChat);
       card.append(inChatRow.item);
 
+      const historyId = preferenceId("harness-question-history-selected");
+      const historyRow = createPreferenceItem(document, {
+        title: messages.harnessQuestionHistorySelectedTitle,
+        description: messages.harnessQuestionHistorySelectedDescription,
+        controlId: historyId,
+        help: {
+          label: messages.harnessQuestionHistorySelectedHelpLabel,
+          lines: messages.harnessQuestionHistorySelectedHelp,
+        },
+      });
+      const history = createPreferenceSwitch(document, historyId, historyRow.description.id);
+      history.checked = readHarnessQuestionHistory(ownerWindow) === "selected";
+      history.addEventListener("change", () => {
+        writeHarnessQuestionHistory(ownerWindow, history.checked);
+      });
+      const syncHistory = (): void => {
+        history.checked = readHarnessQuestionHistory(ownerWindow) === "selected";
+      };
+      ownerWindow.addEventListener(HARNESS_QUESTION_HISTORY_CHANGE_EVENT, syncHistory);
+      historyRow.item.append(history);
+      card.append(historyRow.item);
+
       const softWrapId = preferenceId("reasoning-soft-wrap");
       const row = createPreferenceItem(document, {
         title: messages.reasoningSoftWrapTitle,
@@ -120,6 +147,7 @@ export function createAppearanceSettingsPage(
       return () => {
         ownerWindow.removeEventListener(CODEX_USAGE_BANNER_CHANGE_EVENT, syncUsageBanner);
         ownerWindow.removeEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, syncInChat);
+        ownerWindow.removeEventListener(HARNESS_QUESTION_HISTORY_CHANGE_EVENT, syncHistory);
         ownerWindow.removeEventListener(REASONING_SOFT_WRAP_CHANGE_EVENT, sync);
         disposeIdleRelease();
       };

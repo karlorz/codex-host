@@ -14,16 +14,24 @@ import {
 import { createQuestionCard } from "./renderer-question-card.js";
 import { installQuestionActivity } from "./renderer-question-activity.js";
 import {
+  elementIsShown,
   ensureQuestionHistorySlot,
-  findDisplayedTranscriptItem,
+  findLiveQuestionMount,
   findVisibleHistoryMount,
-  transcriptItemContractPresent,
 } from "./renderer-question-anchors.js";
 import { jumpRevealsQuestionRow } from "./renderer-question-jump.js";
+import {
+  HARNESS_QUESTION_HISTORY_CHANGE_EVENT,
+  readHarnessQuestionHistory,
+} from "./renderer-question-history-preference.js";
 import {
   HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT,
   readHarnessQuestionPlacement,
 } from "./renderer-question-placement-preference.js";
+import {
+  coverNativeComposerRequest,
+  uncoverNativeComposerRequest,
+} from "./renderer-composer-request.js";
 import { isUnsupportedMethod, type RendererRequestOptions } from "./renderer-request-sender.js";
 
 export interface QuestionContext {
@@ -87,15 +95,28 @@ export function installRendererQuestions(
   let disposed = false;
   let inFlight = false;
   let revision = 0;
+  let placement = readHarnessQuestionPlacement(window);
+  let historyMode = readHarnessQuestionHistory(window);
   let context: QuestionContext | null = null;
   let card: ReturnType<typeof createQuestionCard> | null = null;
   let cardKey: string | null = null;
   let mountedPlacement: "in-chat" | "overlay" | "jump" | null = null;
-  let preferOverlay = false;
   let jump: HTMLButtonElement | null = null;
   let stopActivity: (() => void) | undefined;
   const unsupported = new WeakSet<object>();
   const unsupportedRecords = new WeakSet<object>();
+  const listUnobserved = (current: QuestionContext) => {
+    if (unsupported.has(current.route)) return;
+    void Promise.resolve(
+      current.route.sendRequest(
+        THREAD_QUESTIONS_LIST_METHOD,
+        { threadId: current.threadId, unobserved: true },
+        { priority: "background", timeoutMs: 4000 },
+      ),
+    ).catch((error: unknown) => {
+      if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
+    });
+  };
   const drafts = new Map<string, Record<string, string[]>>();
   const records = new Map<string, ReturnType<typeof createQuestionCard>>();
   const clearJump = () => {
@@ -120,17 +141,24 @@ export function installRendererQuestions(
     for (const view of records.values()) view.dispose();
     records.clear();
   };
+  const syncNativeCover = (current: QuestionContext, live: boolean) => {
+    if (live) coverNativeComposerRequest(current.composer);
+    else uncoverNativeComposerRequest(current.composer.ownerDocument);
+  };
+  const liveMount = (
+    document: Document,
+    anchor: ThreadQuestionPendingAnchor | undefined,
+  ): Element | null => {
+    if (!anchor?.itemId) return null;
+    return findLiveQuestionMount(document, anchor.itemId, anchor.turnId);
+  };
   const resolveLivePlacement = (
     document: Document,
-    itemId: string | undefined,
+    anchor: ThreadQuestionPendingAnchor | undefined,
   ): "in-chat" | "overlay" | "jump" => {
-    if (readHarnessQuestionPlacement(window) !== "in-chat") return "overlay";
-    if (itemId && findDisplayedTranscriptItem(document, itemId)) {
-      preferOverlay = false;
-      return "in-chat";
-    }
-    if (preferOverlay) return "overlay";
-    if (itemId && transcriptItemContractPresent(document)) return "jump";
+    if (placement !== "in-chat") return "overlay";
+    if (liveMount(document, anchor)) return "in-chat";
+    if (anchor?.itemId) return "jump";
     return "overlay";
   };
   const placeLive = (
@@ -138,22 +166,25 @@ export function installRendererQuestions(
     anchor: ThreadQuestionPendingAnchor | undefined,
   ): "in-chat" | "overlay" | "jump" => {
     const document = current.composer.ownerDocument;
-    const placement = resolveLivePlacement(document, anchor?.itemId);
+    const placement = resolveLivePlacement(document, anchor);
     if (!card) return placement;
-    if (placement === "in-chat" && anchor?.itemId) {
-      const row = findDisplayedTranscriptItem(document, anchor.itemId);
-      if (row) {
-        ensureQuestionHistorySlot(document, row).append(card.root);
+    if (placement === "in-chat") {
+      const mount = liveMount(document, anchor);
+      if (mount) {
+        ensureQuestionHistorySlot(document, mount).append(card.root);
         return "in-chat";
       }
     }
-    if (placement === "jump" && anchor?.itemId) {
-      const itemId = anchor.itemId;
+    if (placement === "jump") {
       jump = createJumpPill(document, () => {
-        if (!jumpRevealsQuestionRow(document, current.hostId, current.threadId, itemId)) {
-          preferOverlay = true;
-        }
-        void refresh();
+        void jumpRevealsQuestionRow(
+          document,
+          current.hostId,
+          current.threadId,
+          anchor?.itemId,
+        ).then(() => {
+          if (!disposed) void refresh();
+        });
       });
       current.composer.before(jump);
       return "jump";
@@ -175,7 +206,12 @@ export function installRendererQuestions(
       const host = ensureQuestionHistorySlot(document, mount);
       visible.add(record.interactionId);
       const existing = records.get(record.interactionId);
-      if (existing?.root.isConnected && existing.root.parentElement === host) continue;
+      if (
+        existing?.root.isConnected &&
+        existing.root.parentElement === host &&
+        existing.historyMode === historyMode
+      )
+        continue;
       existing?.dispose();
       const view = createQuestionCard(
         document,
@@ -187,7 +223,7 @@ export function installRendererQuestions(
         },
         async () => undefined,
         record.answers,
-        { outcome: record.outcome },
+        { outcome: record.outcome, history: historyMode },
       );
       host.append(view.root);
       records.set(record.interactionId, view);
@@ -219,7 +255,8 @@ export function installRendererQuestions(
     if (disposed) return;
     const next = readContext();
     if (!same(context, next)) {
-      preferOverlay = false;
+      if (context && context.threadId !== next?.threadId) listUnobserved(context);
+      if (context) syncNativeCover(context, false);
       clear();
       clearRecords();
       context = next;
@@ -261,6 +298,7 @@ export function installRendererQuestions(
       if (!live) {
         if (cardKey) drafts.delete(cardKey);
         clear(false);
+        syncNativeCover(current, false);
         syncRecordsSafe(current, closed, undefined);
         return;
       }
@@ -273,14 +311,17 @@ export function installRendererQuestions(
       const anchor = pendingAnchors.find(
         (candidate) => candidate.interactionId === live.interactionId,
       );
-      const ownerDocument = current.composer.ownerDocument;
       if (cardKey === key && mountedPlacement) {
-        const expected = resolveLivePlacement(ownerDocument, anchor?.itemId);
+        const expected = resolveLivePlacement(current.composer.ownerDocument, anchor);
         const stable =
           mountedPlacement === expected &&
-          (expected === "jump" ? jump?.isConnected === true : card?.root.isConnected === true);
+          (expected === "jump"
+            ? jump?.isConnected === true
+            : card?.root.isConnected === true &&
+              (expected !== "in-chat" || elementIsShown(card.root)));
         if (stable) {
           card?.updateAutoResolution(live.autoResolution);
+          syncNativeCover(current, true);
           syncRecordsSafe(current, closed, live.interactionId);
           return;
         }
@@ -316,6 +357,7 @@ export function installRendererQuestions(
         drafts.get(key),
       );
       mountedPlacement = placeLive(current, anchor);
+      syncNativeCover(current, true);
       const mounted = card;
       stopActivity = installQuestionActivity(
         window,
@@ -344,6 +386,7 @@ export function installRendererQuestions(
       if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
       if (revision === startedRevision && same(current, context)) {
         clear();
+        syncNativeCover(current, false);
       }
     } finally {
       inFlight = false;
@@ -353,13 +396,28 @@ export function installRendererQuestions(
     void refresh();
   }, 750);
   const onPlacement = () => {
+    placement = readHarnessQuestionPlacement(window);
     void refresh();
   };
+  const onHistory = () => {
+    historyMode = readHarnessQuestionHistory(window);
+    clearRecords();
+    void refresh();
+  };
+  const onVisibility = () => {
+    if (disposed || window.document.visibilityState !== "hidden") return;
+    const current = context ?? readContext();
+    if (current) listUnobserved(current);
+  };
   window.addEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, onPlacement);
+  window.addEventListener(HARNESS_QUESTION_HISTORY_CHANGE_EVENT, onHistory);
+  window.document.addEventListener("visibilitychange", onVisibility);
   void refresh();
   return {
     refresh,
     refreshContext() {
+      if (context && (card || jump)) coverNativeComposerRequest(context.composer);
+      else if (context) uncoverNativeComposerRequest(context.composer.ownerDocument);
       // Streaming DOM mutations must not turn the background poll into a request per token.
       if (
         !same(context, readContext()) ||
@@ -372,6 +430,9 @@ export function installRendererQuestions(
       disposed = true;
       window.clearInterval(timer);
       window.removeEventListener(HARNESS_QUESTION_PLACEMENT_CHANGE_EVENT, onPlacement);
+      window.removeEventListener(HARNESS_QUESTION_HISTORY_CHANGE_EVENT, onHistory);
+      window.document.removeEventListener("visibilitychange", onVisibility);
+      if (context) syncNativeCover(context, false);
       clear(false);
       clearRecords();
       drafts.clear();

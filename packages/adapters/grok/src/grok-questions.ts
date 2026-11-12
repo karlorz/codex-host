@@ -2,6 +2,7 @@ import {
   validateHostQuestionResponse,
   type HarnessOutput,
   type HarnessResult,
+  type HostQuestion,
   type HostQuestionInteraction,
   type InteractionRespondAccepted,
   type InteractionRespondCommand,
@@ -115,6 +116,33 @@ export function parseGrokQuestionRequest(value: unknown): GrokQuestionRequest {
   };
 }
 
+/** Live AskUserQuestion and history records share this HostQuestion mapping. */
+export function toGrokHostQuestions(questions: GrokQuestionRequest["questions"]): HostQuestion[] {
+  return questions.map((question, index) =>
+    question.options.length
+      ? {
+          id: `q${index}`,
+          type: "choice",
+          prompt: question.question,
+          options: question.options.map(({ label, description, preview }) => {
+            const text = [description, preview].filter(Boolean).join("\n\n");
+            return { value: label, label, ...(text ? { description: text } : {}) };
+          }),
+          multiple: question.multiple ?? false,
+          allowOther: true,
+          optional: true,
+        }
+      : {
+          id: `q${index}`,
+          type: "text",
+          prompt: question.question,
+          multiline: true,
+          secret: false,
+          optional: true,
+        },
+  );
+}
+
 interface PendingQuestion {
   request: GrokQuestionRequest;
   interaction: HostQuestionInteraction;
@@ -158,30 +186,7 @@ export class GrokQuestions {
       turnId: this.turnId,
       title: "Grok",
       ...(request.timeout ? { autoResolution: request.timeout } : {}),
-      questions: request.questions.map((question, index) =>
-        question.options.length
-          ? {
-              id: `q${index}`,
-              type: "choice",
-              prompt: question.question,
-              options: question.options.map(({ label, description, preview }) => ({
-                value: label,
-                label,
-                description: [description, preview].filter(Boolean).join("\n\n"),
-              })),
-              multiple: question.multiple ?? false,
-              allowOther: true,
-              optional: true,
-            }
-          : {
-              id: `q${index}`,
-              type: "text",
-              prompt: question.question,
-              multiline: true,
-              secret: false,
-              optional: true,
-            },
-      ),
+      questions: toGrokHostQuestions(request.questions),
     };
     return new Promise((resolve) => {
       this.#pending.set(interaction.interactionId, { request, interaction, resolve });

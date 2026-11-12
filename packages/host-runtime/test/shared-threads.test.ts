@@ -198,6 +198,8 @@ describe("shared external Threads", () => {
         false,
       );
     }
+    await rpc(ssh, id++, "codexhost/thread/questions/list", { threadId, unobserved: true });
+    await ssh.collector.waitFor((m) => m.method === "item/tool/requestUserInput");
     const params = { threadId, turnId, interactionId, answers: { pick: ["a", "b"] } };
     expect(await rpc(desktop, id++, "codexhost/thread/question/respond", params)).toMatchObject({
       result: { accepted: true },

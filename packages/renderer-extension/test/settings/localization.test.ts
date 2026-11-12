@@ -44,6 +44,12 @@ describe("Renderer settings localization", () => {
       "Off: they appear above the message box",
     );
     expect(chinese.harnessQuestionInChatDescription).toContain("关闭：提问出现在输入框上方");
+    expect(english.harnessQuestionHistorySelectedTitle).toBe(
+      "Keep only selected answers in question history",
+    );
+    expect(chinese.harnessQuestionHistorySelectedTitle).toBe("提问历史只保留已选答案");
+    expect(english.harnessQuestionHistorySelectedDescription).toContain("On by default");
+    expect(chinese.harnessQuestionHistorySelectedDescription).toContain("默认开启");
     const englishVoice = voiceMessages("en");
     const chineseVoice = voiceMessages("zh-CN");
     expect(Object.keys(englishVoice)).toEqual(Object.keys(chineseVoice));

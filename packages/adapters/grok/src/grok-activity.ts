@@ -128,26 +128,27 @@ export function createGrokActivity(options: {
   let tasks: GrokTaskSnapshot[] = [];
   const classifiedChildIds = new Set<string>();
   const listedChildren = (): HostSubagentState[] => {
-    const all = [...options.children.values()];
     const keep = new Set<string>();
-    for (const child of all) {
-      if (child.nativeSubagentId && isActiveChild(child.status)) keep.add(child.nativeSubagentId);
-    }
     for (const loop of options.loops.values()) {
       if (loop.lastSubagentId) keep.add(loop.lastSubagentId);
     }
-    const settled = all.filter((child) => child.nativeSubagentId && !isActiveChild(child.status));
-    for (const child of [...settled].reverse().slice(0, SETTLED_SUBAGENT_ACTIVITY_LIMIT)) {
+    const active: HostSubagentState[] = [];
+    const settled: HostSubagentState[] = [];
+    for (const child of options.children.values()) {
+      if (!child.nativeSubagentId) continue;
+      if (isActiveChild(child.status)) active.push(child);
+      else settled.push(child);
+    }
+    const newestSettled = settled.reverse();
+    for (const child of newestSettled.slice(0, SETTLED_SUBAGENT_ACTIVITY_LIMIT)) {
       if (child.nativeSubagentId) keep.add(child.nativeSubagentId);
     }
-    const active = all.filter(
-      (child) =>
-        child.nativeSubagentId && keep.has(child.nativeSubagentId) && isActiveChild(child.status),
-    );
-    const keptSettledNewestFirst = [...settled]
-      .reverse()
-      .filter((child) => child.nativeSubagentId && keep.has(child.nativeSubagentId));
-    return [...active, ...keptSettledNewestFirst];
+    return [
+      ...active,
+      ...newestSettled.filter(
+        (child) => child.nativeSubagentId && keep.has(child.nativeSubagentId),
+      ),
+    ];
   };
   const summaries = (): BackgroundActivity[] => [
     ...tasks.map((task): BackgroundActivity => {

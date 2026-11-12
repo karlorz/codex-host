@@ -58,6 +58,7 @@ import {
 } from "./renderer-composer-dom.js";
 import {
   hasNativeComposerRequest,
+  hasNearbyNativeComposerRequest,
   NATIVE_COMPOSER_REQUEST_ATTRIBUTES,
 } from "./renderer-composer-request.js";
 import {
@@ -3448,7 +3449,49 @@ export function installRendererBindingProbe(
       ? { hostId, threadId, composer: mounted.composer, route: route.manager }
       : null;
   };
-  const questions = installRendererQuestions(window, readActivityContext);
+  const visibleQuestionComposer = (composer: Element): boolean =>
+    composer.isConnected &&
+    composer.matches(CODEX_COMPOSER_SELECTOR) &&
+    orbitComposerKind(composer) === "codex" &&
+    composer.getClientRects().length > 0 &&
+    window.getComputedStyle(composer).visibility === "visible" &&
+    !composer.closest('[hidden], [inert], [aria-hidden="true"]');
+  const readNativeRequestQuestionContext = () => {
+    const composers = [...window.document.querySelectorAll(CODEX_COMPOSER_SELECTOR)].filter(
+      (composer) => visibleQuestionComposer(composer) && hasNearbyNativeComposerRequest(composer),
+    );
+    const composer = composers.length === 1 ? composers[0] : undefined;
+    if (!composer) return null;
+    const threadId = threadIdFromComposerModelTarget(findComposerModelTarget(composer));
+    const hostId = activeModelHostId(composer);
+    const route = hostId ? window.__codexhostHostRoutingV1?.forHost(hostId) : null;
+    return threadId && hostId && route
+      ? { hostId, threadId, composer, route: route.manager }
+      : null;
+  };
+  let lastQuestionOwner: ReturnType<typeof readActivityContext> = null;
+  const readQuestionContext = () => {
+    const live = readActivityContext();
+    if (live) {
+      lastQuestionOwner = live;
+      return live;
+    }
+    const native = readNativeRequestQuestionContext();
+    if (native) {
+      lastQuestionOwner = native;
+      return native;
+    }
+    const owner = lastQuestionOwner;
+    if (!owner?.composer.isConnected || !hasNearbyNativeComposerRequest(owner.composer)) {
+      lastQuestionOwner = null;
+      return null;
+    }
+    const threadId = threadIdFromComposerModelTarget(findComposerModelTarget(owner.composer));
+    const routed = window.__codexhostHostRoutingV1?.forHost(owner.hostId);
+    if (!threadId || !routed) return null;
+    return { hostId: owner.hostId, threadId, composer: owner.composer, route: routed.manager };
+  };
+  const questions = installRendererQuestions(window, readQuestionContext);
   const backgroundActivity = installRendererBackgroundActivity(window, readActivityContext);
   const rpcRegistry = rendererRpcClientRegistryReader(window, () => rpcSubmission.refresh());
   const rpcSubmission = installRendererRpcSubmissionPreparation(
@@ -3561,6 +3604,7 @@ export function installRendererBindingProbe(
         void refreshCommands(mounted);
         if (controller.get(mounted.composer).agent !== "codex") void refreshDraftUsage(mounted);
       }
+      questions.refreshContext();
     },
     dispose() {
       if (disposed) return;
