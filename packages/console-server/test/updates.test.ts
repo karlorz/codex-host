@@ -84,6 +84,47 @@ describe("console updates", () => {
     });
   });
 
+  it.each(["failed", "succeeded"])(
+    "displays %s service stop output after Console restarts",
+    async (phase) => {
+      const { target, environment } = await npmLayout();
+      const stateDirectory = path.join(root, "state");
+      const operation = path.join(stateDirectory, "update-result");
+      await mkdir(operation, { recursive: true });
+      const serviceStopOutput = "Shared Host stopped; interrupted 7 running task(s)\n";
+      await writeFile(
+        path.join(operation, "status-v1.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          version: "1.1.0",
+          installation: "npm",
+          phase,
+          updatedAt: Math.floor(Date.now() / 1000),
+          serviceStopOutput,
+        }),
+      );
+      const updates = createConsoleUpdates({
+        onHandedOff: vi.fn(),
+        environment,
+        stateDirectory,
+        fetchLatest: async () => release,
+      });
+      await expect(updates.check(target)).resolves.toMatchObject({
+        status: { phase, serviceStopOutput },
+      });
+      await expect(updates.status()).resolves.toMatchObject({
+        status: { phase, serviceStopOutput },
+      });
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 86_401_000);
+      try {
+        await expect(updates.status()).resolves.toEqual({ status: null });
+        await expect(updates.check(target)).resolves.toMatchObject({ status: null });
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it.each(["failed", "succeeded", "prepared"])(
     "does not display historical %s state",
     async (phase) => {
@@ -98,7 +139,7 @@ describe("console updates", () => {
           version: "1.1.0",
           installation: "npm",
           phase,
-          updatedAt: Math.floor(Date.now() / 1000),
+          updatedAt: Math.floor(Date.now() / 1000) - 86_401,
           error: "old failure",
         }),
       );
@@ -149,7 +190,9 @@ describe("console updates", () => {
     await expect(updates.status()).resolves.toMatchObject({
       status: { phase: "failed", error: "current failure" },
     });
-    await expect(createConsoleUpdates(options).status()).resolves.toEqual({ status: null });
+    await expect(createConsoleUpdates(options).status()).resolves.toMatchObject({
+      status: { phase: "failed", error: "current failure" },
+    });
   });
 
   it("reports an equal fork counter as up to date without starting the Updater", async () => {
@@ -261,7 +304,11 @@ describe("console updates", () => {
     const call = spawnUpdater.mock.calls[0];
     if (!call) throw new Error("Updater was not spawned");
     const request = JSON.parse(await readFile(call[1], "utf8"));
-    await writeWaitingForExit(request.status_path);
+    const status = JSON.parse(await readFile(request.status_path, "utf8"));
+    // Match the real updater's atomic publication while readiness polling is active.
+    const readyStatus = `${request.status_path}.fixture-ready.tmp`;
+    await writeFile(readyStatus, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
+    await rename(readyStatus, request.status_path);
     await expect(retry).resolves.toMatchObject({ status: { phase: "waiting-for-exit" } });
     await expect(updates.status()).resolves.toMatchObject({
       status: { phase: "waiting-for-exit", error: null },

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   DEFAULT_WATCH_QUIET_MS,
   DEFAULT_WATCH_TIMEOUT_MS,
@@ -12,6 +14,15 @@ import {
   type ThreadWatchOutcome,
   type ThreadWatchResult,
 } from "./delegation-types.js";
+import type { DelegationWatchStore, PersistedWatch } from "./delegation-watch-store.js";
+import type { NewClientEvent } from "./external-client-events.js";
+import { originClientName } from "./external-client-origin.js";
+import { isValidClientName } from "./external-clients.js";
+
+/** Where notifications for an external client go instead of a new Turn. */
+export interface ClientEventSink {
+  append(client: string, events: readonly NewClientEvent[]): Promise<unknown>;
+}
 
 export { DEFAULT_WATCH_TIMEOUT_MS };
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
@@ -20,16 +31,21 @@ const DELIVERY_WINDOW_MS = 6 * 60 * 60_000;
 const MAX_UNDELIVERABLE_ENTRIES = 50;
 /** Reads failing for this long are reported instead of waiting for the timeout. */
 const UNREADABLE_GRACE_MS = 60_000;
+/** After a restart, how long restored watches wait for their Host sessions to register again. */
+const DEFAULT_RESTORE_GRACE_MS = 5 * 60_000;
 
-interface Watch extends ThreadWatchEntry {
-  timeoutMs: number;
-  deadline: number;
-  deliveryDeadline?: number;
+interface Watch extends PersistedWatch {
   unreadableSince?: number;
   lastReadError?: string;
   /** Earliest time a `completed` outcome may fire after the quiet period. */
   quietUntil?: number;
   quietTurnId?: string;
+  /** Restored watch: read failures mean the owning session is not back yet. */
+  observeGraceUntil?: number;
+  /** Restored watch: deliver only once the notified Thread is readable again. */
+  deliverGraceUntil?: number;
+  /** Restored while watching: the Turn that was running may have been cut off by the restart. */
+  crossedRestart?: boolean;
 }
 
 interface ObservedWatch {
@@ -37,6 +53,44 @@ interface ObservedWatch {
   turnId?: string;
   turnIndex?: number;
   turnStatus?: DelegationThreadStatus;
+  restartNote?: string;
+}
+
+function persisted(watch: Watch): PersistedWatch {
+  const {
+    id,
+    threadId,
+    notifyThreadId,
+    state,
+    outcome,
+    turnId,
+    reason,
+    registeredAt,
+    timeoutMs,
+    deadline,
+    deliveryDeadline,
+    delivering,
+    restartNote,
+    harnessId,
+    refs,
+  } = watch;
+  return {
+    id,
+    threadId,
+    notifyThreadId,
+    state,
+    registeredAt,
+    timeoutMs,
+    deadline,
+    ...(outcome ? { outcome } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(reason ? { reason } : {}),
+    ...(deliveryDeadline !== undefined ? { deliveryDeadline } : {}),
+    ...(delivering ? { delivering } : {}),
+    ...(restartNote ? { restartNote } : {}),
+    ...(harnessId ? { harnessId } : {}),
+    ...(refs?.length ? { refs } : {}),
+  };
 }
 
 function terminal(status: DelegationThreadSnapshot["status"]): boolean {
@@ -75,6 +129,8 @@ function duration(milliseconds: number): string {
 
 function describe(watch: Watch): string {
   const link = threadLink(watch.threadId);
+  if (watch.outcome === "interrupted" && watch.restartNote)
+    return `${link}: interrupted${watch.turnId ? ` (Turn ${watch.turnId})` : ""}. ${watch.restartNote}`;
   switch (watch.outcome) {
     case "timedOut":
       return `${link} has not reached a terminal state after ${duration(watch.timeoutMs)}; this watch expired. Run 'codexhost thread watch' again to keep waiting.`;
@@ -104,15 +160,21 @@ function notification(watches: readonly Watch[]): string {
 /**
  * One-shot notifications when a watched Thread stops, built only on the public
  * `read` and `send` operations, so it is independent of Harness, Desktop and
- * delegation lineage. State is in memory: watches do not survive a Host Runtime
- * restart.
+ * delegation lineage. With a store, watches survive a Host Runtime restart: a
+ * send whose outcome was not recorded before the restart is made again, so a
+ * restart may repeat a notification but does not lose one.
  */
 export class DelegationWatchService {
   readonly #api: Pick<DelegationControlApi, "read" | "send">;
   readonly #pollIntervalMs: number;
   readonly #quietMs: number;
   readonly #diagnose: (error: unknown) => void;
+  readonly #store: DelegationWatchStore | undefined;
+  readonly #clientEvents: ClientEventSink | undefined;
+  readonly #restoreGraceMs: number;
+  readonly #ready: Promise<void>;
   readonly #watches: Watch[] = [];
+  #writes: Promise<void> = Promise.resolve();
   #timer: ReturnType<typeof setTimeout> | undefined;
   #closed = false;
 
@@ -122,15 +184,23 @@ export class DelegationWatchService {
       pollIntervalMs?: number;
       quietMs?: number;
       diagnose?: (error: unknown) => void;
+      store?: DelegationWatchStore;
+      clientEvents?: ClientEventSink;
+      restoreGraceMs?: number;
     } = {},
   ) {
     this.#api = api;
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.#quietMs = options.quietMs ?? DEFAULT_WATCH_QUIET_MS;
     this.#diagnose = options.diagnose ?? (() => undefined);
+    this.#store = options.store;
+    this.#clientEvents = options.clientEvents;
+    this.#restoreGraceMs = options.restoreGraceMs ?? DEFAULT_RESTORE_GRACE_MS;
+    this.#ready = this.#store ? this.#restore(this.#store) : Promise.resolve();
   }
 
   async watch(input: ThreadWatchInput): Promise<ThreadWatchResult> {
+    await this.#ready;
     if (this.#closed) throw new DelegationControlError("INTERNAL_ERROR", "Host Runtime is closing");
     if (typeof input.threadId !== "string" || !input.threadId.trim())
       throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
@@ -144,9 +214,16 @@ export class DelegationWatchService {
     if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)
       throw new DelegationControlError("INVALID_ARGUMENT", "timeoutMs must be a positive integer");
 
+    const client = originClientName(input.notifyThreadId);
+    if (client !== undefined && (!isValidClientName(client) || !this.#clientEvents))
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "The notified client is invalid or this Runtime keeps no client events",
+      );
     // Both reads reject unknown Threads, so a watch is never reported for a missing end.
     const target = await this.#api.read({ threadId: input.threadId, view: "result" });
-    await this.#api.read({ threadId: input.notifyThreadId, view: "result" });
+    if (client === undefined)
+      await this.#api.read({ threadId: input.notifyThreadId, view: "result" });
     const result = {
       threadId: input.threadId,
       notifyThreadId: input.notifyThreadId,
@@ -162,19 +239,32 @@ export class DelegationWatchService {
     );
     if (existing) return { ...result, state: "watching", timeoutMs: existing.timeoutMs };
     if (this.#closed) throw new DelegationControlError("INTERNAL_ERROR", "Host Runtime is closing");
-    this.#watches.push({
+    const watch: Watch = {
+      id: randomUUID(),
       threadId: input.threadId,
       notifyThreadId: input.notifyThreadId,
       state: "watching",
       registeredAt: new Date().toISOString(),
       timeoutMs: input.timeoutMs,
       deadline: Date.now() + input.timeoutMs,
-    });
+    };
+    this.#watches.push(watch);
+    try {
+      await this.#persist(watch, true);
+    } catch (error) {
+      const index = this.#watches.indexOf(watch);
+      if (index >= 0) this.#watches.splice(index, 1);
+      throw new DelegationControlError(
+        "INTERNAL_ERROR",
+        `Could not persist Thread watch: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     this.#schedule();
     return { ...result, state: "watching" };
   }
 
   async watches(): Promise<ThreadWatchListResult> {
+    await this.#ready;
     return {
       watches: this.#watches.map(
         ({
@@ -202,11 +292,44 @@ export class DelegationWatchService {
     };
   }
 
+  /** Stops work in this process. Stored watches stay on disk for the next Runtime. */
   close(): void {
     this.#closed = true;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#watches.length = 0;
+  }
+
+  async #restore(store: DelegationWatchStore): Promise<void> {
+    let records: PersistedWatch[];
+    try {
+      records = await store.adopt();
+    } catch (error) {
+      this.#diagnose(error);
+      return;
+    }
+    if (this.#closed) return;
+    const now = Date.now();
+    const graceUntil = now + this.#restoreGraceMs;
+    for (const record of records) {
+      const watch: Watch = { ...record };
+      // The send may or may not have started a Turn before the restart; deliver again.
+      delete watch.delivering;
+      if (watch.state === "watching") {
+        watch.observeGraceUntil = graceUntil;
+        watch.crossedRestart = true;
+      }
+      if (watch.state === "pendingDelivery" && now >= (watch.deliveryDeadline ?? 0)) {
+        watch.state = "undeliverable";
+        watch.reason = "The delivery window ended while the Host Runtime was stopped";
+      }
+      if (watch.state !== "undeliverable") watch.deliverGraceUntil = graceUntil;
+      this.#watches.push(watch);
+      if (record.delivering || watch.state !== record.state) void this.#persist(watch);
+    }
+    this.#trimUndeliverable();
+    if (records.length > 0) this.#diagnose(`restored ${records.length} watch(es) after a restart`);
+    this.#schedule();
   }
 
   #schedule(): void {
@@ -230,13 +353,15 @@ export class DelegationWatchService {
       if (watch.state !== "watching") continue;
       const observed = await this.#observe(watch);
       if (!observed) continue;
-      const { outcome, turnId, turnIndex, turnStatus } = observed;
+      const { outcome, turnId, turnIndex, turnStatus, restartNote } = observed;
+      if (restartNote) watch.restartNote = restartNote;
       watch.state = "pendingDelivery";
       watch.outcome = outcome;
       if (turnId) watch.turnId = turnId;
       if (turnIndex !== undefined) watch.turnIndex = turnIndex;
       if (turnStatus) watch.turnStatus = turnStatus;
       watch.deliveryDeadline = Date.now() + DELIVERY_WINDOW_MS;
+      await this.#persist(watch);
     }
     const subscribers = new Set(
       this.#watches
@@ -252,6 +377,12 @@ export class DelegationWatchService {
   async #observe(watch: Watch): Promise<ObservedWatch | undefined> {
     try {
       const snapshot = await this.#api.read({ threadId: watch.threadId, view: "result" });
+      delete watch.observeGraceUntil;
+      const turnId = snapshot.turn?.turnId;
+      const crossedRestart = watch.crossedRestart === true;
+      delete watch.crossedRestart;
+      watch.harnessId = snapshot.harnessId;
+      if (snapshot.refs?.length) watch.refs = snapshot.refs;
       if (snapshot.status === "running") {
         delete watch.quietUntil;
         delete watch.quietTurnId;
@@ -260,6 +391,14 @@ export class DelegationWatchService {
       }
       if (terminal(snapshot.status)) {
         delete watch.unreadableSince;
+        if (crossedRestart)
+          return {
+            outcome: "interrupted",
+            ...(turnId ? { turnId } : {}),
+            ...(snapshot.turn ? { turnStatus: snapshot.turn.status } : {}),
+            ...(snapshot.turnIndex !== undefined ? { turnIndex: snapshot.turnIndex } : {}),
+            restartNote: `The Host Runtime restarted while this Thread was running; afterwards it read as ${snapshot.status}, so the work most likely did not finish. Read it, then continue it or start it again.`,
+          };
         const detail: ObservedWatch = {
           outcome: snapshot.status as ThreadWatchOutcome,
           ...(snapshot.turn
@@ -273,7 +412,6 @@ export class DelegationWatchService {
           return detail;
         }
         const now = Date.now();
-        const turnId = snapshot.turn?.turnId;
         if (watch.quietUntil === undefined || watch.quietTurnId !== turnId) {
           watch.quietUntil = now + this.#quietMs;
           if (turnId) watch.quietTurnId = turnId;
@@ -288,7 +426,20 @@ export class DelegationWatchService {
       }
       delete watch.unreadableSince;
     } catch (error) {
-      if (errorCode(error) === "THREAD_NOT_FOUND") return { outcome: "notFound" };
+      if (watch.observeGraceUntil !== undefined) {
+        // Until the session that owns the Thread registers again, a failed read says nothing.
+        if (Date.now() < watch.observeGraceUntil) return undefined;
+        delete watch.observeGraceUntil;
+      }
+      if (errorCode(error) === "THREAD_NOT_FOUND") {
+        // A Harness may be unable to reopen a session whose Turn the restart cut off.
+        if (watch.crossedRestart)
+          return {
+            outcome: "interrupted",
+            restartNote: `The Host Runtime restarted while this Thread was running, and the Thread could not be opened again (${error instanceof Error ? error.message : String(error)}).`,
+          };
+        return { outcome: "notFound" };
+      }
       // Other read failures may be transient, so only a sustained failure is reported.
       watch.unreadableSince ??= Date.now();
       watch.lastReadError = error instanceof Error ? error.message : String(error);
@@ -303,6 +454,15 @@ export class DelegationWatchService {
     const pending = this.#watches.filter(
       (watch) => watch.state === "pendingDelivery" && watch.notifyThreadId === notifyThreadId,
     );
+    const client = originClientName(notifyThreadId);
+    if (client !== undefined) {
+      await this.#deliverToClient(client, pending);
+      return;
+    }
+    if (!(await this.#subscriberReady(notifyThreadId, pending))) return;
+    for (const watch of pending) watch.delivering = true;
+    // Recorded before sending, so a restart during the send delivers again instead of losing it.
+    await Promise.all(pending.map((watch) => this.#persist(watch)));
     try {
       await this.#api.send({ threadId: notifyThreadId, message: notification(pending) });
       for (const watch of pending) this.#remove(watch);
@@ -310,6 +470,7 @@ export class DelegationWatchService {
       const failure = deliveryFailure(error);
       const message = error instanceof Error ? error.message : String(error);
       for (const watch of pending) {
+        delete watch.delivering;
         // A rejected send is retried and never treated as delivered.
         if (failure !== "rejected" || Date.now() >= (watch.deliveryDeadline ?? 0)) {
           watch.state = "undeliverable";
@@ -318,14 +479,82 @@ export class DelegationWatchService {
               ? `Delivery outcome unknown; the notification may already have started a Turn, so it is not retried (${message})`
               : message;
         }
+        void this.#persist(watch);
       }
       this.#trimUndeliverable();
     }
   }
 
+  /**
+   * A client's notification is an event appended to its log. The append either
+   * lands or fails locally, so a failure is retried within the delivery window.
+   */
+  async #deliverToClient(client: string, pending: readonly Watch[]): Promise<void> {
+    for (const watch of pending) delete watch.deliverGraceUntil;
+    try {
+      if (!this.#clientEvents) throw new Error("This Runtime keeps no client events");
+      await this.#clientEvents.append(
+        client,
+        pending.map((watch) => ({
+          type: "watch" as const,
+          threadId: watch.threadId,
+          outcome: watch.outcome ?? "notFound",
+          deepLink: threadLink(watch.threadId),
+          ...(watch.turnId ? { turnId: watch.turnId } : {}),
+          ...(watch.harnessId ? { harnessId: watch.harnessId } : {}),
+          ...(watch.refs?.length ? { refs: watch.refs } : {}),
+          ...(watch.restartNote ? { note: watch.restartNote } : {}),
+        })),
+      );
+      for (const watch of pending) this.#remove(watch);
+    } catch (error) {
+      this.#diagnose(error);
+      for (const watch of pending) {
+        if (Date.now() < (watch.deliveryDeadline ?? 0)) continue;
+        watch.state = "undeliverable";
+        watch.reason = error instanceof Error ? error.message : String(error);
+        void this.#persist(watch);
+      }
+      this.#trimUndeliverable();
+    }
+  }
+
+  /** Restored notifications wait until the notified Thread can be reached again. */
+  async #subscriberReady(notifyThreadId: string, pending: readonly Watch[]): Promise<boolean> {
+    const restored = pending.filter((watch) => watch.deliverGraceUntil !== undefined);
+    if (restored.length === 0) return true;
+    if (restored.some((watch) => Date.now() < (watch.deliverGraceUntil ?? 0))) {
+      try {
+        await this.#api.read({ threadId: notifyThreadId, view: "result" });
+      } catch {
+        return false;
+      }
+    }
+    for (const watch of restored) delete watch.deliverGraceUntil;
+    return true;
+  }
+
+  #persist(watch: Watch, required = false): Promise<void> {
+    const record = persisted(watch);
+    return this.#write((store) => store.save(record), required);
+  }
+
+  #write(
+    operation: (store: DelegationWatchStore) => Promise<void>,
+    required = false,
+  ): Promise<void> {
+    const store = this.#store;
+    if (!store) return Promise.resolve();
+    // Writes run in order, so a later state of a watch is never overwritten by an earlier one.
+    const next = this.#writes.then(() => operation(store));
+    this.#writes = next.catch((error: unknown) => this.#diagnose(error));
+    return required ? next : this.#writes;
+  }
+
   #remove(watch: Watch): void {
     const index = this.#watches.indexOf(watch);
     if (index >= 0) this.#watches.splice(index, 1);
+    void this.#write((store) => store.remove(watch.id));
   }
 
   #trimUndeliverable(): void {

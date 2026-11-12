@@ -96,6 +96,27 @@ describe("delegation CLI", () => {
     });
   });
 
+  it("preserves the caller Thread while resolving a relative Harness inspection cwd", async () => {
+    const fetchImpl = successfulFetch({ harnessId: "pi", inspection: { status: "ready" } });
+    await expect(
+      runDelegationCli({
+        arguments: ["harness", "inspect", "pi", "--cwd", "."],
+        environment: {
+          [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+          [DELEGATION_RUNTIME_TOKEN_ENV]: "token",
+          [DELEGATION_THREAD_ID_ENV]: "codex://threads/inspection-parent",
+        },
+        output: new PassThrough(),
+        fetchImpl,
+      }),
+    ).resolves.toBe(0);
+    expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0]?.[1]?.body))).toEqual({
+      harnessId: "pi",
+      parentThreadId: "inspection-parent",
+      cwd: process.cwd(),
+    });
+  });
+
   it("normalizes deep links and sends delegate start as JSON", async () => {
     const fetchImpl = successfulFetch({ threadId: "child-1" });
     const output = new PassThrough();
@@ -590,6 +611,45 @@ describe("delegation CLI", () => {
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }
+  });
+
+  it("reports a missing local Host without requiring injected credentials", async () => {
+    const diagnosticOutput = new PassThrough();
+    await expect(
+      runDelegationCli({
+        arguments: ["thread", "read", "thread-1"],
+        environment: { PATH: "/synthetic", CODEXHOST_DATA_DIR: "/synthetic" },
+        diagnosticOutput,
+      }),
+    ).resolves.toBe(1);
+    expect(JSON.parse(outputText(diagnosticOutput))).toEqual({
+      error: {
+        code: "RUNTIME_UNREACHABLE",
+        message:
+          "No local CLI credentials were found. Start or update the local Host with its external listener enabled, or configure an external client token.",
+        details: {
+          reason: "missing_runtime_environment",
+          missingEnvironmentVariables: [
+            DELEGATION_RUNTIME_ENDPOINT_ENV,
+            DELEGATION_RUNTIME_TOKEN_ENV,
+          ],
+          nativeCodexRecovery: {
+            recommendedPolicy: {
+              inherit: "all",
+              ignoreDefaultExcludes: true,
+              includeOnlyMustContain: [
+                DELEGATION_RUNTIME_ENDPOINT_ENV,
+                DELEGATION_RUNTIME_TOKEN_ENV,
+              ],
+            },
+          },
+          externalClient: {
+            environmentVariables: ["CODEXHOST_CLIENT_TOKEN", "CODEXHOST_CLIENT_TOKEN_FILE"],
+            register: "codexhost client add <name>",
+          },
+        },
+      },
+    });
   });
 
   it("reports only the Host Runtime variables that are missing", async () => {

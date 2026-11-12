@@ -73,35 +73,6 @@ function removeQueuedItem(
   }
 }
 
-function installLocalQueueGate(target: Record<string, unknown>): (() => void) | null {
-  const getTurnCoordinator = target.getTurnCoordinator as RendererMethod;
-  const coordinator: unknown = getTurnCoordinator.call(target);
-  const queue = isRecord(coordinator) ? coordinator.serverQueue : null;
-  if (!isRecord(queue) || typeof queue.isEnabled !== "function") return null;
-  // This is Desktop's plain queue backend object, not a RpcTarget. Do not shadow
-  // inherited methods or guess at a different private API shape.
-  const descriptor = Object.getOwnPropertyDescriptor(queue, "isEnabled");
-  if (!descriptor?.writable) return null;
-  const original = queue.isEnabled;
-  const getConversation = target.getConversation as RendererMethod;
-  const isEnabled = (...args: unknown[]): unknown => {
-    const threadId = args[0];
-    // Preserve native/unknown Threads, feature flags, and no-argument probes.
-    // No selected-Agent state, ownership cache, or additional RPC is needed.
-    if (
-      typeof threadId === "string" &&
-      isExternalConversation(getConversation.call(target, threadId), threadId)
-    ) {
-      return false;
-    }
-    return original.apply(queue, args);
-  };
-  queue.isEnabled = isEnabled;
-  return () => {
-    if (queue.isEnabled === isEnabled) Object.defineProperty(queue, "isEnabled", descriptor);
-  };
-}
-
 /**
  * Desktop's owner auto-exec reads the local follow-up store, not Host
  * `thread/queue/*`. After an External Turn completes, start the Host head
@@ -214,18 +185,19 @@ function installServerQueueDrain(target: Record<string, unknown>): (() => void) 
 }
 
 /**
- * Desktop 26.1016 overlay-owned External Threads drain through Host
- * `thread/queue/*`. Keep the local-queue gate only on Desktops that cannot
- * report stream ownership, where follower windows still need that fallback.
+ * Overlay-owned External Threads drain through Host `thread/queue/*` when
+ * Desktop reports stream ownership. Otherwise keep this binding probe so
+ * unsupported Desktop versions still fail closed, but do not override
+ * `serverQueue.isEnabled`: the Shared Host implements the native
+ * thread/queue protocol for both Desktop and Web clients.
  */
 export function installRendererExternalQueue(target: unknown): (() => void) | null {
-  if (
-    !isRecord(target) ||
-    typeof target.getTurnCoordinator !== "function" ||
-    typeof target.getConversation !== "function"
-  ) {
-    return null;
+  if (!isRecord(target) || typeof target.getTurnCoordinator !== "function") return null;
+  const coordinator: unknown = target.getTurnCoordinator();
+  const queue = isRecord(coordinator) ? coordinator.serverQueue : null;
+  if (!isRecord(queue) || typeof queue.isEnabled !== "function") return null;
+  if (typeof target.getConversation === "function" && typeof target.getStreamRole === "function") {
+    return installServerQueueDrain(target);
   }
-  if (typeof target.getStreamRole === "function") return installServerQueueDrain(target);
-  return installLocalQueueGate(target);
+  return () => undefined;
 }

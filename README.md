@@ -2,13 +2,11 @@
 
 # CodexHost
 
-**Run Pi and other Harnesses inside Codex Desktop**
+**Use 15+ Agents like Claude Code, Pi and Grok inside Codex Desktop, without switching apps**
 
-We believe **Codex Desktop** offers the best desktop development experience today.
+They get the same Diff review, Fork and approvals as Codex, and can hand work to each other.
 
-But **Codex** isn't the only great **Agent Harness** — **Claude Code** and **Pi** are great too.
-
-**CodexHost** lets you run other **Harnesses** natively inside **Codex Desktop** and have them work together.
+There is also a **Web app**: the same Codex interface with lower memory use, so you can use every Agent on this computer remotely from your phone or any other computer.
 
 ⭐ If CodexHost is useful to you, please give it a star! ⭐
 
@@ -33,11 +31,10 @@ But **Codex** isn't the only great **Agent Harness** — **Claude Code** and **P
   <a href="https://zcode.z.ai/"><img alt="ZCode" src="docs/imgs/badge-zcode.svg" /></a>
   <a href="docs/harnesses/copilot/copilot-harness-integration.md"><img alt="GitHub Copilot" src="https://img.shields.io/badge/Copilot-181717?logo=githubcopilot&logoColor=white" /></a>
 </p>
-<br />
 
-<p align="center"><a href="https://github.com/karlorz/codex-host/releases"><strong>Download</strong></a> · <a href="#cross-agent-collaboration">Cross-Agent Collaboration</a> · <a href="#remote-harness">Remote</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
+<p align="center"><a href="https://github.com/karlorz/codex-host/releases"><strong>Download</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#desktop">Desktop</a> · <a href="#collaboration">Cross-Agent Collaboration</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
 
-<br />
+<img width="90%" src="docs/imgs/hero-desktop-phone.png" alt="Several Agent sessions and the Diff review panel in Codex Desktop, with the same session open on a phone at the bottom right">
 
 </div>
 
@@ -54,17 +51,7 @@ But **Codex** isn't the only great **Agent Harness** — **Claude Code** and **P
 </table>
 </details>
 
-## Interface Preview
-
-No more switching apps: **Pi, Claude Code, Grok Build, and ten-plus other Harnesses** all run right inside the same Codex Desktop window.
-
-https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
-
-### Interface
-
-<div align="center">
-  <img width="90%" src="docs/imgs/codexhost-native-overview.png" alt="Claude Code, Pi, Grok Build, and Oh My Pi sessions running in Codex Desktop, with Diff review, Fork, Worktree, and Agent switching">
-</div>
+<a id="quick-start"></a>
 
 ## Quick Start
 
@@ -72,23 +59,25 @@ https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 
 ```bash
 npm install -g @karlorz/codexhost-cli
-codexhost
+codexhost          # start Codex Desktop
+codexhost web      # start Web and open it in your browser
+codexhost stop     # stop all CodexHost background services
 ```
 
 **Option 2: Installer** (macOS / Windows)
 
-Grab the installer for your platform from [Releases](https://github.com/karlorz/codex-host/releases).
+Grab the installer for your platform from [Releases](https://github.com/karlorz/codex-host/releases). For Web: open codexhost after installing, then visit http://127.0.0.1:4400 locally.
 
 > Linux is supported on x64 and ARM64. See the [Linux guide](docs/platforms/linux/linux.md).
 
-Run `codexhost update` to check for the latest release and prepare an upgrade from your terminal. Quit Codex Desktop first if an upgrade is available. Once preparation completes, the background updater installs it and restarts codexhost. An up-to-date installation exits without changes.
+**Upgrade and stop:** run `codexhost update` to upgrade, and `codexhost stop` to stop all background services. Before installing over an existing npm installation, run `codexhost stop` first.
 
 <details>
 <summary>Installation troubleshooting</summary>
 
 **codexhost does not start, or Codex opens without codexhost features**
 
-Run `codexhost console` (Windows: Start Menu → "codexhost console") to open the local console at `http://127.0.0.1:4399/`. It shows why the last start failed, the Codex Desktop version, Host Runtime logs, and can update codexhost while Codex is not running. It starts together with codexhost: installer launches open it in your browser, and terminal launches print its address.
+Run `codexhost console` (Windows: Start Menu → "codexhost console") to open the local console at `http://127.0.0.1:4399/`. It shows why the last start failed, the Codex Desktop version and Host Runtime logs, and can update codexhost while Codex is not running.
 
 **macOS: "App can't be verified" on first launch**
 
@@ -108,143 +97,113 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 
 </details>
 
-### Highlights
+<a id="desktop"></a>
+
+## Use every Agent in Codex Desktop
+
+No more switching apps: **Pi, Claude Code, Grok Build and 15+ other Agents** all run in the same Codex Desktop window. Every session is in the sidebar, and you can switch Agents from the bottom-right of the composer.
+
+https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 
 <table>
   <tr>
-    <td colspan="2" valign="top">
-      <p><strong>Full workspace</strong><br /><sub>Sessions from different Harnesses share one sidebar; switch Agents from the bottom-right of the composer</sub></p>
-      <div align="center">
-        <img width="90%" src="docs/imgs/codexhost-full-workspace.png" alt="The complete CodexHost workspace in Codex Desktop, showing the project tree, conversation area, and multiple Agent selectors">
-      </div>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <p><strong>Diff review panel</strong><br /><sub>Every turn summarizes its changes; click Review to open the full Diff on the right</sub></p>
+    <td width="33%" valign="top">
+      <p><strong>Diff review panel</strong><br /><sub>Every turn summarizes its changes; click Review to open the full Diff</sub></p>
       <img src="docs/imgs/highlight-diff-review.png" alt="Change summary card in the conversation and the full Diff in the review panel">
     </td>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <p><strong>Fork from any message</strong><br /><sub>Branch in the current workspace, or in a new Worktree for parallel work</sub></p>
       <img src="docs/imgs/highlight-fork-worktree.png" alt="Menu for creating a branch from a message, in this workspace or a new worktree">
     </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <p><strong>Delegate to other Agents with #</strong><br /><sub>Each Agent runs in its own session, in parallel · <a href="#cross-agent-collaboration">Learn more</a></sub></p>
-      <img src="docs/imgs/highlight-delegation.png" alt="Typing # to pick Codex, Claude Code, Grok and other Agents, each task running in its own session">
-    </td>
-    <td width="50%" valign="top">
-      <p><strong>Tool calls and thinking</strong><br /><sub>Expand any edit, command, or thinking step to see the details</sub></p>
-      <img src="docs/imgs/highlight-tool-details.png" alt="An expanded edit entry showing the Diff of a newly created file">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <p><strong>Visible Subagents</strong><br /><sub>Each Subagent has its own icon; open its full conversation on the right</sub></p>
       <img src="docs/imgs/highlight-subagent.png" alt="Status of 4 Subagents in the main conversation, with one opened on the right">
     </td>
+  </tr>
+</table>
+
+<details>
+<summary>More: tool details, usage, account import, diagram rendering</summary>
+
+<table>
+  <tr>
     <td width="50%" valign="top">
-      <p><strong>Remote development</strong><br /><sub>Add a VPS as a project and run Agents directly on the remote machine · <a href="#remote-harness">Learn more</a></sub></p>
-      <img src="docs/imgs/highlight-remote.png" alt="A remote VPS project in the sidebar, with the conversation returning the remote working directory">
+      <p><strong>Tool calls and thinking</strong><br /><sub>Expand any edit, command or thinking step to see the details</sub></p>
+      <img src="docs/imgs/highlight-tool-details.png" alt="An expanded edit entry showing the Diff of a newly created file">
+    </td>
+    <td width="50%" valign="top">
+      <p><strong>Usage at a glance</strong><br /><sub>Cache hit rate, cost estimate and context usage, live</sub></p>
+      <img src="docs/imgs/highlight-usage.png" alt="Usage popover: context, cache hit rate, cache reads and writes, total tokens, cost estimate">
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top">
-      <p><strong>Usage at a glance</strong><br /><sub>Cache hit rate, cost estimate, and context usage, live</sub></p>
-      <img src="docs/imgs/highlight-usage.png" alt="Usage popover: context, cache hit rate, cache reads and writes, total tokens, cost estimate">
-    </td>
     <td width="50%" valign="top">
       <p><strong>One-click account import</strong><br /><sub>Copy your locally signed-in Codex and Grok credentials to Pi, with live quota</sub></p>
       <img src="docs/imgs/highlight-account-import.png" alt="Account settings: 5-hour and 7-day remaining quota, and accounts imported into Pi">
     </td>
-  </tr>
-  <tr>
-    <td colspan="2" valign="top">
-      <p><strong>Mermaid diagram rendering</strong><br /><sub>Left: Codex Desktop + Pi renders the diagram; right: the Pi TUI only shows the source</sub></p>
+    <td width="50%" valign="top">
+      <p><strong>Better than a terminal</strong><br /><sub>Left: Codex Desktop + Pi renders the Mermaid diagram; right: the Pi TUI only shows the source</sub></p>
       <img src="docs/imgs/codex-vs-pi-agent-tui.png" alt="Comparison of Mermaid diagram rendering between Pi with Codex Desktop and the Pi Agent TUI">
     </td>
   </tr>
 </table>
 
-## Feature Status
-
-This matrix describes this fork's external Harness integrations in Codex Desktop, including native UI and shared codexhost question cards. Support depends on each plugin's native protocol, required patches and verified Desktop behavior; see the limits below.
-
-Grok goal completion and restart history are verified on Codex Desktop 26.1027.30824: the original request, final answer, elapsed time and completed helper histories are retained. Broader goal controls and previous-message editing remain partially qualified.
+</details>
 
 <details>
-<summary>Show full feature matrix</summary>
+<summary>Feature support by Agent</summary>
 
-| Capability | <a href="https://pi.dev/"><img alt="Pi" src="https://img.shields.io/badge/-000000?logo=pi&logoColor=white" /></a> | <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi" src="docs/imgs/harness-icon-omp-v5.svg" /></a> | <a href="https://code.claude.com/docs/en/quickstart"><img alt="Claude Code" src="https://img.shields.io/badge/-D97757?logo=claudecode&logoColor=white" /></a> | <a href="https://opencode.ai/docs/"><img alt="OpenCode" src="docs/imgs/harness-icon-opencode.svg" /></a> | <a href="https://grok.com/"><img alt="Grok" src="https://img.shields.io/badge/-000000?logo=x&logoColor=white" /></a> | <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DSH" src="https://img.shields.io/badge/-4D6BFE?logo=deepseek&logoColor=white" /></a> | <a href="https://antigravity.google/product/antigravity-cli"><img alt="AGY" src="docs/imgs/harness-icon-agy.svg" /></a> | <a href="https://www.codebuddy.cn/home/"><img alt="CodeBuddy" src="docs/imgs/harness-icon-codebuddy.svg" width="24" height="24" /></a> | <a href="https://www.workbuddy.ai/docs/workbuddy/Quickstart"><img alt="WorkBuddy" src="packages/adapters/workbuddy/assets/icon.svg" width="24" height="24" /></a> | <a href="https://cursor.com/docs/cli/overview"><img alt="Cursor" src="docs/imgs/harness-icon-cursor.svg" /></a> | <a href="https://hermes-agent.nousresearch.com/docs"><img alt="Hermes" src="docs/imgs/harness-icon-hermes.svg" /></a> | <a href="https://qoder.com/cli"><img alt="Qoder" src="packages/adapters/qoder/assets/icon.svg" width="28" height="28" /></a> | <a href="https://moonshotai.github.io/kimi-code/"><img alt="Kimi Code" src="packages/adapters/kimi-code/assets/icon.svg" width="28" height="28" /></a> | <a href="docs/harnesses/copilot/copilot-harness-integration.md"><img alt="Copilot" src="packages/adapters/copilot/assets/icon.png" width="28" height="28" /></a> |  <a href="https://github.com/QwenLM/qwen-code"><img alt="Qwen Code" src="packages/adapters/qwen-code/assets/icon.svg" width="28" height="28" /></a> | <a href="docs/harnesses/devin/devin-cli-acp-integration.md"><img alt="Devin" src="packages/adapters/devin/assets/icon.svg" width="28" height="28" /></a> |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |  :---: | :---: |
-| Streaming responses | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ | ✅ |
-| Tool status | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ | ✅ |
-| Edit Diff | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  — | ✅ |
-| Questions / cancellation | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ |  ✅ | — / ✅ |
-| Model / Thinking selection | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ / — | ✅ / ◐ |
-| Tool approvals | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ | ✅ |
-| Permission modes | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ | ✅ |
-| Cross-Agent task collaboration | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ |  ✅ | ◐ |
-| Usage | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |  ✅ | — |
-| Fork | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ |  — | ◐ |
-| Context compaction | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |  — | — |
-| Slash commands | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |  — | — |
-| Edit previous message | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  — | ◐ |
-| Native goal lifecycle | ? | ? | ? | ? | ◐ | ✅ | ? | — | — | — | ? | ? | ? | ? |  ? | ? |
-| Shared goal panel | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-| Shared background activity | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-| Shared goal completion / restart history | — | — | — | — | ✅ | — | — | — | — | — | — | — | — | — |  — | — |
-| Host-managed goals | — | — | — | — | — | — | — | — | — | — | — | — | — | — |  — | — |
-| Model-created goals | ? | ? | ? | ? | — | ? | ? | ? | ? | ? | ? | ? | ? | ? |  ? | ? |
-| Live voice chat | ? | ? | ✅ | ? | ◐ | ? | ? | ? | ? | ? | ? | ? | ? | ? |  ? | ? |
-| Multi-select questions | — | ◐ | ◐ | ◐ | ✅ | ◐ | — | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ |  — | — |
-| Question timeout countdown | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-| Question timeout reset on activity | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-| Subagents | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | ◐ | — | — | — | — |  — | — |
-| Computer Use / in-app browser | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-| Generated images | — | — | — | — | ◐ | — | — | — | — | — | — | — | — | — |  — | — |
-
-Legend: ✅ supported integration · ◐ partial, degraded, or saved intent only · — not exposed through the current plugin · ? unverified.
-
-- **Shared background activity**: Grok remains ◐. Native-associated Run/Monitor commands use **Background processes**, genuine children use **Subagents**, and Loop schedules share the native summary panel without a duplicate composer entry. User screenshots accept the shown heading, collapsed instructions, countdown and native child counts; installed latest-run navigation, UI controls and broader stability remain unqualified. Other — cells mean this optional shared activity capability is not exposed by those plugins, rather than no native background execution. See [Grok background activity](docs/harnesses/grok/background-activity.md).
-- **Native goals and Grok editing**: Grok's native lifecycle and shared panel remain ◐ because the full installed pause/resume/Stop, budget and paused-restore matrix is not yet qualified. Completion and restart history are verified separately below. Editing uses conversation-only native rewind, with automated and isolated native coverage; the installed older-message edit/rewind matrix remains pending. DSH's ✅ describes its existing native command lifecycle, not shared-panel parity. ZCode has typed native controls/background ownership, but its shared-panel accounting remains unqualified. Cursor Agent's TUI and builtin `/goal` skill persist conversation `GoalState` and can idle-continue in the interactive CLI. ACP has no goal RPC and does not idle-continue after `end_turn`. Host exposes a curated `/goal` skill that forwards that prompt for the current Turn only; live ACP `goal` stays excluded, Desktop Goal mode is not offered, and unsupported shared goal RPCs still fail closed. No Host-managed scheduler or official goal-tool injection is enabled. Other ? cells remain unverified. See [Native goal bridge](docs/architecture/harness-goals.md).
-- **Grok completion and history**: ✅ covers Desktop `/goal` completion, the separate final answer and achievement footer, and restoration of the original user request, native work duration and completed-goal display after restart. Installed Desktop 26.1027.30824 presentation was manually accepted; Host reads also verified stable worker/checkpoint identity and five completed, readable helper histories. Completion clears the active goal panel; reopening retains completion without reactivating or rerunning the goal. See [Grok goals and history](docs/harnesses/grok/goals-and-history.md).
-- **Grok goal boundaries**: Desktop `/goal` and `/grok-goal` create native goals; ordinary natural-language requests cannot create one on the qualified native build. Real background responses retain native history/checkpoints. Goal helpers expose final read-only child transcripts; their links wait for confirmed parent identity, and post-terminal helpers appear on reopen. Continuous child transcript streaming is unclaimed. Opened idle helper chats use native history timestamps; unhydrated helper list rows retain stored recency. Planner approvals before worker admission cannot be shown as parent interactions; native planning may pause. The Adapter does not elevate permissions.
-- **Live voice chat** uses this fork's version-audited Desktop hook and a configured gateway. The Host `thread/realtime/*` path and new-chat Harness inheritance are generic, including a Work composer whose lastAgent is Grok or Cursor CLI when Codex Work uses Desktop default. Claude Code has a documented attended Desktop call; Grok is ◐ because verification covers a real gateway call and an isolated Host trial with the public plugin, rather than installed Desktop button acceptance. Other Harnesses are unverified (?). See [CPA live-voice Desktop hook](docs/operations/cpa-live-voice-desktop-hook.md).
-- **Cursor questions**: Host maps `cursor/ask_question` to a Host Question. `allowMultiple` would use the shared card in both in-chat and Appearance overlay modes; single-choice stays on the native Desktop Composer card. Current `cursor-agent acp` sessions do not offer the AskQuestion tool, so that extension is not sent and neither card appears. Initialize advertises `_meta.parameterizedModelPicker` only; Cursor has no question client capability. Ask mode is read-only execution, not a question card. ACP history replay has no answered-question payload, so reopen cannot restore a record. See [Experimental Cursor CLI](docs/harnesses/cursor/cursor-cli-experimental.md).
-- **Multi-select questions** use a shared codexhost checkbox card when an Adapter emits `multiple: true`; selected values return as an array. Single-choice groups that allow Other use the same card so the normal chat message box remains available; other single-choice/text groups keep native Desktop cards. The shared card mounts in the transcript by default; Codex Host Settings → Appearance restores the above-Composer overlay. Grok preserves its native multi-select flag and every selected label. The shared Host/browser paths have regression coverage; attended installed Desktop tests returned Alpha and Beta together, and Grok and Claude answered in-chat records both returned after a `codexhost.app` restart. Other Adapter cells remain ◐ where native end-to-end multi-select has not been verified. OMP describes separate single-choice/text interactions; Pi remains single-choice and Antigravity rejects multi-select. See [Grok native questions](docs/harnesses/grok/questions.md), [Claude Code questions](docs/harnesses/claude-code/claude-code-questions.md), [Antigravity questions](docs/harnesses/antigravity/antigravity-question-interaction-postmortem.md) and [OMP interactions](docs/harnesses/omp/omp-interactions.md).
-- **Question countdown and activity reset** are currently exposed only by the Grok plugin and only on shared question cards. Text-only groups retain native Desktop cards without this countdown or activity forwarding. Countdown requires grokgod patch `0027`; acknowledged reset additionally requires `0028` and native `timeout_reset_on_activity = true`. Both rows are ◐ for these surface and build limits; other plugins do not currently expose them (—). These rows describe external Harness integration, not the native Codex model’s question tool. See [Grok native questions](docs/harnesses/grok/questions.md).
-- **Grok build and questions**: this fork uses a patched **grokgod Grok build**; patch-dependent behavior is not a stock-Grok guarantee. The Host handles native `_x.ai/ask_user_question` separately from MCP consent, including single-choice, text, Other and multi-select answers. The Plan picker uses native `session/set_mode`; after a plan finishes, Stay / Approve and implement / Exit without implementing use the `_x.ai/exit_plan_mode` Review plan card. Questions / cancellation stays ◐ because AskUserQuestion Chat about this / Skip interview remain unprojected. See [Grok plan mode](docs/harnesses/grok/plan-mode.md). Patch `0011-ask-question-timeout-action` owns configurable native timeout selection/reset; the Host does not invent a Grok timer or auto-answer. The display-only countdown additionally requires grokgod patch `0027-ask-question-timeout-metadata`; builds without native deadline metadata show no countdown. Activity resets and synchronized countdown updates additionally require `0028-ask-question-activity-ack` and native `timeout_reset_on_activity = true`. Trusted card interaction and later window focus regain reset the native budget; the display follows its acknowledgement; hover and initial display do not. See [Grok native questions](docs/harnesses/grok/questions.md).
-- **Grok MCP approval — Always allow** requires grokgod patch `0025-mcp-elicitation-persist` to forward the native persist offer and return the selected scope as MCP `_meta.persist`. Desktop offers it only when the request includes `always`; unpatched Grok has Allow once / Deny only. Allow this conversation is not exposed because native session lifetime is not qualified. See [Grok MCP elicitation](docs/harnesses/grok/mcp-elicitation.md).
-- **Subagents**: ✅ native status plus a read-only child transcript · ◐ native status only. Pi requires the supported `pi-subagents` extension protocol; OMP requires RPC subagent subscription support. These cells describe plugin projection, not whether an upstream Harness can run subagents internally.
-- **Computer Use / in-app browser** uses the user-installed Grok `cua_repl` MCP. This fork's Computer Use integration requires the patched grokgod Grok build with `0026-cua-turn-end-release`, including turn-boundary cleanup and the Mac Sky native release bridge, plus the installed ChatGPT Computer Use runtime. Stock-Grok parity is not established. IAB is saved intent only: the Host keeps its browser binding disabled pending Desktop authorization and a session-owned browser route. See [Grok Computer Use settings](docs/harnesses/grok/computer-use-settings.md).
-- **Generated images** describes Grok Imagine projection to Desktop `imageGeneration`, not general image-file creation. Grok is the only current adapter emitting this Item; the other cells mean no dedicated gallery projection. Projection has test coverage, but live gallery display remains unverified. See [Grok generated images](docs/harnesses/grok/generated-images.md).
-
-Devin: ◐ indicates conditional support or pending native validation. Thinking requires an advertised native selector; Fork and message editing require the negotiated revert extension and support only the same workspace. Delegation reception is implemented, but full delegation remains unverified. Thinking and history operations still need authenticated native acceptance; see the [integration guide](docs/harnesses/devin/devin-cli-acp-integration.md).
+| Capability | <a href="https://pi.dev/"><img alt="Pi" src="https://img.shields.io/badge/-000000?logo=pi&logoColor=white" /></a> | <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi" src="docs/imgs/harness-icon-omp-v5.svg" /></a> | <a href="https://code.claude.com/docs/en/quickstart"><img alt="Claude Code" src="https://img.shields.io/badge/-D97757?logo=claudecode&logoColor=white" /></a> | <a href="https://opencode.ai/docs/"><img alt="OpenCode" src="docs/imgs/harness-icon-opencode.svg" /></a> | <a href="https://grok.com/"><img alt="Grok" src="https://img.shields.io/badge/-000000?logo=x&logoColor=white" /></a> | <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DSH" src="https://img.shields.io/badge/-4D6BFE?logo=deepseek&logoColor=white" /></a> | <a href="https://antigravity.google/product/antigravity-cli"><img alt="AGY" src="docs/imgs/harness-icon-agy.svg" /></a> | <a href="https://www.codebuddy.cn/home/"><img alt="CodeBuddy" src="docs/imgs/harness-icon-codebuddy.svg" width="24" height="24" /></a> | <a href="https://www.workbuddy.ai/docs/workbuddy/Quickstart"><img alt="WorkBuddy" src="packages/adapters/workbuddy/assets/icon.svg" width="24" height="24" /></a> | <a href="https://cursor.com/docs/cli/overview"><img alt="Cursor" src="docs/imgs/harness-icon-cursor.svg" /></a> | <a href="https://hermes-agent.nousresearch.com/docs"><img alt="Hermes" src="docs/imgs/harness-icon-hermes.svg" /></a> | <a href="https://qoder.com/cli"><img alt="Qoder" src="packages/adapters/qoder/assets/icon.svg" width="28" height="28" /></a> | <a href="https://moonshotai.github.io/kimi-code/"><img alt="Kimi Code" src="packages/adapters/kimi-code/assets/icon.svg" width="28" height="28" /></a> | <a href="docs/harnesses/copilot/copilot-harness-integration.md"><img alt="Copilot" src="packages/adapters/copilot/assets/icon.png" width="28" height="28" /></a> | <a href="https://github.com/QwenLM/qwen-code"><img alt="Qwen Code" src="packages/adapters/qwen-code/assets/icon.svg" width="28" height="28" /></a> | <a href="docs/harnesses/devin/devin-cli-acp-integration.md"><img alt="Devin" src="packages/adapters/devin/assets/icon.svg" width="28" height="28" /></a> |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Streaming responses | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tool status | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Edit Diff | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| Questions / cancellation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — / ✅ |
+| Model / Thinking selection | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ / — | ✅ / ◐ |
+| Tool approvals | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Permission modes | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Cross-Agent task collaboration | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ |
+| Usage | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Fork | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | — | ◐ |
+| Context compaction | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | — |
+| Slash commands | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Edit previous message | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ◐ |
 
 </details>
 
-## Cross-Agent Collaboration
+<a id="collaboration"></a>
 
-Type `#` in the chat input to choose an Agent to delegate a task to, or to find commands and skills available for the selected Harness.
+## Agents hand work to each other
 
-Ask the current Agent to hand off a self-contained task to another Harness. For example:
+Type `#` in the chat input, pick an Agent, and hand it a self-contained task:
 
 > Have `#claude-code` review this change on its own and flag any compatibility risks.
 >
 > Have `#pi` figure out why this test is flaky.
 >
 > Have `#omp` implement this feature while I keep working on the docs.
->
-> Have `#opencode` verify this fix in a separate Thread and run the related tests.
 
-CodexHost spins up a separate Native Session in the target Harness. It shows up in the Codex Desktop conversation list, so you can open it anytime to check progress or pick up the conversation.
+Every delegated task runs as a separate native session in the target Agent. It shows up in the conversation list, so you can open it anytime to check progress or continue the conversation. When it finishes, the result returns to the session that started it.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <p><strong>Agents work in parallel</strong><br /><sub>Each in its own session, without interfering</sub></p>
+      <img src="docs/product/images/multi-agent-parallel-sessions.png" alt="Delegated sessions of several Agents running in parallel in the sidebar">
+    </td>
+    <td width="50%" valign="top">
+      <p><strong>Reports back when done</strong><br /><sub>The originating session is notified when a delegated task ends</sub></p>
+      <img src="docs/product/images/multi-agent-completion-notice.png" alt="Notice shown in the originating session after a delegated task completes">
+    </td>
+  </tr>
+</table>
+
+**For developers:** local programs such as terminal scripts, Claude Desktop and always-on bots can also hand tasks to these Agents and wait for results through the `codexhost delegate` / `codexhost thread` commands or MCP. See [external clients](docs/architecture/external-clients.md).
 
 <details>
-<summary><h3 id="remote-harness">Remote Harness</h3></summary>
+<summary><h3 id="remote-harness">Advanced: use Agents on another machine from your local UI</h3></summary>
 
-Drive Harnesses on another machine from your local Codex Desktop: tasks run remotely, the UI stays local. Both machines need the same codexhost version.
+Tasks run on the other machine while the UI stays in your local Codex Desktop. Both machines need the same CodexHost version.
 
 | Remote machine | How to connect |
 | --- | --- |
@@ -253,7 +212,7 @@ Drive Harnesses on another machine from your local Codex Desktop: tasks run remo
 
 #### SSH
 
-Before you start, add the remote machine in Codex Desktop under **Settings → Connections → SSH**. Your local machine can run macOS, Linux, or Windows.
+Before you start, add the remote machine in Codex Desktop under **Settings → Connections → SSH**. Your local machine can run macOS, Linux or Windows.
 
 <div align="center">
   <img width="70%" src="docs/imgs/remote-ssh-connections.png" alt="SSH connections added under Settings → Connections → SSH in Codex Desktop">
@@ -269,31 +228,17 @@ Before you start, add the remote machine in Codex Desktop under **Settings → C
    ```
 
 2. On your local machine, launch Codex Desktop through codexhost and open the SSH workspace.
-3. Pick a Harness from the composer's Agent / Model selector.
+3. Pick an Agent from the composer's Agent / Model selector.
 
-[SSH setup, diagnostics, and uninstall →](docs/platforms/remote/remote-ssh-host.md)
+[SSH setup, diagnostics and uninstall →](docs/platforms/remote/remote-ssh-host.md)
 
 #### Remote Control (Experimental)
 
-Use Harnesses on a Windows machine from another computer, built on the pairing and sign-in of Codex Desktop's official Remote Control.
+Use Agents on a Windows machine from another computer, built on the pairing and sign-in of Codex Desktop's official Remote Control.
 
-Before you start, make sure official Remote Control can already run Codex tasks. No public services or ports are opened, and Harness credentials never leave the Windows machine.
+Before you start, make sure official Remote Control can already run Codex tasks. No public services or ports are opened, and Agent credentials never leave the Windows machine.
 
-[Remote Control setup, transport boundary, and diagnostics →](docs/platforms/remote/remote-control-host.md)
-
-</details>
-
-<details>
-<summary><h3>How it works</h3></summary>
-
-Most multi-agent clients build their own chat UI and plug Harnesses in through a common protocol.
-
-CodexHost does it differently:
-
-- **Desktop:** extends the official Codex Desktop via CDP / Electron Inspector — no rebuilt chat UI, no patched installer.
-- **Protocol:** a CLI Shim sits in front of the official app-server and passes native Codex requests through untouched.
-- **Harnesses:** each Harness is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs and approvals render in Codex Desktop's native UI. Questions use native Desktop cards or shared codexhost cards according to their fields; see Feature Status.
-- **Orchestration:** delegated tasks run as independent native sessions in the target Harness; the caller can wait for the result or let it run in the background.
+[Remote Control setup, transport boundary and diagnostics →](docs/platforms/remote/remote-control-host.md)
 
 </details>
 
@@ -320,9 +265,22 @@ CodexHost does it differently:
   </tr>
 </table>
 
-## Development
+<details>
+<summary><h3>Architecture and development</h3></summary>
 
-Please read the [contributing guide](CONTRIBUTING.md) before opening an issue or PR. See [repository maintenance automation](docs/operations/repository-maintenance.md) for PR title labels, CI summaries, and pre-release checks.
+#### How it works
+
+Most multi-agent clients build their own chat UI and plug Agents in through a common protocol. CodexHost does it differently:
+
+- **Desktop:** extends the official Codex Desktop via CDP / Electron Inspector, with no rebuilt chat UI and no patched installer
+- **Protocol:** a CLI Shim sits in front of the official app-server and passes native Codex requests through untouched
+- **Agents:** each Agent is integrated through its own native interface where one exists (Pi over RPC, Claude Code via the Agent SDK), falling back to [ACP](https://agentclientprotocol.com/) otherwise. Streaming, tool status, diffs, approvals and questions all render in Codex Desktop's native UI
+- **Orchestration:** delegated tasks run as independent native sessions in the target Agent; the caller can wait for the result or let it run in the background
+- **Web:** Desktop and Web connect to the same background Host, so there is one copy of each session, approval and question, and both sides see the same state
+
+#### Development
+
+Please read the [contributing guide](CONTRIBUTING.md) before opening an issue or PR. See [repository maintenance automation](docs/operations/repository-maintenance.md) for PR title labels, CI summaries and pre-release checks.
 
 Requirements: the official Codex Desktop, Node.js 22.19+ or 24, and Rust.
 
@@ -333,10 +291,14 @@ npm ci
 npm start
 ```
 
-To run the current source with a specific runtime version, use `npm start 0.12.0` (prereleases such as `0.13.0-rc.1` are also accepted). Host status, console version and update-check version reporting use this value. Without a version argument the version remains `<workspace-version>-dev`; `npm start 0.12.0 -- --no-build` reuses artifacts after building once. The override lasts for this launch and does not modify version files or publish packages. Source installations still lack packaged self-update resources; remote npm installation downloads the published package with that version, not the local source.
+| Command | Purpose |
+| --- | --- |
+| `npm start` | Build and start Desktop. |
+| `npm start web` | Build and start Web with Web UI hot reload (default). |
+| `npm start web -- --no-watch` | Build and start Web without hot reload. |
+| `npm stop` | Stop the current user's local codexhost services across worktrees. |
 
-
-### Runtime Architecture
+#### Runtime architecture
 
 Using Pi as an example, here is how a single request flows from left to right: Desktop → shared layer → Pi plugin → native process.
 
@@ -344,18 +306,18 @@ Using Pi as an example, here is how a single request flows from left to right: D
   <img width="100%" src="docs/imgs/pi-runtime-architecture.png" alt="Runtime architecture using Pi: Desktop to the shared layer, then the Pi plugin and native process">
 </div>
 
-### Adding a Harness
+#### Adding a Harness
 
-Most of the work is implementing the plugin's Manifest, factory, Adapter, and Session, plus the native communication and translation logic. The Renderer still has some hard-coded wiring, so full Desktop integration takes extra work.
+Most of the work is implementing the plugin's Manifest, factory, Adapter and Session, plus the native communication and translation logic. The Renderer still has some hard-coded wiring, so full Desktop integration takes extra work.
+Tip: point your coding Agent at the in-repo [codexhost-add-harness Skill](.agents/skills/codexhost-add-harness/SKILL.md). It covers plugin structure, the shared Adapter interface, capability implementation and testing requirements.
 
-Tip: point your coding Agent at the in-repo [codexhost-add-harness Skill](.agents/skills/codexhost-add-harness/SKILL.md). It covers plugin structure, the shared Adapter interface, capability implementation, and testing requirements.
-
-Desktop Grok Threads receive CodexHost session rules through Grok's official ACP `session/new` `_meta.rules` field. Host Runtime retires leftover Host-owned `~/.grok/rules/codexhost-desktop.md` copies and leaves user-edited files in place. New Harness plugins do not add a home-rule copy. Details: [operations/cpa-live-voice-desktop-hook.md](docs/operations/cpa-live-voice-desktop-hook.md).
+</details>
 
 ## Acknowledgements
 
 - Thanks to the [LINUX DO](https://linux.do/) community for their ongoing support.
 - Thanks to [Paseo](https://github.com/getpaseo/paseo), whose approach to multi-Harness integration and architecture inspired ours.
+- Thanks to [DSH (DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness); CodexHost's Web client is built on DSH Web.
 
 ## Contributors
 
@@ -374,3 +336,4 @@ Thanks to everyone who has contributed to CodexHost.
     <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=bytepioneer-ai/codex-host&type=date&legend=top-left" />
   </picture>
 </a>
+

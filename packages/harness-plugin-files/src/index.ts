@@ -5,6 +5,7 @@ export {
   type InstalledHarnessPlugin,
 } from "./discovery.js";
 export { HarnessLaunchSettingsStore } from "./launch-settings.js";
+export { HarnessPreferencesStore, HarnessPreferenceConflict } from "./preferences.js";
 export {
   GROK_BROWSER_BINDING_SUPPORTED,
   GROK_CUA_REPL_SERVER,

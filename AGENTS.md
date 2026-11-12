@@ -28,8 +28,12 @@
   - `host-runtime/`: Host composition and installed plugin loading
   - `update-manager/`: background update preparation
   - `console-server/`: local codexhost console that works without Codex Desktop (diagnostics, updates, Harness launch settings)
+  - `web-server/`: local Web Host that serves the browser/phone app
+  - `remote-relay/`: optional self-hosted phone/browser Relay
+  - `enrolled-mcp-relay/`: outbound enrolled MCP hop for unmanaged clients
   - `shared-contracts/`: browser-safe types and runtime schemas
   - `renderer-extension/`: browser JavaScript extension
+- `apps/web-ui/`: browser and phone Web client imported from DSH Web
 
 ### Build and Release
 
@@ -59,6 +63,7 @@ Use the applicable repository-local skills below when their task occurs; they su
 | Overview table of a batch of PRs with a 1–5 recommendation score | [codexhost-pr-overview](.agents/skills/codexhost-pr-overview/SKILL.md) |
 | Reviewing a PR or local diff for correctness and boundaries | [codexhost-code-review](.agents/skills/codexhost-code-review/SKILL.md) |
 | Selecting local checks before pushing or claiming checks pass | [codexhost-pre-push-checks](.agents/skills/codexhost-pre-push-checks/SKILL.md) |
+| Testing runtime behavior in isolated Web, Host, Harness, or end-to-end environments | [codexhost-isolated-testing](.agents/skills/codexhost-isolated-testing/SKILL.md) |
 | Finding evidence-backed simplification candidates (read-only audit) | [codexhost-find-simplifications](.agents/skills/codexhost-find-simplifications/SKILL.md) |
 | Auditing comments and docs for reasoning-transcript leakage | [codexhost-trim-cot-leakage](.agents/skills/codexhost-trim-cot-leakage/SKILL.md) |
 
@@ -88,7 +93,8 @@ Existing Harness integration and Desktop update audit skills remain applicable t
 - Delegation parent and watch recipient must identify the actual calling chat. Never copy another process's `CODEXHOST_THREAD_ID`/`CODEX_THREAD_ID` or source a shared runtime environment file to obtain an identity. If this session lacks its own supplied identity, use its independently verified chat ID with `--parent-thread`/`--notify`; otherwise report the missing caller context. Verify the returned parent before registering a watch. A valid runtime connection, unique active chat or copied environment is not caller provenance.
 
 - Choose build and validation commands from `package.json`, not a copied command catalog. For focused tests, use the repository configuration in `tests/vitest.config.js` or `tests/e2e/playwright.config.js`, and the owning `Cargo.toml` for Rust test features.
-- To build and launch from source, run `npm start` at the repository root; `npm start -- --no-build` reuses existing artifacts. On macOS/Windows this stops running Codex Desktop processes before launch. Use it when launching is intended, not as a routine validation command; implementation is in `tools/dev-desktop/run.mjs`. To inspect a Sparkle candidate without stopping production Desktop, use `npm run scratch:candidate -- --print` or `--launch` (`tools/dev-desktop/scratch-candidate.mjs`). Never point it at `/Applications/ChatGPT.app`.
+- To build and launch from source, run `npm start` at the repository root for Desktop or `npm start web` for Web; both restart the corresponding interface after building, reusing an unchanged shared Host. A changed Host restarts automatically only when the other interface is closed; otherwise a post-build prompt defaults to keeping Host (non-interactive runs keep it and warn). `--restart-host` / `--keep-host` override this choice; no running Host is left to the interface's `host ensure`. `--no-build` reuses existing artifacts and applies the same Host decision. Restarting Host interrupts its tasks. `npm start web` rebuilds Web UI sources on edit and swaps them into open pages by default; `--no-watch` disables this, while explicit `--watch` remains supported. `--no-build` does not disable watching. On macOS/Windows the Desktop command stops running Codex Desktop processes before launch. Use it when launching is intended, not as a routine validation command; implementation is in `tools/dev-desktop/run.mjs`. To inspect a Sparkle candidate without stopping production Desktop, use `npm run scratch:candidate -- --print` or `--launch` (`tools/dev-desktop/scratch-candidate.mjs`). Never point it at `/Applications/ChatGPT.app`.
+- `npm stop` stops the current user's identifiable local codexhost services across worktrees (Web/watchers, managed Desktop, shared Hosts and Console), interrupting tasks and Web terminals without deleting data. It signals verified service processes and waits for native supervisors to finish cleanup, without using the invoking checkout's build. Run only when stopping is intended, from a separate terminal; never use it as routine validation or from a Host-owned task. Implementation: `tools/dev-desktop/stop.mjs`.
 - Small, low-risk changes do not require tests. For high-risk or cross-package changes, or when explicitly requested, add focused tests for changed behavior and boundary conditions; do not run full test suites by default.
 - Do not claim a check passed unless it was executed. Report skipped or blocked checks and the reason.
 - A change is complete only when implementation, contracts, tests, and affected documentation agree.

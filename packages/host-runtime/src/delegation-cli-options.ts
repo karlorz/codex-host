@@ -4,10 +4,14 @@ import { DelegationControlError } from "./delegation-types.js";
 const FREE_TEXT_OPTIONS: ReadonlySet<string> = new Set(["--task", "--task-name", "--message"]);
 /** Presence flags; a following `true`/`false` is consumed, otherwise the flag is true. */
 const FLAG_OPTIONS: ReadonlySet<string> = new Set(["--fallback-default", "--machine", "--session"]);
+/** Options that may be given more than once; every value is kept in order. */
+const REPEATABLE_OPTIONS: ReadonlySet<string> = new Set(["--ref"]);
 
 export interface DelegationCliArguments {
   positionals: string[];
+  /** For a repeatable option, the last value; all values are in `repeated`. */
   options: Map<string, string>;
+  repeated: Map<string, string[]>;
 }
 
 /**
@@ -25,6 +29,7 @@ export function consumesNextArgument(argument: string, next: string | undefined)
 export function parseDelegationArguments(arguments_: readonly string[]): DelegationCliArguments {
   const positionals: string[] = [];
   const parsed = new Map<string, string>();
+  const repeated = new Map<string, string[]>();
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (!argument) continue;
@@ -34,7 +39,7 @@ export function parseDelegationArguments(arguments_: readonly string[]): Delegat
     }
     const separator = argument.indexOf("=");
     const name = separator === -1 ? argument : argument.slice(0, separator);
-    if (parsed.has(name))
+    if (parsed.has(name) && !REPEATABLE_OPTIONS.has(name))
       throw new DelegationControlError("INVALID_ARGUMENT", `${name} may only be provided once`);
     let optionValue: string | undefined;
     if (separator !== -1) {
@@ -53,6 +58,8 @@ export function parseDelegationArguments(arguments_: readonly string[]): Delegat
       throw new DelegationControlError("INVALID_ARGUMENT", `${name} must be true or false`);
     }
     parsed.set(name, optionValue);
+    if (REPEATABLE_OPTIONS.has(name))
+      repeated.set(name, [...(repeated.get(name) ?? []), optionValue]);
   }
-  return { positionals, options: parsed };
+  return { positionals, options: parsed, repeated };
 }
