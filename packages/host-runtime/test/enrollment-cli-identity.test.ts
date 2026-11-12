@@ -114,6 +114,38 @@ describe("enrollment CLI identity", () => {
     });
   });
 
+  it("does not treat thread-list --client as enrollment identity", async () => {
+    const dataDir = await tempDataDir();
+    await writeEnrollmentStore(
+      enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot"),
+      record({
+        clientId: "grok-bot",
+        token: "grok-token",
+        threadId: "grok-thread",
+        enrollmentId: "enrollment-grok",
+      }),
+    );
+    const connection = await resolveCliRuntimeConnection({
+      environment: { CODEXHOST_DATA_DIR: dataDir },
+      parsed: parseDelegationArguments(["--client", "muse"]),
+      nowMs: NOW,
+    });
+    expect(connection).toMatchObject({
+      source: "enrollment",
+      token: "grok-token",
+      callerThreadId: "grok-thread",
+    });
+    await expect(
+      resolveCliRuntimeConnection({
+        environment: { CODEXHOST_DATA_DIR: await tempDataDir() },
+        parsed: parseDelegationArguments(["--client", "grok-bot"]),
+        nowMs: NOW,
+      }),
+    ).rejects.toMatchObject({
+      details: { reason: "missing_runtime_environment" },
+    });
+  });
+
   it.each(["read", "wait"])(
     "uses enrollment credentials for thread %s despite inherited Host identity",
     async (command) => {

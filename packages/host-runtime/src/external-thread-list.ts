@@ -212,21 +212,22 @@ export interface ExternalThreadListInput {
   placementOf?(threadId: string): StoredSectionPlacementV1 | undefined;
 }
 
-/** The list visibility predicate without runtime lookup or row projection. */
+/** Visibility without row projection. Runtime is read only for scoped scheduled-loop filtering. */
 export function filterExternalThreadListRecords(
   input: Pick<ExternalThreadListInput, "records" | "query" | "placementOf"> & {
     runtimeFor?(threadId: string): ExternalThreadListRuntimeState | null;
   },
 ): StoredThreadRecordV1[] {
   const byId = new Map(input.records.map((record) => [record.hostThreadId, record]));
-  const hasRuntime = input.runtimeFor !== undefined;
+  const scoped = input.query.parentThreadId !== null || input.query.ancestorThreadId !== null;
+  const needsRuntime = scoped && input.runtimeFor !== undefined;
   return input.records.filter((record) =>
     includesExternalRecord(
       record,
       input.query,
       byId,
       input.placementOf?.(record.hostThreadId)?.section.id ?? null,
-      hasRuntime ? (input.runtimeFor?.(record.hostThreadId) ?? null) : undefined,
+      needsRuntime ? (input.runtimeFor?.(record.hostThreadId) ?? null) : undefined,
     ),
   );
 }

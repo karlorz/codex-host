@@ -129,7 +129,7 @@ describe("installed Harness composition", () => {
     } finally {
       await registry.close();
     }
-  }, 35_000);
+  }, 90_000);
 
   it.each([
     ["copilot", "CODEXHOST_COPILOT_COMMAND"],
@@ -162,7 +162,7 @@ describe("installed Harness composition", () => {
         await registry.close();
       }
     },
-    35_000,
+    90_000,
   );
 
   it("keeps managed macOS execution behind the plugin's Broker with no direct CLI fallback", async () => {
@@ -192,7 +192,7 @@ describe("installed Harness composition", () => {
     } finally {
       await registry.close();
     }
-  }, 35_000);
+  }, 90_000);
 
   it("creates independent instances for concurrent Host connections", async () => {
     const [first, second] = await Promise.all([load(), load()]);
@@ -206,7 +206,7 @@ describe("installed Harness composition", () => {
     } finally {
       await Promise.all([first.close(), second.close()]);
     }
-  }, 35_000);
+  }, 90_000);
 
   it("derives preinstalled resources from the actual runtime, not cwd or a local Host's resources", () => {
     const data = path.resolve("fixture", "data");

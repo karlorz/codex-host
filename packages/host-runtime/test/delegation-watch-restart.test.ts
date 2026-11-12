@@ -70,6 +70,7 @@ function service(
 ): DelegationWatchService {
   return new DelegationWatchService(fake, {
     pollIntervalMs: POLL_MS,
+    quietMs: 0,
     restoreGraceMs: GRACE_MS,
     store,
   });
@@ -414,6 +415,7 @@ describe("DelegationWatchService across a Host Runtime restart", () => {
     const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
     const watches = new DelegationWatchService(fake, {
       pollIntervalMs: POLL_MS,
+      quietMs: 0,
       store: failing,
       diagnose,
     });

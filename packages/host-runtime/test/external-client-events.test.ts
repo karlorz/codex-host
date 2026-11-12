@@ -133,6 +133,7 @@ describe("watches that notify an external client", () => {
     const append = vi.fn(async () => []);
     const service = new DelegationWatchService(fake, {
       pollIntervalMs: 1_000,
+      quietMs: 0,
       clientEvents: { append },
     });
     await expect(
@@ -163,6 +164,7 @@ describe("watches that notify an external client", () => {
     const append = vi.fn().mockRejectedValueOnce(new Error("disk full")).mockResolvedValue([]);
     const service = new DelegationWatchService(runtime(status), {
       pollIntervalMs: 1_000,
+      quietMs: 0,
       clientEvents: { append },
     });
     await service.watch({ threadId: "child", notifyThreadId: "client:bot", timeoutMs: 60_000 });
