@@ -361,7 +361,7 @@ describe("client enrollment store and Runtime", () => {
     });
     const connection = await resolveCliRuntimeConnection({
       environment: { CODEXHOST_DATA_DIR: dataDir },
-      parsed: { positionals: ["read"], options: new Map() },
+      parsed: { positionals: ["read"], options: new Map(), repeated: new Map() },
       nowMs: Date.parse("2026-11-07T00:00:00.000Z"),
     });
     expect(connection.endpoint).toBe("http://127.0.0.1:50843");
@@ -908,9 +908,7 @@ describe("client enrollment store and Runtime", () => {
     expect(JSON.parse(outputText(diagnosticOutput))).toMatchObject({
       error: {
         code: "RUNTIME_UNREACHABLE",
-        message: expect.stringContaining(
-          "CODEXHOST_RUNTIME_ENDPOINT and CODEXHOST_RUNTIME_TOKEN are required",
-        ),
+        message: expect.stringContaining("No local CLI credentials were found"),
         details: {
           reason: "missing_runtime_environment",
           missingEnvironmentVariables: [

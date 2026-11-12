@@ -13,6 +13,7 @@ import {
   type DelegationStartInput,
   type DelegationWatchApi,
   type HarnessInspectInput,
+  type HarnessListInput,
   type ThreadCancelInput,
   type ThreadListInput,
   type ThreadSendInput,
@@ -41,7 +42,7 @@ function annotateEnrollmentBusy(
   });
 }
 
-function errorBody(error: unknown): {
+export function errorBody(error: unknown): {
   error: { code: string; message: string; details?: unknown };
 } {
   if (error instanceof DelegationControlError) {
@@ -61,7 +62,7 @@ function errorBody(error: unknown): {
   };
 }
 
-function writeJson(response: ServerResponse, status: number, value: unknown): void {
+export function writeJson(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(`${JSON.stringify(value)}\n`);
 }
@@ -112,7 +113,7 @@ function authenticateControlRequest(
   return matchesBearerToken(header, hostToken) ? { kind: "host" } : undefined;
 }
 
-async function jsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+export async function jsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -171,6 +172,40 @@ async function startWithWatch(
     timeoutMs: watchTimeoutMs as number,
   });
   return { ...result, watch };
+}
+
+/** The delegation routes shared by the Host control server and the external client listener. */
+export async function routeDelegationRequest(
+  handlers: { api: DelegationControlApi; watchApi?: DelegationWatchApi },
+  route: string | undefined,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  switch (route) {
+    case "/v1/harness/list":
+      return handlers.api.listHarnesses(body as HarnessListInput);
+    case "/v1/harness/inspect":
+      return handlers.api.inspect(body as unknown as HarnessInspectInput);
+    case "/v1/delegate/start":
+      return body.watchTimeoutMs === undefined
+        ? handlers.api.start(body as unknown as DelegationStartInput)
+        : startWithWatch(handlers.api, watchApi(handlers.watchApi), body);
+    case "/v1/thread/send":
+      return handlers.api.send(body as unknown as ThreadSendInput);
+    case "/v1/thread/cancel":
+      return handlers.api.cancel(body as unknown as ThreadCancelInput);
+    case "/v1/thread/read":
+      return handlers.api.read(body as unknown as ThreadReadInput);
+    case "/v1/thread/wait":
+      return handlers.api.wait(body as unknown as ThreadWaitInput);
+    case "/v1/thread/watch":
+      return watchApi(handlers.watchApi).watch(body as unknown as ThreadWatchInput);
+    case "/v1/thread/watches":
+      return watchApi(handlers.watchApi).watches();
+    case "/v1/thread/list":
+      return handlers.api.list(body as unknown as ThreadListInput);
+    default:
+      throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+  }
 }
 
 export async function startDelegationControlServer(input: {
@@ -251,66 +286,28 @@ export async function startDelegationControlServer(input: {
         }
         input.enrollment.authorize(principal.record, enrollmentActionForRoute(request.url, body));
       }
-      switch (request.url) {
-        case "/v1/harness/list":
-          writeJson(response, 200, await input.api.listHarnesses());
-          return;
-        case "/v1/harness/inspect":
-          writeJson(response, 200, await input.api.inspect(body as unknown as HarnessInspectInput));
-          return;
-        case "/v1/delegate/start":
-          writeJson(
-            response,
-            200,
-            body.watchTimeoutMs === undefined
-              ? await input.api.start(body as unknown as DelegationStartInput)
-              : await startWithWatch(input.api, watchApi(input.watchApi), body),
-          );
-          return;
-        case "/v1/thread/send":
-          writeJson(response, 200, await input.api.send(body as unknown as ThreadSendInput));
-          return;
-        case "/v1/thread/cancel":
-          writeJson(response, 200, await input.api.cancel(body as unknown as ThreadCancelInput));
-          return;
-        case "/v1/thread/read":
-          writeJson(response, 200, await input.api.read(body as unknown as ThreadReadInput));
-          return;
-        case "/v1/thread/wait":
-          writeJson(response, 200, await input.api.wait(body as unknown as ThreadWaitInput));
-          return;
-        case "/v1/thread/watch":
-          writeJson(
-            response,
-            200,
-            await watchApi(input.watchApi).watch(body as unknown as ThreadWatchInput),
-          );
-          return;
-        case "/v1/thread/watches": {
-          const watches = await watchApi(input.watchApi).watches();
-          writeJson(
-            response,
-            200,
-            principal.kind === "enrollment" && input.enrollment
-              ? input.enrollment.filterWatches(principal.record, watches)
-              : watches,
-          );
-          return;
-        }
-        case "/v1/thread/list": {
-          const list = await input.api.list(body as unknown as ThreadListInput);
-          writeJson(
-            response,
-            200,
-            principal.kind === "enrollment" && input.enrollment
-              ? input.enrollment.filterList(principal.record, list)
-              : list,
-          );
-          return;
-        }
-        default:
-          throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+      const result = await routeDelegationRequest(input, request.url, body);
+      if (request.url === "/v1/thread/watches") {
+        writeJson(
+          response,
+          200,
+          principal.kind === "enrollment" && input.enrollment
+            ? input.enrollment.filterWatches(principal.record, result as never)
+            : result,
+        );
+        return;
       }
+      if (request.url === "/v1/thread/list") {
+        writeJson(
+          response,
+          200,
+          principal.kind === "enrollment" && input.enrollment
+            ? input.enrollment.filterList(principal.record, result as never)
+            : result,
+        );
+        return;
+      }
+      writeJson(response, 200, result);
     })().catch((error) => {
       const annotated = annotateEnrollmentBusy(error, principal);
       writeJson(response, enrollmentHttpStatus(annotated), errorBody(annotated));

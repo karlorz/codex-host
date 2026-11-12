@@ -32,6 +32,7 @@ import {
 import { createTwoFilesPatch } from "diff";
 import path from "node:path";
 import { summarizeFileChanges } from "./file-change-summary.js";
+import { isFileMutatingTool, projectFileOperations } from "./file-operation-projection.js";
 
 import {
   projectCodexApprovalRequest,
@@ -196,24 +197,6 @@ export function toolCommandLine(toolName: string, args: JsonValue): string | und
 
 function compactToolName(toolName: string): string {
   return toolName.toLowerCase().replaceAll(/[_-]/g, "");
-}
-
-function isFileMutatingTool(toolName: string): boolean {
-  return [
-    "edit",
-    "editfile",
-    "fileedit",
-    "strreplace",
-    "searchreplace",
-    "applypatch",
-    "replace",
-    "multiedit",
-    "write",
-    "writefile",
-    "filewrite",
-    "create",
-    "createfile",
-  ].includes(compactToolName(toolName));
 }
 
 function isWriteTool(toolName: string): boolean {
@@ -457,6 +440,23 @@ function toolContentItems(item: Extract<HostItem, { type: "toolExecution" }>): J
   );
 }
 
+function collabAgentStatus(
+  status: Extract<HostItem, { type: "subagentDelegation" }>["subagents"][number]["status"],
+): string {
+  switch (status) {
+    case "pending":
+      return "pendingInit";
+    case "running":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "errored";
+    case "interrupted":
+      return "interrupted";
+  }
+}
+
 /** Read-only native activities never advertise a writable spawnAgent receiver. */
 function projectSubagentActivities(
   item: Extract<HostItem, { type: "subagentDelegation" }>,
@@ -513,6 +513,7 @@ function projectItem(
   outcome: HostItemOutcome | null,
   defaultCwd: string,
   includeCommandOutput = true,
+  senderThreadId?: string,
 ): JsonObject {
   switch (item.type) {
     case "userMessage":
@@ -599,8 +600,33 @@ function projectItem(
         failure: null,
         transparentBackground: null,
       };
-    case "subagentDelegation":
-      throw new Error("Subagent delegation requires per-child activity projection");
+    case "subagentDelegation": {
+      const primary = item.subagents[0];
+      // Codex exposes one configuration per Item, not per receiver. Do not
+      // attribute the first child's configuration to a heterogeneous group.
+      const sameConfiguration = item.subagents.every(
+        (subagent) =>
+          subagent.model === primary?.model &&
+          subagent.reasoningEffort === primary?.reasoningEffort,
+      );
+      return {
+        id: item.itemId,
+        type: "collabAgentToolCall",
+        tool: item.operation === "spawn" ? "spawnAgent" : "sendInput",
+        status: itemStatus(outcome),
+        senderThreadId: senderThreadId ?? "",
+        receiverThreadIds: item.subagents.map(({ subagentId }) => subagentId),
+        prompt: item.prompt ?? null,
+        model: sameConfiguration ? (primary?.model ?? null) : null,
+        reasoningEffort: sameConfiguration ? (primary?.reasoningEffort ?? null) : null,
+        agentsStates: Object.fromEntries(
+          item.subagents.map(({ subagentId, status, resultSummary }) => [
+            subagentId,
+            { status: collabAgentStatus(status), message: resultSummary ?? null },
+          ]),
+        ),
+      };
+    }
   }
 }
 
@@ -697,15 +723,18 @@ export function projectHistoricalTurn(input: HistoricalTurnProjectionInput): Jso
     }
     if (item.type === "subagentDelegation") return projectSubagentActivities(item);
     if (item.type === "reasoning" && !reasoningDisplayText(item.text)) return [];
+    const mediaItem = item.type === "agentMessage" ? projectAgentMessageMedia(item, cwd) : item;
     return item.type === "reasoning"
       ? [projectItem(item, outcome, cwd), projectReasoningTranscriptItem(item, outcome, cwd)]
       : [
-          projectItem(
-            item.type === "agentMessage" ? projectAgentMessageMedia(item, cwd) : item,
-            outcome,
-            cwd,
-            true,
-          ),
+          {
+            ...projectItem(mediaItem, outcome, cwd, true, input.threadId ?? ""),
+            ...(item.type === "agentMessage" &&
+            mediaItem.type === "agentMessage" &&
+            mediaItem.text !== item.text
+              ? { codexhostNativeText: item.text }
+              : {}),
+          },
         ];
   };
   const entries = snapshot.items.map((entry) => ({ entry, projected: projectEntry(entry) }));
@@ -714,7 +743,7 @@ export function projectHistoricalTurn(input: HistoricalTurnProjectionInput): Jso
     lastVisible,
     historicalStatus(snapshot.outcome) === "completed",
   );
-  return {
+  const turn = {
     id: turnId,
     status: historicalStatus(snapshot.outcome),
     items: [
@@ -737,6 +766,14 @@ export function projectHistoricalTurn(input: HistoricalTurnProjectionInput): Jso
     completedAt: hasTiming ? Math.floor(completedAtMs / 1000) : null,
     durationMs: hasTiming ? completedAtMs - startedAtMs : null,
     itemsView: "full",
+  };
+  return {
+    ...turn,
+    codexhostFileOperations: projectFileOperations(
+      snapshot.items,
+      turn.items,
+      ({ item, outcome }) => projectItem(item, outcome, cwd, true, input.threadId ?? ""),
+    ),
   };
 }
 
@@ -769,6 +806,7 @@ function diffText(changes: HostFileChange[]): string {
 export class CodexTurnProjector {
   readonly #cwd: string;
   readonly #input: HostTurnSnapshot["input"];
+  readonly #snapshotInput: HostTurnSnapshot["input"];
   readonly #clientUserMessageId: string | null;
   readonly #interactions = new Map<HostInteractionId, ProjectedInteraction>();
   readonly #items = new Map<HostItemId, ProjectedItem>();
@@ -790,12 +828,15 @@ export class CodexTurnProjector {
     cwd: string;
     startedAtMs: number;
     initialInput?: HostTurnSnapshot["input"];
+    /** Accepted input for independent viewers, without altering Desktop's optimistic echo. */
+    snapshotInput?: HostTurnSnapshot["input"];
     clientUserMessageId?: string;
   }) {
     this.#threadId = input.threadId;
     this.#turnId = input.turnId;
     this.#cwd = input.cwd;
     this.#input = input.initialInput ?? [];
+    this.#snapshotInput = input.snapshotInput ?? this.#input;
     this.#clientUserMessageId = input.clientUserMessageId ?? null;
     this.#startedAtMs = input.startedAtMs;
     this.#startedAt = Math.floor(input.startedAtMs / 1000);
@@ -853,6 +894,47 @@ export class CodexTurnProjector {
       completedAt: null,
       durationMs: null,
       itemsView: "full",
+    };
+  }
+
+  /** Complete materialized state for snapshot clients. pendingTurn() remains
+   * the Desktop-specific wire shape; it deliberately omits several live Items.
+   */
+  snapshotTurn(base: JsonObject = this.pendingTurn()): JsonObject {
+    const turn = {
+      ...base,
+      items: [
+        ...this.#projectInput(this.#snapshotInput),
+        ...this.#wireItemOrder.flatMap((itemId) => {
+          const projected = this.#items.get(itemId);
+          if (!projected?.wireStarted) return [];
+          const item = this.#projectItem(
+            itemId === this.#fileItemId ? this.#fileSummary() : projected.item,
+            projected.outcome,
+          );
+          // Desktop's compaction wire Item has no status; snapshot clients need
+          // its own outcome even while the containing Turn continues.
+          if (projected.item.type === "contextCompaction") {
+            item.status =
+              projected.outcome?.status === "cancelled"
+                ? "interrupted"
+                : itemStatus(projected.outcome);
+            if (projected.outcome?.status === "failed")
+              item.error = { message: projected.outcome.error.message };
+            if (projected.outcome?.status === "cancelled" && projected.outcome.reason)
+              item.error = { message: projected.outcome.reason };
+          }
+          return [item];
+        }),
+      ],
+    };
+    return {
+      ...turn,
+      codexhostFileOperations: projectFileOperations(
+        [...this.#items.values()],
+        turn.items,
+        ({ item, outcome }) => projectItem(item, outcome, this.#cwd, true, this.#threadId),
+      ),
     };
   }
 
@@ -1395,15 +1477,15 @@ export class CodexTurnProjector {
     };
   }
 
-  #projectInput(): JsonObject[] {
-    return this.#input.length === 0
+  #projectInput(input = this.#input): JsonObject[] {
+    return input.length === 0
       ? []
       : [
           {
             id: `${this.#turnId}-user`,
             type: "userMessage",
             clientId: this.#clientUserMessageId,
-            content: projectUserInput(this.#input),
+            content: projectUserInput(input),
           },
         ];
   }
@@ -1452,9 +1534,17 @@ export class CodexTurnProjector {
     outcome: HostItemOutcome | null = null,
     includeCommandOutput = true,
   ): JsonObject {
-    return item.type === "userMessage"
-      ? projectUserMessage(item, this.#userMessageClientIds.get(item.itemId) ?? null)
-      : projectItem(this.#mediaItem(item), outcome, this.#cwd, includeCommandOutput);
+    if (item.type === "userMessage")
+      return projectUserMessage(item, this.#userMessageClientIds.get(item.itemId) ?? null);
+    const mediaItem = this.#mediaItem(item);
+    return {
+      ...projectItem(mediaItem, outcome, this.#cwd, includeCommandOutput, this.#threadId),
+      ...(item.type === "agentMessage" &&
+      mediaItem.type === "agentMessage" &&
+      mediaItem.text !== item.text
+        ? { codexhostNativeText: item.text }
+        : {}),
+    };
   }
 
   #agentMedia(itemId: HostItemId): ReturnType<typeof createAgentMedia> {

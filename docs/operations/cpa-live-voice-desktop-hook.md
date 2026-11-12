@@ -57,10 +57,12 @@ experimental_realtime_webrtc_call_base_url = "https://<realtime-host>/v1"
 The macOS **26.1027.61615** build **24141** profile binds Work gateway voice,
 native Chat Instant Connect and Voice Settings to the exact assets below.
 The retained **26.1027.30824** profiles remain independently selectable.
-Fork `v0.17.4-0` keeps this pin. Public Sparkle latest is **26.1103.41825**
-build **25679** ([#35](https://github.com/karlorz/codex-host/issues/35),
-[#36](https://github.com/karlorz/codex-host/issues/36)). Karl's decision is
-to keep production on this pin; 26.1103 is skipped, not a pending remap.
+Fork tags on this pin keep it. Public Sparkle latest is **26.1106.51428**
+build **26605** ([#37](https://github.com/karlorz/codex-host/issues/37),
+[#38](https://github.com/karlorz/codex-host/issues/38)). Keep production on
+this pin; 26.1106 is skipped, not a pending remap. Upstream `v0.18.0` #811
+accepts 24- and 25-slot scoped-draft Model memo layouts on that Desktop; it
+does not map Work/Chat voice assets.
 
 | Contract | macOS 26.1027.61615 asset and exports |
 | --- | --- |
@@ -105,6 +107,14 @@ current bindings, not a complete vendor-bundle diff. Microphone release,
 interruption/mute, and spontaneous-close recovery are opportunistic dogfood
 under [issue #4](https://github.com/karlorz/codex-host/issues/4), not a
 release gate.
+
+## Desktop 26.1106.51428 (skipped)
+
+Public Sparkle **26.1106.51428** build **26605** is not a Work/Chat pin.
+Compat Daily tracks it on [#37](https://github.com/karlorz/codex-host/issues/37)
+and [#38](https://github.com/karlorz/codex-host/issues/38). Upstream `v0.18.0`
+draft-model binding for 26.1106 is independent of these voice assets. Unknown
+or mixed assets fail closed. Keep 26.1027; this is not a remap queue.
 
 ## Desktop 26.1103.41825 (skipped)
 

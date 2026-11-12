@@ -19,7 +19,8 @@ describe("Renderer settings foundation", () => {
     expect(pages.map(({ id }) => id)).toEqual(DEFAULT_RENDERER_SETTINGS_PAGE_IDS);
     expect(pages.map(({ label }) => label)).toEqual([
       "Connections",
-      "Remote connections",
+      "Phone & browser",
+      "Other computers (SSH)",
       "Enrollment",
       "Accounts",
       "Session Import",
@@ -31,6 +32,7 @@ describe("Renderer settings foundation", () => {
     ]);
     expect(pages.map(({ icon }) => icon)).toEqual([
       "connections",
+      "mobile",
       "gateway",
       "enrollment",
       "accounts",
@@ -51,6 +53,7 @@ describe("Renderer settings foundation", () => {
 
     expect(pages.map(({ id }) => id)).toEqual([
       "connections",
+      "mobile-web",
       "remote-connections",
       "enrollment",
       "accounts",

@@ -14,12 +14,17 @@ import {
   runEnrollStatus,
   type CliRuntimeConnection,
 } from "./delegation-cli-enrollment.js";
+import { resolveRuntimeConnection, usesExternalClient } from "./delegation-runtime-connection.js";
+import { runClientCommand } from "./external-client-cli.js";
+import { originClientName } from "./external-client-origin.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
 
 import {
   DEFAULT_WATCH_TIMEOUT_MS,
   DELEGATION_RUNTIME_ENDPOINT_ENV,
+  DELEGATION_THREAD_ID_ENV,
+  NATIVE_CODEX_THREAD_ID_ENV,
   DelegationControlError,
   type DelegationControlErrorCode,
 } from "./delegation-types.js";
@@ -29,6 +34,7 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 // longer waits are split into Runtime requests that each answer well before then.
 const MAX_WAIT_REQUEST_MS = 240_000;
 const DEFAULT_LIMIT = 25;
+const EVENT_FOLLOW_POLL_MS = 55_000;
 const MAX_LIMIT = 100;
 
 function normalizeThreadId(value: string): string {
@@ -93,12 +99,12 @@ function runtimeOptions(allowed: readonly string[]): string[] {
 }
 
 async function requestRuntime(input: {
-  connection: CliRuntimeConnection;
+  connection: CliRuntimeConnection & { kind?: "host" | "client" };
   path: string;
   body: Record<string, unknown>;
   fetchImpl?: typeof fetch;
 }): Promise<unknown> {
-  const { endpoint, token } = input.connection;
+  const { endpoint, token, kind } = input.connection;
   let response: Response;
   try {
     response = await (input.fetchImpl ?? fetch)(new URL(input.path, endpoint), {
@@ -111,7 +117,9 @@ async function requestRuntime(input: {
   } catch (error) {
     throw new DelegationControlError(
       "RUNTIME_UNREACHABLE",
-      "Host Runtime could not be reached. If this command runs inside native Codex, use a session sandbox that permits local Runtime connections or run the command explicitly outside the sandbox.",
+      kind === "client"
+        ? "Host Runtime could not be reached through the external client listener. Check that codexhost is running and the listener port is not turned off."
+        : "Host Runtime could not be reached. If this command runs inside native Codex, use a session sandbox that permits local Runtime connections or run the command explicitly outside the sandbox.",
       { cause: error instanceof Error ? error.message : String(error) },
     );
   }
@@ -164,6 +172,17 @@ function writeJson(output: Writable, value: unknown): void {
   output.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+/** A Thread, or `client:<name>` for an external client's own event log. */
+function normalizeNotifyTarget(value: string): string {
+  return originClientName(value) !== undefined ? value : normalizeThreadId(value);
+}
+
+/** The calling Thread: Host-provided for External Harnesses, Codex-provided for native Codex. */
+function callerThreadId(environment: NodeJS.ProcessEnv): string | undefined {
+  return (
+    environment[DELEGATION_THREAD_ID_ENV] || environment[NATIVE_CODEX_THREAD_ID_ENV] || undefined
+  );
+}
 export async function runDelegationCli(input: {
   arguments: string[];
   environment?: NodeJS.ProcessEnv;
@@ -282,9 +301,29 @@ export async function runDelegationCli(input: {
       view: "result" | "messages" = "result",
     ): void =>
       writeJson(output, format === "json" ? body : compactDelegationOutput(name, body, view));
-    let resolved: CliRuntimeConnection | undefined;
+    let resolved: (CliRuntimeConnection & { kind?: "host" | "client" }) | undefined;
     const connection = async () => {
-      resolved ??= await resolveCliRuntimeConnection({ environment, parsed, nowMs });
+      if (resolved) return resolved;
+      try {
+        resolved = await resolveCliRuntimeConnection({ environment, parsed, nowMs });
+      } catch (error) {
+        if (
+          !(error instanceof DelegationControlError) ||
+          error.details?.reason !== "missing_runtime_environment" ||
+          parsed.options.has(ENROLLED_CLIENT_OPTION)
+        ) {
+          throw error;
+        }
+        const client = await resolveRuntimeConnection(environment);
+        const caller = callerThreadId(environment);
+        resolved = {
+          endpoint: client.endpoint,
+          token: client.token,
+          source: "env",
+          kind: client.kind,
+          ...(caller ? { callerThreadId: caller } : {}),
+        };
+      }
       return resolved;
     };
     const runtime = async (requestPath: string, body: Record<string, unknown>) =>
@@ -294,6 +333,50 @@ export async function runDelegationCli(input: {
         body,
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       });
+    if (group === "events") {
+      // events has no subcommand, so its options start right after the group.
+      const options = parseDelegationArguments(input.arguments.slice(1));
+      rejectUnknown(options, ["--after", "--limit", "--follow"]);
+      if (options.positionals.length > 0)
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "events accepts no positional arguments",
+        );
+      if (!(await usesExternalClient(environment)))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "events are kept for external clients; use local CLI credentials or an explicit external client token",
+        );
+      const follow = value(options, "--follow");
+      if (follow !== undefined && follow !== "true" && follow !== "false")
+        throw new DelegationControlError("INVALID_ARGUMENT", "--follow must be true or false");
+      let after = value(options, "--after") ? Number(value(options, "--after")) : 0;
+      if (!Number.isSafeInteger(after) || after < 0)
+        throw new DelegationControlError("INVALID_ARGUMENT", "--after must be an event id");
+      const limit = value(options, "--limit")
+        ? positiveInteger(value(options, "--limit"), "--limit", MAX_LIMIT)
+        : MAX_LIMIT;
+      const poll = (timeoutMs: number) =>
+        runtime("/v1/events/poll", { after, limit, timeoutMs }) as Promise<{
+          events: Array<{ id: number }>;
+          cursor: number;
+        }>;
+      if (follow !== "true") {
+        writeJson(output, await poll(0));
+        return 0;
+      }
+      // One JSON line per event until interrupted; the last id printed is the cursor to resume from.
+      while (true) {
+        const page = await poll(EVENT_FOLLOW_POLL_MS);
+        for (const event of page.events) output.write(`${JSON.stringify(event)}\n`);
+        after = page.cursor;
+      }
+    }
+    if (group === "client") {
+      rejectUnknown(parsed, []);
+      writeJson(output, await runClientCommand(command, parsed.positionals, environment));
+      return 0;
+    }
     if (group === "harness" && command === "list") {
       rejectUnknown(parsed, runtimeOptions([]));
       if (parsed.positionals.length > 0) {
@@ -302,7 +385,14 @@ export async function runDelegationCli(input: {
           "harness list accepts no positional arguments",
         );
       }
-      writeResult("harness list", await runtime("/v1/harness/list", {}));
+      const caller = (await connection()).callerThreadId ?? callerThreadId(environment);
+      writeResult(
+        "harness list",
+        await runtime(
+          "/v1/harness/list",
+          caller ? { parentThreadId: normalizeThreadId(caller) } : {},
+        ),
+      );
       return 0;
     }
     if (group === "harness" && command === "inspect") {
@@ -321,10 +411,12 @@ export async function runDelegationCli(input: {
       if (refresh !== undefined && refresh !== "true" && refresh !== "false") {
         throw new DelegationControlError("INVALID_ARGUMENT", "--refresh must be true or false");
       }
+      const caller = (await connection()).callerThreadId ?? callerThreadId(environment);
       writeResult(
         "harness inspect",
         await runtime("/v1/harness/inspect", {
           harnessId,
+          ...(caller ? { parentThreadId: normalizeThreadId(caller) } : {}),
           ...(cwdOption(parsed) ? { cwd: cwdOption(parsed) } : {}),
           ...(refresh !== undefined ? { refresh: refresh === "true" } : {}),
         }),
@@ -346,6 +438,7 @@ export async function runDelegationCli(input: {
           "--watch",
           "--watch-timeout-ms",
           "--fallback-default",
+          "--ref",
         ]),
       );
       if (parsed.positionals.length > 0)
@@ -380,6 +473,7 @@ export async function runDelegationCli(input: {
           ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
           ...(value(parsed, "--request-id") ? { requestId: value(parsed, "--request-id") } : {}),
+          ...(parsed.repeated.get("--ref") ? { refs: parsed.repeated.get("--ref") } : {}),
           ...(watch === "true"
             ? {
                 watchTimeoutMs: value(parsed, "--watch-timeout-ms")
@@ -512,8 +606,13 @@ export async function runDelegationCli(input: {
       const threadId = parsed.positionals[0];
       if (!threadId)
         throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
-      const notifyThread = value(parsed, "--notify") ?? (await connection()).callerThreadId;
-      if (!notifyThread)
+      const notifyThread =
+        value(parsed, "--notify") ??
+        (await connection()).callerThreadId ??
+        callerThreadId(environment);
+      // An external client is notified itself; the Runtime fills that in.
+      const external = await usesExternalClient(environment);
+      if (!notifyThread && !external)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
           "--notify <thread> is required when the caller Thread is unknown; delegate start reports it as parent",
@@ -522,7 +621,7 @@ export async function runDelegationCli(input: {
         "thread watch",
         await runtime("/v1/thread/watch", {
           threadId: normalizeThreadId(threadId),
-          notifyThreadId: normalizeThreadId(notifyThread),
+          ...(notifyThread ? { notifyThreadId: normalizeNotifyTarget(notifyThread) } : {}),
           timeoutMs: value(parsed, "--timeout-ms")
             ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
             : DEFAULT_WATCH_TIMEOUT_MS,
@@ -541,7 +640,10 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "list") {
-      rejectUnknown(parsed, runtimeOptions(["--cwd", "--parent", "--limit", "--cursor", "--sort"]));
+      rejectUnknown(
+        parsed,
+        runtimeOptions(["--cwd", "--parent", "--client", "--ref", "--limit", "--cursor", "--sort"]),
+      );
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -560,11 +662,18 @@ export async function runDelegationCli(input: {
       )
         throw new DelegationControlError("INVALID_ARGUMENT", "--sort is invalid");
       const parentThread = value(parsed, "--parent");
+      const client = value(parsed, "--client");
+      const ref = value(parsed, "--ref");
+      // An external client has no workspace of its own, so it lists every workspace by default.
+      const external = await usesExternalClient(environment);
+      const cwd = cwdOption(parsed) ?? (external || client || ref ? undefined : process.cwd());
       writeResult(
         "thread list",
         await runtime("/v1/thread/list", {
-          cwd: cwdOption(parsed) ?? process.cwd(),
+          ...(cwd ? { cwd } : {}),
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
+          ...(client ? { client } : {}),
+          ...(ref ? { ref } : {}),
           limit: value(parsed, "--limit")
             ? positiveInteger(value(parsed, "--limit"), "--limit", MAX_LIMIT)
             : DEFAULT_LIMIT,

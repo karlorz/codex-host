@@ -115,7 +115,8 @@ describe("Renderer settings localization", () => {
       ),
     ).toEqual([
       "连接",
-      "远程连接",
+      "手机与浏览器",
+      "其他电脑（SSH）",
       "客户端登记",
       "账号",
       "会话导入",

@@ -46,6 +46,10 @@ import {
   validateNpmMetaPackage,
 } from "../../scripts/release/prepare-npm-meta.mjs";
 import { hostReleaseTargetId, releaseTarget } from "../../scripts/release/targets.mjs";
+import { expectedWebPaths } from "../../scripts/release/web-resources.mjs";
+
+const launcherStdout =
+  "Shared Host stopped; interrupted 2 running task(s)\nstartup:" + "x".repeat(1024 * 1024);
 
 async function temporaryDirectory() {
   return mkdtemp(path.join(os.tmpdir(), "codexhost-npm-package-"));
@@ -235,7 +239,7 @@ if (process.env.CODEXHOST_TEST_TTY === "1") {
 childProcess.spawn = () => {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
-  setTimeout(() => child.stdout.write("startup:" + "x".repeat(1024 * 1024) + "rea"), 10);
+  setTimeout(() => child.stdout.write(${JSON.stringify(launcherStdout)} + "rea"), 10);
   setTimeout(() => child.stdout.write("dy\\n"), 20);
   setTimeout(() => child.emit("exit", 7, null), 80);
   return child;
@@ -282,6 +286,7 @@ async function runLauncherLifecycle(
       {
         encoding: "utf8",
         env: environment,
+        maxBuffer: 2 * 1024 * 1024,
         timeout: 2_000,
         windowsHide: true,
       },
@@ -314,6 +319,7 @@ childProcess.spawn = (command, args, options) => {
     command,
     args,
     npmNodePath: options?.env?.CODEXHOST_NPM_NODE_PATH,
+    npmWrapperPath: options?.env?.CODEXHOST_NPM_LAUNCHER_PATH,
     stdoutFd: Array.isArray(options?.stdio) ? options.stdio[1]?.fd : null,
   }) + "\\n");
   const child = new EventEmitter();
@@ -467,6 +473,13 @@ describe("npm package release", () => {
       ).toContain("MIT License");
       expect(notice).toContain("licenses/OpenCode-SDK-LICENSE.txt");
       expect(license).toContain("Copyright (c) 2025 opencode");
+      expect(notice).toContain("licenses/DesktopScreenshot-NOTICES.txt");
+      const nativeNotices = await readFile(
+        path.join(output, "licenses/DesktopScreenshot-NOTICES.txt"),
+        "utf8",
+      );
+      expect(nativeNotices).toContain("xcap 0.9.8");
+      expect(nativeNotices).toContain("Apache License");
     } finally {
       await rm(output, { recursive: true, force: true });
     }
@@ -605,6 +618,8 @@ describe("npm package release", () => {
     expect(source).toContain('userArguments[0] === "delegate"');
     expect(source).toContain('userArguments[0] === "thread"');
     expect(source).toContain('userArguments[0] === "enroll"');
+    expect(source).toContain('userArguments[0] === "client"');
+    expect(source).toContain('userArguments[0] === "events"');
     expect(source).toContain('userArguments[0] === "console"');
     expect(source).toContain('[consoleServer, userArguments[0] === "update" ? "update" : "open"]');
     expect(source).toContain('"--codexhost-delegation-cli"');
@@ -616,6 +631,86 @@ describe("npm package release", () => {
     expect(source).toContain("path.dirname(path.dirname(path.resolve(process.argv[1])))");
     expect(source).not.toContain("runtime/node");
   });
+
+  it.each(["web", "stop", "status"])("routes %s to the native service command", async (command) => {
+    const options = command === "web" ? ["--port", "4501", "--public-url", ""] : [];
+    const { result, calls } = await runGeneratedWrapperLifecycle(
+      "darwin",
+      [command, ...options],
+      [0],
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual(
+      command === "status"
+        ? ["status"]
+        : [
+            command,
+            "--node",
+            process.execPath,
+            "--host-runtime",
+            expect.stringMatching(/host-runtime\.mjs$/u),
+            "--web-runtime",
+            expect.stringMatching(/web-server\.mjs$/u),
+            ...options,
+          ],
+    );
+  });
+
+  it.each(["on", "off", "status"])(
+    "routes autostart %s with the npm entrypoint",
+    async (action) => {
+      const { result, calls } = await runGeneratedWrapperLifecycle(
+        "darwin",
+        ["autostart", action],
+        [0],
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toEqual(["autostart", action]);
+      expect(calls[0].npmNodePath).toBe(process.execPath);
+      expect(calls[0].npmWrapperPath).toMatch(/bin[/\\\\]codexhost\.js$/u);
+    },
+  );
+
+  it("passes background Web through without launching Desktop", async () => {
+    const { result, calls } = await runGeneratedWrapperLifecycle(
+      "darwin",
+      ["web", "--background"],
+      [0],
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0]).toBe("web");
+    expect(calls[0].args.at(-1)).toBe("--background");
+  });
+
+  it.each(["ensure", "stop"])(
+    "supplies native resources for independent host %s without launching Desktop",
+    async (command) => {
+      const data = path.resolve("isolated-host-data");
+      const { result, calls } = await runGeneratedWrapperLifecycle(
+        "darwin",
+        ["host", command, "--data", data],
+        [0],
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toEqual([
+        "host",
+        command,
+        "--node",
+        process.execPath,
+        "--host-runtime",
+        expect.stringMatching(/host-runtime\.mjs$/u),
+        "--data",
+        expect.any(String),
+        "--data",
+        data,
+      ]);
+      expect(calls[0].args).not.toContain("launch");
+    },
+  );
 
   it.each(["darwin", "linux", "win32"])(
     "keeps automatic Node selection compatible on %s",
@@ -767,6 +862,28 @@ describe("npm package release", () => {
     expect(result.stderr).not.toContain("unknown command");
   });
 
+  it("documents background Web and uninstall commands in both npm READMEs", () => {
+    for (const readme of [
+      createNpmMetaReadme({ version: "0.1.0" }),
+      createNpmReadme({ version: "0.1.0", target: releaseTarget("windows-x64") }),
+    ]) {
+      for (const command of [
+        "codexhost web",
+        "codexhost status",
+        "codexhost autostart on",
+        "codexhost autostart off",
+        "codexhost stop",
+        `npm uninstall -g ${NPM_PACKAGE_NAME}`,
+        "tailscale serve status",
+        "tailscale serve --https=443 --set-path=/ off",
+      ])
+        expect(readme).toContain(command);
+      expect(readme).toContain("127.0.0.1:4400");
+      expect(readme).toContain("--trusted-proxy");
+      expect(readme).toContain("--public-url");
+    }
+  });
+
   it("keeps Windows launcher supervision alive after the ready handshake", async () => {
     const result = await runLauncherLifecycle("win32");
     const readme = createNpmMetaReadme({ version: "0.1.0" });
@@ -775,9 +892,10 @@ describe("npm package release", () => {
     expect(result.status, result.stderr).toBe(7);
     expect(result.stderr).toContain("received Launcher ready");
     expect(result.stderr).toContain("Launcher exited after ready");
-    expect(result.stdout).toContain(
+    expect(result.stdout).toBe(
       "⭐ If this project helps you, please give us a Star ⭐\n" +
-        "https://github.com/karlorz/codex-host",
+        "https://github.com/karlorz/codex-host\n" +
+        launcherStdout,
     );
     expect(readme).toContain("On Windows, the command remains attached until Codex Desktop exits");
     expect(readme).toContain("process trees of completed commands");
@@ -808,9 +926,12 @@ describe("npm package release", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain("received Launcher ready");
     expect(result.stderr).not.toContain("Launcher exited after ready");
+    expect(result.stdout).toContain("Shared Host stopped; interrupted 2 running task(s)\n");
+    expect(result.stdout).not.toContain("ready\n");
     expect(result.stdout).toBe(
       "⭐ If this project helps you, please give us a Star ⭐\n" +
-        "https://github.com/karlorz/codex-host\n",
+        "https://github.com/karlorz/codex-host\n" +
+        launcherStdout,
     );
   });
 
@@ -820,7 +941,8 @@ describe("npm package release", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
       "⭐ 如果这个项目对你有帮助，请给我们一个 Star ⭐\n" +
-        "https://github.com/karlorz/codex-host\n",
+        "https://github.com/karlorz/codex-host\n" +
+        launcherStdout,
     );
   });
 
@@ -831,12 +953,14 @@ describe("npm package release", () => {
     expect(colored.status, colored.stderr).toBe(0);
     expect(colored.stdout).toBe(
       "\u001B[33m⭐ If this project helps you, please give us a Star ⭐\u001B[0m\n" +
-        "\u001B[36mhttps://github.com/karlorz/codex-host\u001B[0m\n",
+        "\u001B[36mhttps://github.com/karlorz/codex-host\u001B[0m\n" +
+        launcherStdout,
     );
     expect(plain.status, plain.stderr).toBe(0);
     expect(plain.stdout).toBe(
       "⭐ If this project helps you, please give us a Star ⭐\n" +
-        "https://github.com/karlorz/codex-host\n",
+        "https://github.com/karlorz/codex-host\n" +
+        launcherStdout,
     );
   });
 
@@ -963,6 +1087,8 @@ describe("npm package release", () => {
         root: "/repo/source",
       });
       expect(paths).toEqual(expectedNpmPackagePaths(target));
+      expect(paths).toEqual(expect.arrayContaining(expectedWebPaths(target)));
+      expect(paths).toContain("app/web-server.mjs");
       expect(paths.join("\n")).not.toContain("enrolled-mcp-relay");
       expect(paths).toContain("licenses/OpenCode-SDK-LICENSE.txt");
       expect(paths).not.toContain("runtime/node");
@@ -996,15 +1122,38 @@ describe("npm package release", () => {
     }
   });
 
-  it("rejects npm packages that still point at a private Node runtime", async () => {
+  it.each([
+    "runtime/node",
+    "/opt/codexhost/runtime/node",
+    "runtime/node.exe",
+    String.raw`runtime\node.exe`,
+    String.raw`runtime\\node.exe`,
+  ])("rejects a private Node runtime reference: %s", async (reference) => {
     const root = await temporaryDirectory();
     const target = releaseTarget("macos-arm64");
     try {
       await createNpmPackageFixture(root, target);
-      await writeFile(path.join(root, "README.md"), "uses runtime/node for the private runtime\n");
+      await writeFile(path.join(root, "README.md"), `uses ${reference} for the private runtime\n`);
       await expect(
         validateNpmPackage({ packageRoot: root, target, root: "/repo/source" }),
       ).rejects.toThrow("must not embed a private Node runtime");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows nested Host dependency source labels without confusing node_modules with Node", async () => {
+    const root = await temporaryDirectory();
+    const target = releaseTarget("linux-x64");
+    try {
+      await createNpmPackageFixture(root, target);
+      await writeFile(
+        path.join(root, "app", "host-runtime.mjs"),
+        "// packages/host-runtime/node_modules/@deepseek-ai/cordis/lib/index.js\n",
+      );
+      expect(await validateNpmPackage({ packageRoot: root, target, root: "/repo/source" })).toEqual(
+        expectedNpmPackagePaths(target),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

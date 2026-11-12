@@ -72,7 +72,7 @@
 
 ## 怎么用
 
-    npm install -g @codexhost/cli
+    npm install -g @karlorz/codexhost-cli
     codexhost
 
 打开后在任意会话的输入框里输入 `#` 就能看到。
@@ -85,7 +85,7 @@ CodexHost 最初只是为了让 Pi 有个好用的桌面端。接入的 Agent �
 
 GitHub：
 
-https://github.com/BytePioneer-AI/codex-host
+https://github.com/karlorz/codex-host
 
 觉得有意思的话，求一个 Star ⭐
 

@@ -1,5 +1,15 @@
 import { WORKSPACE_CONTRACT_VERSION } from "@codexhost/shared-contracts";
 export { createLocalPageOpener } from "./local-page-control.js";
+export {
+  ensureHostService,
+  isHostClientChannelOnline,
+  type HostServiceLaunch,
+} from "./host-service-launch.js";
+export {
+  HostClientChannel,
+  discoverHostClientChannel,
+  type HostClientUpdate,
+} from "./host-client-channel.js";
 
 export {
   CdpClient,
@@ -92,3 +102,4 @@ export const packageMetadata = {
   contractVersion: WORKSPACE_CONTRACT_VERSION,
 } as const;
 export { requestDesktopRemoteConnections } from "./remote-connections-control.js";
+export { requestRemoteSession } from "./remote-session-client.js";

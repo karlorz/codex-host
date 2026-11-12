@@ -108,6 +108,8 @@ it("registers the primary Remote Control Host as the catalog for its attached se
         environment: {
           CODEXHOST_STOCK_CODEX_PATH: "/synthetic/codex",
           CODEXHOST_DATA_DIR: dataDir,
+          // Keep the user's watches, clients and listener port out of the test.
+          CODEXHOST_EXTERNAL_CLIENT_PORT: "off",
         },
       }),
     ).toBe(0);

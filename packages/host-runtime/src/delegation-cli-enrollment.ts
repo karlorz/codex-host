@@ -192,17 +192,6 @@ export function inspectCliAuthentication(input: {
   };
 }
 
-function explicitEnrollmentClientSelected(
-  parsed: DelegationCliArguments,
-  environment: NodeJS.ProcessEnv,
-): boolean {
-  return Boolean(
-    option(parsed, ENROLLED_CLIENT_OPTION) ||
-    option(parsed, "--client") ||
-    environment[DELEGATION_ENROLL_CLIENT_ENV],
-  );
-}
-
 async function loadEnrollmentConnection(input: {
   environment: NodeJS.ProcessEnv;
   clientId: string;
@@ -273,12 +262,13 @@ export async function resolveCliRuntimeConnection(input: {
     };
   }
   if (endpoint || token) throw missingRuntimeEnvironmentError(endpoint, token);
-  const clientId = selectedEnrollmentClientId(input.parsed, input.environment);
+  // `--client` lists another client's work; identity is --enrolled-client or CODEXHOST_ENROLL_CLIENT.
+  const fromEnv = input.environment[DELEGATION_ENROLL_CLIENT_ENV];
   return loadEnrollmentConnection({
     environment: input.environment,
-    clientId,
+    clientId: parseEnrollmentClientId(fromEnv ?? DEFAULT_ENROLLMENT_CLIENT_ID),
     nowMs: input.nowMs,
-    explicit: explicitEnrollmentClientSelected(input.parsed, input.environment),
+    explicit: Boolean(fromEnv),
   });
 }
 

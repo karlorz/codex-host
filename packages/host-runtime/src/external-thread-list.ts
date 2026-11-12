@@ -90,7 +90,7 @@ function includesExternalRecord(
   query: DecodedThreadListRequest,
   byId: ReadonlyMap<string, StoredThreadRecordV1>,
   sectionId: string | null,
-  runtime: ExternalThreadListRuntimeState | null,
+  runtime?: ExternalThreadListRuntimeState | null,
 ): boolean {
   if (record.state !== "ready" || !record.nativeSessionRef) return false;
   // Rollback retains old records for historical links, but only rebound children
@@ -119,7 +119,13 @@ function includesExternalRecord(
   )
     return false;
   // Scoped discovery is Desktop's Subagent topology; settled loop runs are not model-delegated children.
-  if (scoped && record.subagent?.origin === "scheduled" && runtime?.running !== true) return false;
+  if (
+    runtime !== undefined &&
+    scoped &&
+    record.subagent?.origin === "scheduled" &&
+    runtime?.running !== true
+  )
+    return false;
   if (query.parentThreadId !== null && record.subagent?.parentHostThreadId !== query.parentThreadId)
     return false;
   if (query.ancestorThreadId !== null) {
@@ -206,41 +212,50 @@ export interface ExternalThreadListInput {
   placementOf?(threadId: string): StoredSectionPlacementV1 | undefined;
 }
 
+/** Visibility without row projection. Runtime is read only for scoped scheduled-loop filtering. */
+export function filterExternalThreadListRecords(
+  input: Pick<ExternalThreadListInput, "records" | "query" | "placementOf"> & {
+    runtimeFor?(threadId: string): ExternalThreadListRuntimeState | null;
+  },
+): StoredThreadRecordV1[] {
+  const byId = new Map(input.records.map((record) => [record.hostThreadId, record]));
+  const scoped = input.query.parentThreadId !== null || input.query.ancestorThreadId !== null;
+  const needsRuntime = scoped && input.runtimeFor !== undefined;
+  return input.records.filter((record) =>
+    includesExternalRecord(
+      record,
+      input.query,
+      byId,
+      input.placementOf?.(record.hostThreadId)?.section.id ?? null,
+      needsRuntime ? (input.runtimeFor?.(record.hostThreadId) ?? null) : undefined,
+    ),
+  );
+}
+
 /** External Threads that match a list query's filters, projected as list rows (unsorted). */
 export function externalThreadListEntries(input: ExternalThreadListInput): ThreadListEntry[] {
   const sessionIds = resolveExternalSessionTreeIds(input.records);
-  const byId = new Map(input.records.map((record) => [record.hostThreadId, record]));
-  return input.records
-    .filter((record) =>
-      includesExternalRecord(
-        record,
-        input.query,
-        byId,
-        input.placementOf?.(record.hostThreadId)?.section.id ?? null,
-        input.runtimeFor(record.hostThreadId),
-      ),
-    )
-    .map((record): ThreadListEntry => {
-      const runtime = input.runtimeFor(record.hostThreadId);
-      const sessionId = sessionIds.get(record.hostThreadId);
-      if (!sessionId) throw new Error("External Thread Session tree could not be resolved");
-      const placement = input.placementOf?.(record.hostThreadId);
-      const thread = externalThreadValue({
-        record,
-        turns: [],
-        sessionId,
-        ...(runtime ? { running: runtime.running } : { loaded: false }),
-        ...(placement ? { placement } : {}),
-      });
-      return {
-        source: "external",
-        thread,
-        timestamp:
-          input.query.sortKey === "created_at"
-            ? unixTimestamp(record.createdAt, "createdAt")
-            : unixTimestamp(record.updatedAt, "updatedAt"),
-      };
+  return filterExternalThreadListRecords(input).map((record): ThreadListEntry => {
+    const runtime = input.runtimeFor(record.hostThreadId);
+    const sessionId = sessionIds.get(record.hostThreadId);
+    if (!sessionId) throw new Error("External Thread Session tree could not be resolved");
+    const placement = input.placementOf?.(record.hostThreadId);
+    const thread = externalThreadValue({
+      record,
+      turns: [],
+      sessionId,
+      ...(runtime ? { running: runtime.running } : { loaded: false }),
+      ...(placement ? { placement } : {}),
     });
+    return {
+      source: "external",
+      thread,
+      timestamp:
+        input.query.sortKey === "created_at"
+          ? unixTimestamp(record.createdAt, "createdAt")
+          : unixTimestamp(record.updatedAt, "updatedAt"),
+    };
+  });
 }
 
 export function listExternalThreadMetadata(

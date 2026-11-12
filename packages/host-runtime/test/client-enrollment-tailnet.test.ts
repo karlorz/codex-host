@@ -175,7 +175,7 @@ describe("tailnet enrollment transport", () => {
       await resolveCliRuntimeConnection({
         environment,
         nowMs: Date.now(),
-        parsed: { options: new Map(), positionals: [] },
+        parsed: { options: new Map(), repeated: new Map(), positionals: [] },
       }),
     ).toMatchObject({
       endpoint: remote.endpoint,

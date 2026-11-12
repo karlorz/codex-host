@@ -107,6 +107,7 @@ describe("enrolled MCP relay loop", () => {
           ["--port", String(relay.linkPort)],
           ["--link-secret-file", secretFile],
         ]),
+        repeated: new Map(),
         positionals: [],
       },
       output,
