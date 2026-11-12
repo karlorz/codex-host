@@ -141,7 +141,7 @@ export function installOverlayVoiceChromeDedup(
       target.removeEventListener("message", listener, true);
       observer?.disconnect();
       reveal();
-      if (target[GLOBAL] === handle) delete target[GLOBAL];
+      if (target[GLOBAL] === handle) Reflect.deleteProperty(target, GLOBAL);
     },
   };
   target[GLOBAL] = handle;
