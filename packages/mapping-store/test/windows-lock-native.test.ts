@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MappingStore } from "../src/index.js";
 
@@ -13,6 +13,17 @@ vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof ChildProcessModule>();
   return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
 });
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && "code" in error && error.code === "ETIMEDOUT"
+  );
+}
+
+async function nativeExecFileSync(): Promise<typeof execFileSync> {
+  const actual = await vi.importActual<typeof ChildProcessModule>("node:child_process");
+  return actual.execFileSync;
+}
 
 // Exercise the actual Windows PowerShell/CIM query, not the current-PID shortcut.
 // Access to a protected system process is covered separately by simulated OS replies.
@@ -22,10 +33,19 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   let store: MappingStore;
   let processStartedAt: string;
 
+  beforeAll(async () => {
+    const execFile = await nativeExecFileSync();
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "1"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      timeout: 30_000,
+    });
+  });
+
   beforeEach(async () => {
     vi.mocked(execFileSync).mockReset();
-    const actual = await vi.importActual<typeof ChildProcessModule>("node:child_process");
-    vi.mocked(execFileSync).mockImplementation(actual.execFileSync);
+    vi.mocked(execFileSync).mockImplementation(await nativeExecFileSync());
     directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-windows-native-lock-"));
     owner = spawn(
       process.execPath,
@@ -65,14 +85,16 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   }
 
   async function prependQuery(script: string): Promise<void> {
-    const actual = await vi.importActual<typeof ChildProcessModule>("node:child_process");
+    const execFile = await nativeExecFileSync();
     vi.mocked(execFileSync).mockImplementationOnce((file, args, options) => {
       if (!Array.isArray(args)) throw new Error("Missing native query arguments");
-      return actual.execFileSync(
-        file,
-        [...args.slice(0, -1), `${script}; ${args.at(-1)}`],
-        options,
-      );
+      const queryArgs = [...args.slice(0, -1), `${script}; ${args.at(-1)}`];
+      try {
+        return execFile(file, queryArgs, options);
+      } catch (error) {
+        if (!isTimeoutError(error)) throw error;
+        return execFile(file, queryArgs, options);
+      }
     });
   }
 
