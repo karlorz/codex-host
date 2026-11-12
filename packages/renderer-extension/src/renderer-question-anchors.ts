@@ -168,8 +168,11 @@ function childrenLaidOutInRow(parent: Element): boolean {
   const kids = [...parent.children].filter((el) => elementIsDisplayed(el));
   for (let i = 0; i < kids.length; i++) {
     for (let j = i + 1; j < kids.length; j++) {
-      const a = kids[i].getBoundingClientRect();
-      const b = kids[j].getBoundingClientRect();
+      const left = kids[i];
+      const right = kids[j];
+      if (!left || !right) continue;
+      const a = left.getBoundingClientRect();
+      const b = right.getBoundingClientRect();
       const separateX = a.right <= b.left + 1 || b.right <= a.left + 1;
       const overlapY = a.top < b.bottom - 4 && b.top < a.bottom - 4;
       if (separateX && overlapY) return true;
