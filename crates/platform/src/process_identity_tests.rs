@@ -53,12 +53,33 @@ fn identifies_and_signals_a_process_after_its_executable_is_replaced() {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
-    let root = env::temp_dir().join(format!("codexhost-image-{}", std::process::id()));
+    let root = env::temp_dir().join(format!(
+        "codexhost-image-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     fs::create_dir_all(root.join("package")).unwrap();
     let executable = root.join("package/sleep");
-    fs::copy("/bin/sleep", &executable).unwrap();
+    let source = root.join("sleep.c");
+    fs::write(
+        &source,
+        "#include <unistd.h>\nint main(void) { for (;;) pause(); }\n",
+    )
+    .unwrap();
+    assert!(
+        Command::new("cc")
+            .arg("-o")
+            .arg(&executable)
+            .arg(&source)
+            .status()
+            .unwrap()
+            .success(),
+        "cc failed to build the process-identity fixture"
+    );
     let child = Command::new(&executable)
-        .arg("60")
         .stdin(Stdio::null())
         .spawn()
         .unwrap();
@@ -78,6 +99,12 @@ fn identifies_and_signals_a_process_after_its_executable_is_replaced() {
         thread::sleep(Duration::from_millis(10));
     };
     let live = process_identity(fixture.child.id()).unwrap();
+    // macOS SIGKILLs a still-loading image if the last directory entry is removed too early.
+    thread::sleep(Duration::from_millis(200));
+    assert!(
+        fixture.child.try_wait().unwrap().is_none(),
+        "fixture exited before replace"
+    );
 
     fs::rename(
         fixture.root.join("package"),
