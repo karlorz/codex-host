@@ -395,6 +395,42 @@ describe("production Desktop Controller", () => {
     expect(startAttachmentServer).toHaveBeenCalledOnce();
   });
 
+  it("does not inject the Renderer on skipped Desktop 26.1106", async () => {
+    const previous = process.env.CODEXHOST_DESKTOP_VERSION;
+    process.env.CODEXHOST_DESKTOP_VERSION = "26.1106.51428";
+    const abort = new AbortController();
+    const install = vi.fn<DesktopControllerDependencies["install"]>();
+    const publishStatus = vi.fn();
+    const readRenderer = vi.fn(async () => "production renderer");
+    try {
+      await runDesktopController(controllerOptions(), abort.signal, {
+        readRenderer,
+        install,
+        startAttachmentServer: vi.fn(async () => attachmentServer()),
+        ready: vi.fn(),
+        publishStatus,
+        sleep: vi.fn(async () => {
+          abort.abort();
+        }),
+        monitorIntervalMs: 1,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
+      else process.env.CODEXHOST_DESKTOP_VERSION = previous;
+    }
+
+    expect(install).not.toHaveBeenCalled();
+    expect(readRenderer).not.toHaveBeenCalled();
+    const states = publishStatus.mock.calls.map(([document]) => document.renderer);
+    expect(states).toEqual([
+      expect.objectContaining({
+        state: "unavailable",
+        error: "Desktop 26.1106.51428 is skipped; Renderer injection is disabled.",
+        failures: 1,
+      }),
+    ]);
+  });
+
   it("publishes Renderer integration failure and recovery for the console", async () => {
     const abort = new AbortController();
     const session: RendererCdpControlSession = {

@@ -167,6 +167,7 @@
 | [`operations/codex-desktop-upgrade-diagnosis-playbook.md`](operations/codex-desktop-upgrade-diagnosis-playbook.md) | Desktop 更新后 Renderer、Bridge、Agent、Model、语言设置异常及输入性能的诊断流程，含 26.1027 主进程 Manager 路由；兼容性与交互性能回归时阅读。 |
 | [`operations/cpa-live-voice-desktop-hook.md`](operations/cpa-live-voice-desktop-hook.md) | Shared Desktop/console Voice settings, macOS 26.1027.61615 Work/Chat bindings and acceptance limits, external Harness routing, focused smoke tests, and daily Sparkle pin drift (`.github/workflows/compat-daily.yml`). |
 | [`operations/macos-desktop-pin-daily-driver.md`](operations/macos-desktop-pin-daily-driver.md) | Keep production `/Applications/ChatGPT.app` on 26.1027.61615; unaudited Sparkle skipped; pin-drift opens a new issue per surface and supersedes the previous tracker. |
+| [`operations/windows-desktop-pin-daily-driver.md`](operations/windows-desktop-pin-daily-driver.md) | Keep Windows Store ChatGPT on MSIX 26.1106.6628.0 (product 26.1106.51428); Renderer injection is skipped so the splash does not hang. |
 | [`operations/browser-annotation-cursor.md`](operations/browser-annotation-cursor.md) | Built-in browser Annotate cursor recovery when page CSP blocks its stylesheet; scoped Host shim, persistence, ownership, and regression checks. |
 
 ## 平台、进程与远程运行
