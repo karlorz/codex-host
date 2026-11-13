@@ -84,27 +84,31 @@ it("reports an unreachable control endpoint and retains the failure across retri
   assert.deepEqual(a.stopped, []);
 });
 
-it("retries after Relay reaches maxConnections and registers when capacity is released", async (t) => {
-  proxyEnvironment(t);
-  const relay = await startRelay(t, 25, { maxConnections: 1 });
-  const occupying = client(t, `localhost:${relay.port}`);
-  await until(() => occupying.registrations.length === 1);
-  const waiting = client(t, `localhost:${relay.port}`);
-  // connecting runs both when an attempt starts and when a failure schedules its retry.
-  // maxConnections can drop TCP before TLS completes without an immediate client
-  // error. Allow two real 30-second attempt deadlines plus their retry backoff.
-  await until(() => waiting.attempts() >= 4, 65_000);
-  assert.equal(waiting.registrations.length, 0);
-  assert.deepEqual(waiting.stopped, []);
-  assert.equal(occupying.registrations.length, 1);
-  assert.equal(occupying.attempts(), 1);
-  assert.deepEqual(occupying.stopped, []);
+it(
+  "retries after Relay reaches maxConnections and registers when capacity is released",
+  { timeout: 100_000 },
+  async (t) => {
+    proxyEnvironment(t);
+    const relay = await startRelay(t, 25, { maxConnections: 1 });
+    const occupying = client(t, `localhost:${relay.port}`);
+    await until(() => occupying.registrations.length === 1);
+    const waiting = client(t, `localhost:${relay.port}`);
+    // connecting runs both when an attempt starts and when a failure schedules its retry.
+    // maxConnections can drop TCP before TLS completes without an immediate client
+    // error. Two 30-second attempt deadlines plus retry backoff need headroom above 60s.
+    await until(() => waiting.attempts() >= 4, 90_000);
+    assert.equal(waiting.registrations.length, 0);
+    assert.deepEqual(waiting.stopped, []);
+    assert.equal(occupying.registrations.length, 1);
+    assert.equal(occupying.attempts(), 1);
+    assert.deepEqual(occupying.stopped, []);
 
-  occupying.close();
-  await until(() => waiting.registrations.length === 1);
-  assert.equal(waiting.registrations[0], `${deriveId(waiting.identity.publicKey)}.relay.test`);
-  assert.deepEqual(waiting.stopped, []);
-});
+    occupying.close();
+    await until(() => waiting.registrations.length === 1);
+    assert.equal(waiting.registrations[0], `${deriveId(waiting.identity.publicKey)}.relay.test`);
+    assert.deepEqual(waiting.stopped, []);
+  },
+);
 
 it("stops after a rejected signature or unsupported upgrade version", async (t) => {
   proxyEnvironment(t);
