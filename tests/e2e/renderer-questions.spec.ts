@@ -436,7 +436,14 @@ test("reattaches the same overlay card after a native rerender so Other text and
   await expect(card).toHaveAttribute("data-keep", "1");
   await expect(page.getByRole("checkbox", { name: "Gamma", exact: true })).toBeChecked();
   await expect(other).toHaveValue("keep typing");
-  expect(await other.evaluate((input) => input.getRootNode().activeElement === input)).toBe(true);
+  expect(
+    await other.evaluate((input) => {
+      const root = input.getRootNode();
+      return root instanceof Document || root instanceof ShadowRoot
+        ? root.activeElement === input
+        : false;
+    }),
+  ).toBe(true);
 });
 
 for (const scheme of ["dark", "light"] as const) {
