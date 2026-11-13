@@ -262,8 +262,9 @@ export function installRendererQuestions(
       }
       context = next;
     }
-    let current = context;
-    if (!current || inFlight || unsupported.has(current.route)) return;
+    const active = context;
+    if (!active || inFlight || unsupported.has(active.route)) return;
+    let current: QuestionContext = active;
     const startedRevision = revision;
     inFlight = true;
     try {
