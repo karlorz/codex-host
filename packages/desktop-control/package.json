@@ -7,6 +7,10 @@
     "dist"
   ],
   "exports": {
+    "./renderer-react-ownership": {
+      "types": "./dist/renderer-react-ownership.d.ts",
+      "import": "./dist/renderer-react-ownership.js"
+    },
     "./renderer-bindings": {
       "types": "./dist/renderer-bindings.d.ts",
       "import": "./dist/renderer-bindings.js"

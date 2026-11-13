@@ -20,7 +20,9 @@ import {
   DESKTOP_VERSION_ENV,
   cpaLiveVoiceHookBootstrap,
   cpaLiveVoiceHookEnabled,
+  cpaLiveVoiceOverlayHookAllowed,
   detectInstalledDesktopVersion,
+  overlayVoiceBootstrapPreferred,
 } from "../src/cpa-live-voice-hook.js";
 
 let directory: string;
@@ -183,5 +185,38 @@ describe("CPA live-voice controller bootstrap", () => {
       [DESKTOP_VERSION_ENV]: "26.1021.31345",
     });
     expect(source).toContain('"desktopVersion":"26.1021.31345"');
+  });
+
+  it("keeps overlay CDP injection when Desktop version is unset", () => {
+    expect(cpaLiveVoiceOverlayHookAllowed(environment)).toBe(true);
+  });
+
+  it.each(["26.1027.61615", "26.1027.30824", "26.1021.31345", "26.1007.30912", "26.1106.51428"])(
+    "keeps overlay CDP injection on allowed Desktop %s",
+    (version) => {
+      expect(
+        cpaLiveVoiceOverlayHookAllowed({ ...environment, [DESKTOP_VERSION_ENV]: version }),
+      ).toBe(true);
+    },
+  );
+
+  it("skips overlay CDP injection when voice injection is off", () => {
+    expect(cpaLiveVoiceOverlayHookAllowed({ [CPA_LIVE_VOICE_ENV]: "0" })).toBe(false);
+  });
+
+  it("prefers the small overlay voice bootstrap only on macOS 26.1106.51428", () => {
+    expect(overlayVoiceBootstrapPreferred(environment)).toBe(false);
+    expect(
+      overlayVoiceBootstrapPreferred({
+        ...environment,
+        [DESKTOP_VERSION_ENV]: "26.1106.51428",
+      }),
+    ).toBe(true);
+    expect(
+      overlayVoiceBootstrapPreferred({
+        ...environment,
+        [DESKTOP_VERSION_ENV]: "26.1027.61615",
+      }),
+    ).toBe(false);
   });
 });

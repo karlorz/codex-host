@@ -5,6 +5,7 @@ import {
   type RendererHostRpcRoot,
   type RendererHostRpcStore,
 } from "./renderer-host-rpc-discovery.js";
+import { installRendererRpcForHostHook } from "./renderer-rpc-for-host-hooks.js";
 
 type Method = (...args: unknown[]) => unknown;
 type NativeRpc = object & {
@@ -62,7 +63,7 @@ export function installRendererRpcSubmissionPreparation(
   let registryBinding: {
     registry: RendererRpcClientRegistry;
     original: RendererRpcClientRegistry["forHost"];
-    wrapped: RendererRpcClientRegistry["forHost"];
+    owns(): boolean;
     release(): void;
   } | null = null;
   let disposed = false;
@@ -73,28 +74,24 @@ export function installRendererRpcSubmissionPreparation(
     const registry = readRegistry?.() ?? null;
     if (
       registry !== (registryBinding?.registry ?? null) ||
-      (registryBinding && registryBinding.registry.forHost !== registryBinding.wrapped)
+      (registryBinding && !registryBinding.owns())
     ) {
       for (const binding of bindings.values()) binding.release();
       bindings.clear();
       registryBinding?.release();
       registryBinding = null;
-      const descriptor = registry && Object.getOwnPropertyDescriptor(registry, "forHost");
-      if (registry && descriptor?.writable && typeof descriptor.value === "function") {
-        const original = descriptor.value as RendererRpcClientRegistry["forHost"];
-        const wrapped = (hostId: string) => {
+      const hook =
+        registry &&
+        installRendererRpcForHostHook(registry, (upstream) => (hostId) => {
           refresh();
-          return bindings.get(hostId)?.proxy ?? original.call(registry, hostId);
-        };
-        Object.defineProperty(registry, "forHost", { ...descriptor, value: wrapped });
+          return bindings.get(hostId)?.proxy ?? upstream(hostId);
+        });
+      if (registry && hook) {
         registryBinding = {
           registry,
-          original,
-          wrapped,
-          release() {
-            if (registry.forHost === wrapped)
-              Object.defineProperty(registry, "forHost", descriptor);
-          },
+          original: hook.upstream,
+          owns: hook.owns,
+          release: hook.release,
         };
       }
     }

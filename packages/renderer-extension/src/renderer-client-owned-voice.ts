@@ -1,18 +1,43 @@
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
-import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
-import {
-  REALTIME_CALL_METHOD,
-  filterRealtimeCallHeaders,
-  isRealtimeCallId,
-  realtimeCallIdFromLocation,
-  realtimeCallResponseSchema,
-} from "@codexhost/shared-contracts";
-import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-hook.js";
+import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
 import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
 } from "./renderer-cpa-live-voice-preference.js";
 import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
+import {
+  lastVoiceLaunchProductExperience,
+  rememberVoiceProductExperience,
+  requestVoiceHost,
+  VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY,
+  wrapClientOwnedVoiceFetch,
+  type NativeVoiceBridge,
+  type NativeVoiceFetch,
+} from "./renderer-voice-gateway-wrap.js";
+import {
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+  installHashedOverlayVoiceHook,
+  type ClientOwnedVoiceActivation,
+} from "./renderer-hashed-overlay-voice.js";
+import {
+  HOME_COMPOSER_MODE_STORAGE_KEY,
+  isWorkComposerSurface,
+} from "./renderer-work-composer-surface.js";
+
+export { HOME_COMPOSER_MODE_STORAGE_KEY, isWorkComposerSurface };
+
+export {
+  lastVoiceLaunchProductExperience,
+  rememberVoiceProductExperience,
+  requestVoiceHost,
+  VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY,
+  wrapClientOwnedVoiceFetch,
+  type NativeVoiceBridge,
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+  type ClientOwnedVoiceActivation,
+};
 
 export const CLIENT_OWNED_VOICE_VERSION = "26.1027.61615";
 export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-18b189e867e7.js";
@@ -130,137 +155,6 @@ export const CLIENT_OWNED_VOICE_ASSETS = [
 const SHARED_INIT = "Oit";
 const SHARED_RESPONSE_ERROR = "Mit";
 const HOOK_GLOBAL = "__codexhostClientOwnedVoiceV1";
-type RecordValue = Record<string, unknown>;
-function object(value: unknown): value is RecordValue {
-  return value !== null && typeof value === "object";
-}
-
-export interface NativeVoiceBridge {
-  dispatchMessage(type: string, message: RecordValue): void;
-  subscribe(type: string, listener: (message: unknown) => void): () => void;
-}
-
-export function requestVoiceHost(
-  bridge: NativeVoiceBridge,
-  params: RecordValue,
-  method: string = REALTIME_CALL_METHOD,
-): Promise<unknown> {
-  const id = `codexhost-voice:${crypto.randomUUID()}`;
-  return new Promise((resolve, reject) => {
-    let unsubscribe = () => {};
-    const timer = setTimeout(() => {
-      unsubscribe();
-      reject(new Error("Voice gateway did not answer in time"));
-    }, 30_000);
-    const done = () => {
-      clearTimeout(timer);
-      unsubscribe();
-    };
-    unsubscribe = bridge.subscribe("mcp-response", (event) => {
-      if (
-        !object(event) ||
-        event.hostId !== "local" ||
-        !object(event.message) ||
-        event.message.id !== id
-      )
-        return;
-      done();
-      if (event.message.error) reject(new Error("Configured voice gateway request failed"));
-      else resolve(event.message.result);
-    });
-    try {
-      bridge.dispatchMessage("mcp-request", {
-        hostId: "local",
-        request: { id, method, params },
-      });
-    } catch {
-      done();
-      reject(new Error("Voice gateway Host connection is unavailable"));
-    }
-  });
-}
-
-interface NativeVoiceFetch {
-  fetch(url: string, options?: RequestInit): Promise<Response>;
-}
-
-/** Desktop Chat/Work toggle persistence. Missing means Chat. */
-export const HOME_COMPOSER_MODE_STORAGE_KEY = "home-composer-mode-v1";
-
-function backendModelName(headers?: HeadersInit): string {
-  const raw = new Headers(headers).get("x-codex-turn-metadata");
-  if (!raw) return "";
-  try {
-    const parsed = JSON.parse(raw) as { backend_model_name?: unknown };
-    return typeof parsed.backend_model_name === "string" ? parsed.backend_model_name : "";
-  } catch {
-    return "";
-  }
-}
-
-/** Coding / Harness backend models. Speech `gpt-live*` is used by Chat and Work. */
-function isWorkBackendModel(name: string): boolean {
-  const model = name.toLowerCase();
-  if (!model) return false;
-  if (model.startsWith("codexhost/")) return true;
-  return model.includes("codex") && !model.includes("gpt-live");
-}
-
-function visibleWorkComposer(owner: object): boolean {
-  const document = (owner as { document?: Document }).document;
-  if (!document?.querySelectorAll) return false;
-  const visible = (element: Element) => {
-    const box = element.getBoundingClientRect?.() ?? { width: 0 };
-    return box.width > 0 && !element.closest?.("[hidden], [inert]");
-  };
-  return (
-    [...document.querySelectorAll("[data-codex-composer-root]")].some(visible) &&
-    ![...document.querySelectorAll("[data-chatgpt-composer]")].some(visible)
-  );
-}
-
-function selectedWorkTab(owner: object): boolean {
-  const document = (owner as { document?: Document }).document;
-  if (!document?.querySelectorAll) return false;
-  const controls = document.querySelectorAll("button, [role='tab'], a");
-  let workSelected = false;
-  let chatSelected = false;
-  for (const element of controls) {
-    const name = (element.textContent ?? "").replace(/\s+/gu, " ").trim();
-    if (name !== "Chat" && name !== "Work") continue;
-    const selected =
-      element.getAttribute("aria-selected") === "true" ||
-      element.getAttribute("aria-pressed") === "true" ||
-      element.getAttribute("data-state") === "active" ||
-      element.getAttribute("data-state") === "on";
-    if (!selected) continue;
-    if (name === "Work") workSelected = true;
-    if (name === "Chat") chatSelected = true;
-  }
-  return workSelected && !chatSelected;
-}
-
-export function isWorkComposerSurface(owner: object = globalThis): boolean {
-  const storage = (owner as { localStorage?: Storage }).localStorage;
-  try {
-    const raw = storage?.getItem(HOME_COMPOSER_MODE_STORAGE_KEY);
-    if (raw != null && raw !== "") {
-      let value: unknown = raw;
-      if (raw.startsWith("{") || raw.startsWith('"') || raw.startsWith("[")) {
-        try {
-          value = JSON.parse(raw) as unknown;
-        } catch {
-          value = raw;
-        }
-      }
-      if (value === "work") return true;
-      if (value === "chat") return false;
-    }
-  } catch {
-    /* Fall through to the visible Work/Chat control. */
-  }
-  return selectedWorkTab(owner) || visibleWorkComposer(owner);
-}
 
 function selectedComposerModel(owner: object): string {
   const routing = (
@@ -276,20 +170,6 @@ function selectedComposerModel(owner: object): string {
   } catch {
     return "";
   }
-}
-
-let lastVoiceProductExperience: string | undefined;
-
-export function rememberVoiceProductExperience(request: unknown): void {
-  const experience = object(request) ? request.productExperience : undefined;
-  lastVoiceProductExperience =
-    experience === "chat" || experience === "work" || experience === "codex"
-      ? experience
-      : undefined;
-}
-
-export function lastVoiceLaunchProductExperience(): string | undefined {
-  return lastVoiceProductExperience;
 }
 
 function lastAgentIsExternalHarness(owner: object): boolean {
@@ -310,107 +190,17 @@ function lastAgentIsExternalHarness(owner: object): boolean {
 }
 
 export function isExternalHarnessComposer(owner: object = globalThis): boolean {
-  if (lastVoiceProductExperience === "chat") return false;
+  const experience = lastVoiceLaunchProductExperience();
+  if (experience === "chat") return false;
   if (selectedComposerModel(owner).startsWith("codexhost/")) return true;
-  if (lastVoiceProductExperience === "codex") return false;
-  if (lastVoiceProductExperience !== "work" && !isWorkComposerSurface(owner)) return false;
+  if (experience === "codex") return false;
+  if (experience !== "work" && !isWorkComposerSurface(owner)) return false;
   return lastAgentIsExternalHarness(owner);
 }
 
-/** Only the audited native WebFetch voice bootstrap is forwarded. Other native
- * requests retain their receiver, arguments, authentication and error behavior.
- */
-export function wrapClientOwnedVoiceFetch(
-  client: NativeVoiceFetch,
-  bridge: NativeVoiceBridge,
-  workOverride: () => boolean,
-  responseError: (response: Response, url: string) => Promise<unknown>,
-  chatOverride: () => boolean = () => false,
-  workSurface: () => boolean = () => isWorkComposerSurface(),
-  externalHarness: () => boolean = () => isExternalHarnessComposer(),
-): () => void {
-  const original = client.fetch;
-  const wrapped: NativeVoiceFetch["fetch"] = async function (this: NativeVoiceFetch, url, options) {
-    if (
-      typeof url !== "string" ||
-      url.split("?")[0] !== "/wham/realtime/calls" ||
-      options?.method !== "POST"
-    )
-      return original.call(this, url, options);
-    const experience = lastVoiceLaunchProductExperience();
-    const chat = experience === "chat";
-    const model = backendModelName(options.headers);
-    // The overlay has no Composer; explicit launch ownership also covers Work
-    // models without "codex" in their name and starts without model metadata.
-    const work =
-      !chat &&
-      (experience === "work" ||
-        experience === "codex" ||
-        isWorkBackendModel(model) ||
-        workSurface());
-    // The avatar overlay has no primary Composer routing state. The native
-    // request's explicit Harness model still owns its gateway bootstrap there.
-    const external = !chat && (model.startsWith("codexhost/") || externalHarness());
-    const gateway = external || (work ? workOverride() : chatOverride());
-    chatVoiceDebug("wham-create", {
-      work,
-      external,
-      route: gateway ? "gateway" : "desktop",
-      productExperience: experience ?? "unset",
-    });
-    if (!gateway) {
-      if (!external && !work)
-        // Native Chat Instant Connect is Desktop's browser-voice stack
-        // (fetchVoiceRequest → chatgpt.com/realtime/wm), not Codex /wham.
-        chatVoiceDebug("chat-native-passthrough", {
-          hasThreadId: new Headers(options.headers).has("Thread-Id"),
-        });
-      return original.call(this, url, options);
-    }
-    if (typeof options.body !== "string") throw new Error("Unsupported native voice call request");
-    options.signal?.throwIfAborted();
-    const requestId = crypto.randomUUID();
-    let cancelled = false;
-    const cancel = () => {
-      if (cancelled) return;
-      cancelled = true;
-      void requestVoiceHost(bridge, { operation: "cancel", requestId }).catch(() => undefined);
-    };
-    options.signal?.addEventListener("abort", cancel, { once: true });
-    try {
-      const result = realtimeCallResponseSchema.parse(
-        await requestVoiceHost(bridge, {
-          operation: "create",
-          requestId,
-          body: options.body,
-          // Drop Desktop OAuth, ChatGPT account identity and cookies at the bridge
-          // boundary; the Host allowlist repeats this check before sending.
-          headers: filterRealtimeCallHeaders(Object.fromEntries(new Headers(options.headers))),
-        }),
-      );
-      if (options.signal?.aborted) {
-        const callId = realtimeCallIdFromLocation(result.headers.location ?? "");
-        if (result.status >= 200 && result.status < 300 && isRealtimeCallId(callId))
-          await requestVoiceHost(bridge, { operation: "hangup", callId });
-        options.signal.throwIfAborted();
-      }
-      const response = new Response(result.status === 204 ? null : result.body, {
-        status: result.status,
-        headers: result.headers,
-      });
-      if (!response.ok) throw await responseError(response, url);
-      return response;
-    } catch (error) {
-      cancel();
-      throw error;
-    } finally {
-      options.signal?.removeEventListener("abort", cancel);
-    }
-  };
-  client.fetch = wrapped;
-  return () => {
-    if (client.fetch === wrapped) client.fetch = original;
-  };
+type RecordValue = Record<string, unknown>;
+function object(value: unknown): value is RecordValue {
+  return value !== null && typeof value === "object";
 }
 
 interface VoiceTarget {
@@ -420,8 +210,10 @@ interface VoiceTarget {
   setTimeout: typeof setTimeout;
   clearTimeout: typeof clearTimeout;
 }
+
 interface VoiceHook {
   status: "disabled" | "pending" | "active" | "unsupported";
+  activation?: ClientOwnedVoiceActivation;
   dispose(): void;
 }
 
@@ -439,6 +231,15 @@ export function installClientOwnedVoiceHook(
   if (existing) return existing;
   const config = readCpaLiveVoiceHookConfig(target);
   if (!config) return { status: "disabled", dispose() {} };
+  if (
+    config.desktopVersion === HASHED_WEBPACK_VOICE_VERSION &&
+    (config.desktopPlatform === undefined || config.desktopPlatform === "darwin")
+  ) {
+    return installHashedOverlayVoiceHook({
+      target,
+      ...(options.importModule ? { importModule: options.importModule } : {}),
+    });
+  }
   if (!supportsVoiceVersion(CLIENT_OWNED_VOICE_ASSETS, config.desktopVersion))
     return { status: "unsupported", dispose() {} };
   const importModule = options.importModule ?? ((url: string) => import(url));
@@ -446,8 +247,15 @@ export function installClientOwnedVoiceHook(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let restore: (() => void) | undefined;
   const started = Date.now();
+  const activation: ClientOwnedVoiceActivation = {
+    assetSeen: false,
+    importStarted: false,
+    importResolved: false,
+    wrapperActive: false,
+  };
   const handle: VoiceHook = {
     status: "pending",
+    activation,
     dispose() {
       disposed = true;
       if (timer !== undefined) target.clearTimeout(timer);
@@ -456,6 +264,23 @@ export function installClientOwnedVoiceHook(
     },
   };
   target[HOOK_GLOBAL] = handle;
+  const activate = (
+    client: NativeVoiceFetch,
+    bridge: NativeVoiceBridge,
+    responseError: (response: Response, url: string) => Promise<unknown>,
+  ): void => {
+    restore = wrapClientOwnedVoiceFetch(
+      client,
+      bridge,
+      () => cpaLiveVoicePreferenceAllowsInstall(target),
+      responseError,
+      () => chatLiveVoicePreferenceAllowsOverride(target),
+      () => isWorkComposerSurface(target),
+      () => isExternalHarnessComposer(target),
+    );
+    activation.wrapperActive = true;
+    handle.status = "active";
+  };
   const attempt = async (): Promise<void> => {
     if (disposed) return;
     const names = loadedAssetNames(target.document, target.performance);
@@ -465,7 +290,7 @@ export function installClientOwnedVoiceHook(
       config.desktopVersion,
       config.desktopPlatform,
     );
-    if (assets) {
+    if (handle.status !== "active" && assets) {
       try {
         const sharedModule = await importModule(`app://-/assets/${assets.shared}`);
         const fetchFrom = "fetchFrom" in assets ? assets.fetchFrom : "shared";
@@ -505,16 +330,7 @@ export function installClientOwnedVoiceHook(
           typeof bridge?.subscribe !== "function"
         )
           throw new Error();
-        restore = wrapClientOwnedVoiceFetch(
-          client,
-          bridge,
-          () => cpaLiveVoicePreferenceAllowsInstall(target),
-          responseError,
-          () => chatLiveVoicePreferenceAllowsOverride(target),
-          () => isWorkComposerSurface(target),
-          () => isExternalHarnessComposer(target),
-        );
-        handle.status = "active";
+        activate(client, bridge, responseError);
       } catch {
         /* Retry below until the timeout. */
       }

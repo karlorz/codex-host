@@ -246,6 +246,63 @@ describe("Renderer CDP Control Session", () => {
     session.close();
   });
 
+  it("evaluates the overlay voice bootstrap on the current document instead of the full hook IIFE", async () => {
+    const primary = rendererClient();
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(false);
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      overlayHookSource: "full overlay hook IIFE",
+      overlayVoiceBootstrapSource: "overlay voice bootstrap",
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      operations: {
+        listTargets: vi.fn(async () => [
+          target("page-1"),
+          target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+        ]),
+        connect: vi.fn(async (webSocketDebuggerUrl: string) =>
+          webSocketDebuggerUrl.includes("overlay") ? overlay : primary,
+        ),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      {
+        method: "Page.addScriptToEvaluateOnNewDocument",
+        params: { source: "overlay voice bootstrap" },
+      },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: "overlay voice bootstrap", awaitPromise: true },
+      },
+    ]);
+    expect(
+      overlay.commands.some(
+        ({ params }) =>
+          params?.source === "full overlay hook IIFE" ||
+          params?.expression === "full overlay hook IIFE",
+      ),
+    ).toBe(false);
+    overlay.commands.length = 0;
+    await session.ensureInstalled();
+    expect(overlay.commands).toEqual([
+      {
+        method: "Runtime.evaluate",
+        params: { expression: "overlay voice bootstrap", awaitPromise: true },
+      },
+    ]);
+    expect(overlay.commands.some(({ method }) => method === "Runtime.enable")).toBe(false);
+    session.close();
+  });
+
   it("keeps the primary session when overlay CDP connect fails", async () => {
     const primary = rendererClient();
     const session = await createRendererCdpControlSession({
@@ -306,9 +363,6 @@ describe("Renderer CDP Control Session", () => {
     await session.ensureInstalled();
 
     expect(overlay.commands).toEqual([
-      { method: "Runtime.enable" },
-      { method: "Page.enable" },
-      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source: "overlay hook only" } },
       {
         method: "Runtime.evaluate",
         params: { expression: "overlay hook only", awaitPromise: true },
@@ -368,7 +422,7 @@ describe("Renderer CDP Control Session", () => {
           method: "Runtime.evaluate",
           params: { expression: "overlay hook only", awaitPromise: true },
         });
-        expect(healthy.close).toHaveBeenCalledOnce();
+        expect(healthy.close).not.toHaveBeenCalled();
         if (stage === "connect") {
           expect(stalled.close).not.toHaveBeenCalled();
           finishConnect?.(stalled);
@@ -378,9 +432,11 @@ describe("Renderer CDP Control Session", () => {
           expect(stalled.close).toHaveBeenCalledOnce();
         }
         await expect(session.ensureInstalled()).resolves.toMatchObject({ binding: readyBinding() });
+        expect(healthy.close).not.toHaveBeenCalled();
       } finally {
         session.close();
       }
+      expect(healthy.close).toHaveBeenCalledOnce();
     },
   );
 

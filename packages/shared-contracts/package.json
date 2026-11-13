@@ -22,6 +22,14 @@
     "./sidebar-browser": {
       "types": "./dist/sidebar-browser.d.ts",
       "import": "./dist/sidebar-browser.js"
+    },
+    "./realtime-call": {
+      "types": "./dist/realtime-call.d.ts",
+      "import": "./dist/realtime-call.js"
+    },
+    "./realtime-call-core": {
+      "types": "./dist/realtime-call-core.d.ts",
+      "import": "./dist/realtime-call-core.js"
     }
   },
   "scripts": {

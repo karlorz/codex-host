@@ -59,6 +59,8 @@ Desktop **26.1029.61003 / build 24614** 的提交和队列协调器由主进程�
 
 - `desktop-control/renderer-rpc-steering.ts` 通过 CDP 查找 `collectAppStateSnapshot` 的真实 Closure，核对 Controller 方法组合、函数身份和当前 React root 的 Scope 身份；只有唯一匹配才安装。发现过程不导入模块、执行模块工厂或打开主进程 Inspector，临时句柄统一释放。
 - `renderer-rpc-steering.ts` 包装该 Controller 的 `forHost`，保留原生 RPC 的 await、dup 和 lease 行为，只拦截 Coordinator 的 `sendMessage` / `sendQueuedMessageNow` preparation callback。实际提交、乐观消息、附件和排队执行仍由原生 Coordinator 拥有；主进程 Manager 本身不变。
+
+Submission preparation and steering share the native Controller's `forHost` method. Their hooks retain explicit predecessor links: refreshing one recognizes the other as part of the same installation instead of wrapping it again. Either hook can be removed independently, while an unrelated native method replacement retires ownership. The Controller checks this shared ownership before repeating steering discovery.
 - `official` 保留原生 preparation；不支持 Host 扩展的 stock app-server 先验证原生 Thread 所有权。`activeTurn` 保留 steer preparation；`newTurn` 使用同一原生 callback 的 start preparation，并设置 `afterInactiveTurnId`，使 Desktop 为替换 Turn 创建正常 start 展示。
 - 两种外部送达方式均在 `additionalContext.codexhost_external_steering` 中携带 `{ kind: "application", value: JSON.stringify({ expectedTurnId, clientUserMessageId, delivery }) }`。该字段经过原生请求白名单保留。Host 校验消息身份后，把标记的外部 `turn/start` 交给现有停止后重发流程，返回正常 `{ turn }` envelope；`activeTurn` 的 `turn/steer` 不得因能力变化偷偷变成新轮。
 - 新轮接受后，只移除本次队列消息。确认替换 Turn 仍在执行或正常完成后，才恢复中断暂停队列；显式停止或失败保留暂停。若提交前已有另一条因中断暂停的消息，则拒绝本次替换并要求先处理它，避免原生 resume-all 接口恢复先前暂停项。读取队列有超时，subscription lease 必须释放。

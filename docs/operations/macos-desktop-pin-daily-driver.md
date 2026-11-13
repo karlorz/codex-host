@@ -32,8 +32,29 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 
 ## Daily driver
 
-The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Unaudited
-Sparkle builds stay skipped, including **26.1106.51428** and **26.1103.41825**.
+The qualified Work/Chat voice daily driver is `/Applications/ChatGPT.app` at
+**26.1027.61615**. The Controller permits Renderer installation on macOS
+**26.1106.51428** build **26605**: its isolated signed-out startup supports
+`Runtime.enable`, `Debugger.enable`, the loaded-module catalog and production
+Renderer bundle evaluation without the Windows Store splash hang. This does not
+qualify signed-in Composer/routing behavior or Work/Chat voice. Voice retains its
+exact asset/version gates. Avatar-overlay voice-hook CDP is installed once on
+this build so compact Voice Chat Work calls can use the configured gateway
+without a 500ms overlay `Runtime.enable` race. Current-document overlay
+injection uses the small hashed webpack voice bootstrap instead of evaluating
+the full overlay hook IIFE during Voice start. Other
+**26.1106.*** builds and **26.1103.*** remain skipped; the Windows Store skip is
+unchanged.
+
+Signed-in inspection of **26.1106.51428** reached a visible Agent control and a
+ready local RPC route, then encountered recurring `Runtime.enable` timeouts and
+a busy Renderer. A focused regression reproduces recursion when submission
+preparation and steering independently wrap the native registry's `forHost`.
+The source uses shared hook ownership to preserve both wrappers across refreshes;
+timed-out CDP connections close before accepting further commands. Signed-in
+runtime acceptance of this patch remains required. A transient Controller
+`installed` status does not establish external submission readiness, and the
+numeric-chunk native Remote Control discovery path remains unqualified.
 Windows Store uses a separate pin in
 [windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
 Open `compat-broken` pin-drift issues ([#37](https://github.com/karlorz/codex-host/issues/37),

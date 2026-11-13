@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -75,12 +75,34 @@ describe("production Renderer release chain", () => {
     expect(rendererBuild).toContain("dist/production.js");
     expect(rendererBuild).toContain("src/cpa-live-voice-entry.ts");
     expect(rendererBuild).toContain("dist/cpa-live-voice-hook.js");
+    expect(rendererBuild).toContain("src/overlay-voice-bootstrap-entry.ts");
+    expect(rendererBuild).toContain("dist/overlay-voice-bootstrap.js");
     expect(releaseBuilder).toContain('dist", "production.js');
     expect(releaseBuilder).toContain('dist", "cpa-live-voice-hook.js');
+    expect(releaseBuilder).toContain('dist", "overlay-voice-bootstrap.js');
     expect(releaseBuilder).toContain("desktop-controller.mjs");
     expect(releaseBuilder).toContain('packageName: "lucide"');
     expect(releaseBuilder).toContain("lucide-LICENSE.txt");
     expect(releaseBuilder).not.toContain('dist", "index.js"');
+  });
+
+  it("keeps overlay voice bootstrap hashed-only", async () => {
+    const entry = await source("packages/renderer-extension/src/overlay-voice-bootstrap-entry.ts");
+    expect(entry).toContain("installHashedOverlayVoiceHook");
+    expect(entry).not.toContain("installClientOwnedVoiceHook");
+    expect(entry).not.toContain("installCpaLiveVoiceHook");
+    expect(entry).not.toContain("renderer-cpa-live-voice-preference");
+    expect(entry).not.toContain("renderer-new-thread-preference");
+    expect(entry).not.toContain('@codexhost/shared-contracts"');
+    try {
+      const built = await stat(
+        path.join(root, "packages/renderer-extension/dist/overlay-voice-bootstrap.js"),
+      );
+      expect(built.size).toBeLessThan(50_000);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
   });
 
   it("requires Launcher consumption rather than file presence alone", async () => {

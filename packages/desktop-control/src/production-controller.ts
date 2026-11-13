@@ -15,7 +15,11 @@ import {
   createRendererStatusReporter,
   type DesktopControllerStatusDocument,
 } from "./controller-status.js";
-import { cpaLiveVoiceHookBootstrap } from "./cpa-live-voice-hook.js";
+import {
+  cpaLiveVoiceHookBootstrap,
+  cpaLiveVoiceOverlayHookAllowed,
+  overlayVoiceBootstrapPreferred,
+} from "./cpa-live-voice-hook.js";
 import {
   installRendererCdpControlSession,
   type RendererCdpControlSession,
@@ -42,6 +46,7 @@ export interface DesktopControllerDependencies {
     rendererCdpEndpoint: string;
     rendererSource: string;
     overlayHookSource?: string;
+    overlayVoiceBootstrapSource?: string;
     enabledAgents?: readonly string[];
     timeoutMs: number;
     signal?: AbortSignal;
@@ -258,16 +263,32 @@ export async function runDesktopController(
     status.installing();
     startupTrace("reading Renderer bundle");
     const rendererRead = dependencies.readRenderer(options.rendererPath);
-    const overlayPath = bootstrap
-      ? path.join(path.dirname(options.rendererPath), "cpa-live-voice-hook.js")
-      : undefined;
-    const [rendererSource, overlayBundle] = overlayPath
-      ? await Promise.all([rendererRead, dependencies.readRenderer(overlayPath)])
-      : [await rendererRead, undefined];
+    const overlayDir = path.dirname(options.rendererPath);
+    const overlayPath =
+      bootstrap && cpaLiveVoiceOverlayHookAllowed()
+        ? path.join(overlayDir, "cpa-live-voice-hook.js")
+        : undefined;
+    const overlayBootstrapPath =
+      overlayPath && overlayVoiceBootstrapPreferred()
+        ? path.join(overlayDir, "overlay-voice-bootstrap.js")
+        : undefined;
+    const [rendererSource, overlayBundle, overlayBootstrapBundle] = overlayPath
+      ? await Promise.all([
+          rendererRead,
+          dependencies.readRenderer(overlayPath),
+          overlayBootstrapPath
+            ? dependencies.readRenderer(overlayBootstrapPath).catch(() => "")
+            : Promise.resolve(""),
+        ])
+      : [await rendererRead, undefined, ""];
     if (rendererSource.trim().length === 0) throw new Error("production Renderer Bundle is empty");
     const overlayHookSource =
       bootstrap && overlayBundle && overlayBundle.trim().length > 0
         ? `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${overlayBundle}`
+        : undefined;
+    const overlayVoiceBootstrapSource =
+      overlayHookSource && overlayBootstrapBundle.trim().length > 0
+        ? `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${overlayBootstrapBundle}`
         : undefined;
     startupTrace("installing Renderer Session");
     const installed = await installProductionSession(
@@ -275,6 +296,7 @@ export async function runDesktopController(
         rendererCdpEndpoint: options.rendererCdpEndpoint,
         rendererSource: `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${rendererSource}`,
         ...(overlayHookSource ? { overlayHookSource } : {}),
+        ...(overlayVoiceBootstrapSource ? { overlayVoiceBootstrapSource } : {}),
         // External Agents are discovered from each target Host after installation.
         timeoutMs: PRODUCTION_INSTALL_TIMEOUT_MS,
         signal,

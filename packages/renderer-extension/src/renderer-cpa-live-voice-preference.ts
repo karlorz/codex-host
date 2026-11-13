@@ -1,45 +1,35 @@
 import { voiceRoutesSchema, type VoiceRoutes } from "@codexhost/shared-contracts";
+import {
+  CHAT_LIVE_VOICE_STORAGE_KEY,
+  CPA_LIVE_VOICE_STORAGE_KEY,
+  SHARED_VOICE_CACHE,
+  cachedVoiceRoutes,
+  nativeChatVoicePreferenceAllowsStart,
+  readVoiceStorageFlag,
+  rememberVoiceRoutes,
+  voicePreferenceState,
+} from "./renderer-voice-routes-cache.js";
 
-// Voice hook globals survive binding-probe replacement and bundle reinjection.
-// Keep their settings in the document realm so each bundle reads the same state.
-const voiceStateOwner = globalThis as typeof globalThis & {
-  __codexhostVoicePreferenceStateV1?: {
-    sharedRoutes: WeakMap<object, VoiceRoutes>;
-    gatewayReady: WeakMap<object, boolean>;
-  };
+export {
+  CHAT_LIVE_VOICE_STORAGE_KEY,
+  CPA_LIVE_VOICE_STORAGE_KEY,
+  nativeChatVoicePreferenceAllowsStart,
 };
-const { sharedRoutes, gatewayReady } = (voiceStateOwner.__codexhostVoicePreferenceStateV1 ??= {
-  sharedRoutes: new WeakMap<object, VoiceRoutes>(),
-  gatewayReady: new WeakMap<object, boolean>(),
-});
+
 export function applyVoiceGatewayReadiness(owner: object, ready: boolean): void {
-  gatewayReady.set(owner, ready);
+  voicePreferenceState().gatewayReady.set(owner, ready);
 }
 export function voiceGatewayIsReady(owner: object): boolean {
-  return gatewayReady.get(owner) === true;
+  return voicePreferenceState().gatewayReady.get(owner) === true;
 }
-const SHARED_VOICE_CACHE = "codexhost.voice-routes-cache.v1";
-function cachedRoutes(owner: object): VoiceRoutes | undefined {
-  const memory = sharedRoutes.get(owner);
-  if (memory) return memory;
-  try {
-    const storage = (owner as { localStorage?: Storage }).localStorage;
-    const parsed = voiceRoutesSchema.safeParse(
-      JSON.parse(storage?.getItem(SHARED_VOICE_CACHE) ?? "null"),
-    ).data;
-    if (parsed) sharedRoutes.set(owner, parsed);
-    return parsed;
-  } catch {
-    return undefined;
-  }
-}
+
 export function applySharedVoiceRoutes(owner: object, routes: VoiceRoutes): void {
   const snapshot = voiceRoutesSchema.parse({
     chatExperience: routes.chatExperience,
     chatConnection: routes.chatConnection,
     workConnection: routes.workConnection,
   });
-  sharedRoutes.set(owner, snapshot);
+  rememberVoiceRoutes(owner, snapshot);
   try {
     (owner as { localStorage?: Storage }).localStorage?.setItem(
       SHARED_VOICE_CACHE,
@@ -49,49 +39,32 @@ export function applySharedVoiceRoutes(owner: object, routes: VoiceRoutes): void
     /* Memory retains the applied route if browser storage is unavailable. */
   }
 }
-export function nativeChatVoicePreferenceAllowsStart(owner: object): boolean {
-  const routes = cachedRoutes(owner);
-  return routes
-    ? routes.chatExperience === "chatgpt"
-    : !readFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
-}
+
 export function legacyVoiceRoutes(owner: Window): VoiceRoutes {
-  const chatLegacy = readFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
+  const chatLegacy = readVoiceStorageFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
   return {
     chatExperience: chatLegacy ? "codex" : "chatgpt",
     chatConnection: chatLegacy ? "gateway" : "desktop",
-    workConnection: readFlag(owner, CPA_LIVE_VOICE_STORAGE_KEY, true) ? "gateway" : "desktop",
+    workConnection: readVoiceStorageFlag(owner, CPA_LIVE_VOICE_STORAGE_KEY, true)
+      ? "gateway"
+      : "desktop",
   };
-}
-
-export const CPA_LIVE_VOICE_STORAGE_KEY = "codexhost.cpa-live-voice.v1";
-export const CHAT_LIVE_VOICE_STORAGE_KEY = "codexhost.chat-live-voice.v1";
-
-function readFlag(owner: object, key: string, enabledWhenUnset: boolean): boolean {
-  const storage = (owner as { localStorage?: Storage }).localStorage;
-  if (!storage) return enabledWhenUnset;
-  try {
-    const value = storage.getItem(key);
-    return enabledWhenUnset ? value !== "0" : value === "1";
-  } catch {
-    return enabledWhenUnset;
-  }
 }
 
 /** Codex Work gateway choice; legacy storage is read only until shared migration. */
 export function readCpaLiveVoicePreference(owner: Window): boolean {
-  const routes = cachedRoutes(owner);
+  const routes = cachedVoiceRoutes(owner);
   return routes
     ? routes.workConnection === "gateway"
-    : readFlag(owner, CPA_LIVE_VOICE_STORAGE_KEY, true);
+    : readVoiceStorageFlag(owner, CPA_LIVE_VOICE_STORAGE_KEY, true);
 }
 
 /** Gateway is an explicit Codex Chat connection, independent of native ChatGPT. */
 export function readChatLiveVoicePreference(owner: Window): boolean {
-  const routes = cachedRoutes(owner);
+  const routes = cachedVoiceRoutes(owner);
   return routes
     ? routes.chatExperience === "codex" && routes.chatConnection === "gateway"
-    : readFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
+    : readVoiceStorageFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
 }
 
 /** Work override state for the injected hook, which only exposes a global object. */

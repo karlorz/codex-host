@@ -1,6 +1,10 @@
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { installRendererRpcSteeringDirect } from "../src/renderer-rpc-steering.js";
+import {
+  installRendererRpcForHostHook,
+  rendererRpcForHostOwns,
+} from "../src/renderer-rpc-for-host-hooks.js";
 
 function fixture(options: { foreign?: boolean; ambiguous?: boolean } = {}) {
   const objects = new Map<string, object>();
@@ -168,5 +172,26 @@ describe("native RPC steering owner discovery", () => {
     const f = fixture();
     const client = { command: f.command, evaluate: () => Promise.reject(new Error("closed")) };
     await expect(installRendererRpcSteeringDirect(client)).resolves.toBe(false);
+  });
+  it("retains steering underneath a submission hook without repeating heap discovery", async () => {
+    const f = fixture();
+    const method = f.controller.forHost;
+    const release = vi.fn();
+    f.window.__codexhostRpcSteeringV1 = {
+      controller: f.controller,
+      forHost: method,
+      owns: () => rendererRpcForHostOwns(f.controller, method),
+      release,
+    };
+    const outer = installRendererRpcForHostHook(f.controller, (upstream) => upstream);
+    try {
+      expect(f.controller.forHost).not.toBe(method);
+      await expect(installRendererRpcSteeringDirect(f.client)).resolves.toBe(false);
+      expect(release).not.toHaveBeenCalled();
+      expect(f.install).not.toHaveBeenCalled();
+      expect(f.command).not.toHaveBeenCalled();
+    } finally {
+      outer?.release();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { auditedAppInitialAssetPresent } from "./renderer-cpa-live-voice-hook.js";
+import { auditedAppInitialAssetPresent } from "./renderer-cpa-live-voice-config.js";
 
 interface VoiceAssets {
   version: string;

@@ -47,6 +47,15 @@ the splash and times out `Runtime.enable`. The Desktop Controller skips
 injection on **26.1106.*** and **26.1103.*** product versions so Desktop stays
 usable. Host and Web are independent of that skip.
 
+The exact-version allow attempt on `msi-1` in interactive session **4**
+reproduces this failure. The Controller can briefly report `installed` before
+recovery records `CDP command 'Runtime.enable' timed out`; the visible window
+remains on the splash. That initial status is not a successful attachment.
+Keep the Windows skip and retain a Controller backup before compatibility probes.
+Launch through the installed `codexhost-start.exe` in the interactive session;
+a session-0 Host can separately lock the Mapping Store and prevent startup.
+The macOS exact-version exception does not qualify the Windows Store build.
+
 This is not a Live Voice qualification of 26.1106. Voice pins stay in
 [cpa-live-voice-desktop-hook.md](cpa-live-voice-desktop-hook.md).
 macOS production remains [26.1027.61615](macos-desktop-pin-daily-driver.md).

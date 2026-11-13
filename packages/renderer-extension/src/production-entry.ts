@@ -6,6 +6,7 @@ import { installExternalVoiceLaunchHook } from "./renderer-external-voice-launch
 import { installVoiceCapabilityProjection } from "./renderer-voice-capability.js";
 import { installVoiceSettingsExplanation } from "./renderer-voice-settings.js";
 import { installRendererRpcSteering } from "./renderer-rpc-steering.js";
+import { rendererRpcForHostOwns } from "@codexhost/desktop-control/renderer-bindings";
 
 Object.defineProperty(window, "__codexhostInstallRpcSteeringV1", {
   configurable: true,
@@ -26,11 +27,14 @@ Object.defineProperty(window, "__codexhostInstallRpcSteeringV1", {
       originalDispose.call(routing);
     };
     routing.dispose = dispose;
+    const owner = controller as { forHost: (hostId: string) => unknown };
+    const forHost = owner.forHost;
     state.__codexhostRpcSteeringV1 = {
       controller,
       // A later native Remote Control install replaces this method; the Controller
       // compares it on every tick and releases a displaced wrapper to reinstall.
-      forHost: (controller as { forHost: unknown }).forHost,
+      forHost,
+      owns: () => rendererRpcForHostOwns(owner, forHost),
       release() {
         cleanup();
         delete state.__codexhostRpcSteeringV1;

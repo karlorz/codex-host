@@ -8,6 +8,16 @@ const entries = [
   { entry: "src/index.ts", format: "esm", outfile: "dist/index.js" },
   { entry: "src/production-entry.ts", format: "iife", outfile: "dist/production.js" },
   { entry: "src/cpa-live-voice-entry.ts", format: "iife", outfile: "dist/cpa-live-voice-hook.js" },
+  {
+    entry: "src/overlay-voice-bootstrap-entry.ts",
+    format: "iife",
+    outfile: "dist/overlay-voice-bootstrap.js",
+  },
+  {
+    entry: "src/hashed-native-chat-voice-entry.ts",
+    format: "iife",
+    outfile: "dist/hashed-native-chat-voice.js",
+  },
   { entry: "src/probe-entry.ts", format: "iife", outfile: "dist/renderer-binding-probe.js" },
   { entry: "src/audit-entry.ts", format: "iife", outfile: "dist/contract-audit.js" },
   { entry: "src/console-entry.ts", format: "iife", outfile: "dist/console.js" },

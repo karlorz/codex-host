@@ -60,7 +60,8 @@ The retained **26.1027.30824** profiles remain independently selectable.
 Fork tags on this pin keep it. Public Sparkle latest is **26.1106.51428**
 build **26605** ([#37](https://github.com/karlorz/codex-host/issues/37),
 [#38](https://github.com/karlorz/codex-host/issues/38)). Keep production on
-this pin; 26.1106 is skipped, not a pending remap. Upstream `v0.18.0` #811
+this voice pin; macOS 26.1106 Renderer installation does not qualify voice.
+Upstream `v0.18.0` #811
 accepts 24- and 25-slot scoped-draft Model memo layouts on that Desktop; it
 does not map Work/Chat voice assets.
 
@@ -108,7 +109,7 @@ interruption/mute, and spontaneous-close recovery are opportunistic dogfood
 under [issue #4](https://github.com/karlorz/codex-host/issues/4), not a
 release gate.
 
-## Desktop 26.1106.51428 (skipped)
+## Desktop 26.1106.51428 (voice unqualified)
 
 Public Sparkle **26.1106.51428** build **26605** is not a Work/Chat pin.
 Compat Daily tracks it on [#37](https://github.com/karlorz/codex-host/issues/37)
@@ -117,9 +118,59 @@ draft-model binding for 26.1106 is independent of these voice assets. Unknown
 or mixed assets fail closed. Keep 26.1027; this is not a remap queue.
 Windows Store product **26.1106.51428** (MSIX **26.1106.6628.0**) is the
 Windows daily driver. CodexHost Renderer injection hangs that window on the
-splash, so the Desktop Controller skips injection on 26.1106/26.1103 product
-versions. Host and Web still run. This is not a Live Voice qualification of
-26.1106. Windows daily-driver steps are in
+splash, so the Desktop Controller keeps the Windows 26.1106/26.1103 skip.
+The exact macOS **26.1106.51428** build is allowed to attempt Renderer installation;
+its isolated signed-out startup and production-bundle evaluation do not reproduce
+that hang. Signed-in Composer/routing behavior remains unqualified.
+Named `app-initial-*` / `app-shared-*` Work/Chat pins remain unqualified;
+capability-family and overlay-page exports are not remapped. Compact Voice Chat
+still uses the avatar overlay webContents. Overlay voice-hook CDP is installed
+once per overlay target and kept attached, so later Controller ticks do not
+`Runtime.enable` that page again. Current-document injection on this build uses
+the small `overlay-voice-bootstrap.js` hashed webpack wrap, not the full overlay
+hook IIFE, so compact Voice Chat start is not stalled by a large
+`Runtime.evaluate`. The wrap resolves
+`348410.1a97dde15f.js` → `GDNt._n` and Host bridge `TL6G.O1`. ChatGPT Chat
+voice on this build is still the CodexHost Start Voice waveform beside Send,
+not the official overlay Voice Chat button. Named `start-voice-*` files are
+absent, so the native Chat hook loads hashed Instant Connect instead:
+`async/530142.1e51e7f4b2.js` (`j9r7.initializeVoiceSession` /
+`startVoiceWithIntroduction`) and `async/586788.c871bb9b7d.js`
+(`VoiceInstantConnectCacheController`). Empty `j9r7` / `oWM3` webpack cache
+entries are unpoisoned after those async factories are installed. Empty
+ChatGPT home has no Send control; the waveform occupies the official voice
+slot, then hides Codex Start new voice chat / Start voice chat in that Chat
+composer. While the waveform is present those official controls stay hidden.
+An empty existing Chat still has a disabled Send; Start Voice copies the official
+voice control classes instead of Send's `pointer-events-none`, and a leftover
+Instant Connect flag that is not `connected` does not disable the waveform.
+Hashed Chat must not set `hOYb.H3`. That flag freezes ChatGPT home and cancels
+Instant Connect introduction. Hashed idle still mounts
+`VoiceInstantConnectCacheController` so queued START runs. Hashed START reads
+`getVoiceNuxMode`: first-run `wingman` uses `startVoiceWithIntroduction` with
+`{kind:"full", showIntroduction:true}`; after `hasSeenAdvancedVoice` it clears a
+stale Instant Connect intent and dispatches `{type:"START", args:{conversationId,
+eventSource:"composer"}}`. A missing intro payload would reopen Meet Voice on every
+click. Leftover intent makes native `ip.ac` reject START and return to Chat home.
+`GaA7.appServices.realtimeVoiceRuntime.requestRealtimeStart` intercepts Chat only
+while `__codexhostNativeChatVoiceV1.status === "active"`. A failed hashed bind
+must not reject the official Instant Connect wave with Native Chat voice is
+unavailable. Chat START still goes through `startNativeChatVoiceForRequest` when
+that hook is bound. Existing Chat threads still show Start Voice beside Send
+when hashed Instant Connect bind fails; that click remembers Chat and uses
+`GaA7` Instant Connect. ChatGPT Instant Connect that still reaches
+the overlay can POST `/wham`, so the avatar-overlay URL is not Work ownership.
+The primary hashed hook records the visible Composer surface in
+`codexhost.voice-launch-experience.v1`; the overlay wrap reads that shared
+value. Chat launch experience wins over overlay `originator=codex_work_desktop`
+and overlay `existingCall`, so Chat Instant Connect stays Chat instead of Host
+Work. Overlay Work create still goes through Host when launch experience is Work
+or unset. Thread identity stays the native conversation id. Explicit Work launch
+ownership and a Work-surface `originator=codex_work_desktop` use the Work
+connection preference.
+`__codexhostClientOwnedVoiceV1.activation`
+reports asset seen, import started/resolved/failed, and wrapper active. Other skipped
+builds retain their guards. Host and Web run independently. Windows daily-driver steps are in
 [windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
 
 ## Desktop 26.1103.41825 (skipped)
@@ -796,8 +847,10 @@ npm run build:renderer
 ```
 
 Copy `packages/renderer-extension/dist/production.js` onto the running
-installation's `app/renderer-extension.js`, and
-`packages/renderer-extension/dist/cpa-live-voice-hook.js` onto `app/cpa-live-voice-hook.js`.
+installation's `app/renderer-extension.js`,
+`packages/renderer-extension/dist/cpa-live-voice-hook.js` onto `app/cpa-live-voice-hook.js`,
+and `packages/renderer-extension/dist/overlay-voice-bootstrap.js` onto
+`app/overlay-voice-bootstrap.js`.
 On the macOS app bundle those paths are
 `/Applications/codexhost.app/Contents/Resources/app/`. Discover the equivalent
 payload from the current Controller `--renderer` argument on other layouts.
@@ -902,7 +955,12 @@ avatar overlay, where no primary Composer is present. It applies even when the
 backend model name has no `codex` marker (for example, `gpt-6.1-sol`) or call
 metadata omits the model. Model-name and visible-Composer detection remain
 fallbacks for launches without an explicit product experience. Explicit Chat
-ownership still selects the Chat connection preference.
+ownership still selects the Chat connection preference. On macOS **26.1106.51428**
+the hashed overlay starter has no `productExperience`; the primary Composer
+surface is persisted so overlay `/wham` can apply that same ownership. ChatGPT
+Instant Connect on this build must not inherit Work routing from the overlay
+URL. Overlay Chat Instant Connect stays on native Instant Connect when Chat is
+Desktop default; Codex Chat gateway still Host-creates Chat, not Work.
 
 The Host reads the configured realtime URLs and selected provider's
 `experimental_bearer_token` or `env_key`. Both URLs must use HTTPS and share an
@@ -1161,7 +1219,7 @@ The legacy gate override reads the Work gateway preference at install time. Per-
 
 1. When the saved injection setting is on (unless overridden by `CODEXHOST_CPA_LIVE_VOICE=0|1`), the Controller prefixes the production Renderer source with a frozen `globalThis.__codexhostCpaLiveVoiceHookV1` record (audited Desktop version and `app-initial` asset name only).
 2. `Page.addScriptToEvaluateOnNewDocument` plus immediate `Runtime.evaluate` inject the Host Renderer into the primary `app://-/index.html` page.
-3. Voice starts on the avatar overlay (`app://-/index.html?initialRoute=/avatar-overlay`). That page gets a **hook-only** bundle (`cpa-live-voice-hook.js`), not the Host Renderer binding. The overlay loads the same audited `app-initial` asset in its own JavaScript realm with its own Statsig client. The overlay bundle also drops Host `thread/started` and turn/item notifications for Threads that have not hosted voice in that overlay, so a leftover overlay does not upsert CLI-created Threads or rebind the same Turn into the main chat. Known voice Threads keep receiving notifications after hangup because native stream ownership can outlive the call. While a realtime call is active and the overlay's own voice controls are collapsed (Work voice has handed the orb to the main Thread), the overlay hides its leftover mascot, Quick Chat orb, and transcript-message chrome so Voice Chat does not show a second copy. Expanded Quick Chat voice keeps the overlay mascot.
+3. Voice starts on the avatar overlay (`app://-/index.html?initialRoute=/avatar-overlay`). That page gets a **hook-only** bundle, not the Host Renderer binding. Work/Chat pins inject `cpa-live-voice-hook.js`. macOS **26.1106.51428** current-document and new-document overlay injection uses `overlay-voice-bootstrap.js` (hashed webpack WebFetch wrap only; Controller still prefixes CPA config) so compact Voice Chat start is not blocked by evaluating the full overlay IIFE. The overlay loads the same audited `app-initial` asset in its own JavaScript realm with its own Statsig client. The overlay bundle also drops Host `thread/started` and turn/item notifications for Threads that have not hosted voice in that overlay, so a leftover overlay does not upsert CLI-created Threads or rebind the same Turn into the main chat. Known voice Threads keep receiving notifications after hangup because native stream ownership can outlive the call. While a realtime call is active and the overlay's own voice controls are collapsed (Work voice has handed the orb to the main Thread), the overlay hides its leftover mascot, Quick Chat orb, and transcript-message chrome so Voice Chat does not show a second copy. Expanded Quick Chat voice keeps the overlay mascot.
 4. The Renderer hook no-ops unless the exact audited `app://-/assets/app-initial-6350d04672d0.js` asset is present (performance entries, script src, or link href, including relative URLs). Unknown assets fail closed; matching text in a query string or source-map filename is insufficient.
 5. On a matching page it polls for up to 60 seconds until a Statsig client is registered, then wraps that client's `checkGate`. The gate is read when voice starts, so the wrap only has to land before the first voice click.
 

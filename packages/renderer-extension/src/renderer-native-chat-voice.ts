@@ -3,10 +3,17 @@ import {
   NATIVE_CHAT_VOICE_ASSETS,
   loadNativeChatVoiceModules,
 } from "./renderer-native-chat-voice-assets.js";
-import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bindings";
+import { committedReactAncestors } from "@codexhost/desktop-control/renderer-react-ownership";
 import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
-import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-hook.js";
-import { nativeChatVoicePreferenceAllowsStart } from "./renderer-cpa-live-voice-preference.js";
+import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
+import {
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  hashedNativeChatVoiceSupported,
+  loadHashedNativeChatVoiceModules,
+  startHashedChatInstantConnect,
+} from "./renderer-hashed-native-chat-voice.js";
+import { rememberVoiceProductExperience } from "./renderer-voice-gateway-wrap.js";
+import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
 import { observeNativeChatVoiceState } from "./renderer-native-chat-voice-state.js";
 import { nativeChatVoiceDraftSelection } from "./renderer-native-chat-voice-selection.js";
 import {
@@ -100,14 +107,26 @@ export function detectNativeChatVoiceBinding(
     if (!scope) return;
     const appNode = scope.chain.get(native.scopeDefinition.id);
     if (!record(appNode)) return;
-    const backendId = scope.get(native.backendConversationId, props.conversationId);
-    const hasBackendId = typeof backendId === "string" && CONVERSATION_UUID.test(backendId);
+    let backendId: unknown;
+    try {
+      backendId = scope.get(native.backendConversationId, props.conversationId);
+    } catch {
+      backendId = undefined;
+    }
+    // A local-chatgpt locator is never a backend ChatGPT UUID.
+    if (typeof backendId === "string" && backendId.startsWith("local-chatgpt:"))
+      backendId = undefined;
+    let hasBackendId = typeof backendId === "string" && CONVERSATION_UUID.test(backendId);
     // Native drafts have a local locator until voice or a message creates the Chat.
     // START accepts an absent backend ID and owns conversation creation.
     const isDraft =
       backendId == null &&
       props.conversationId.startsWith("local-chatgpt:") &&
       CONVERSATION_UUID.test(props.conversationId.slice("local-chatgpt:".length));
+    if (!hasBackendId && !isDraft && CONVERSATION_UUID.test(props.conversationId)) {
+      hasBackendId = true;
+      backendId = props.conversationId;
+    }
     if (!hasBackendId && !isDraft) return;
     // The owner creates this provider below itself. Its own subscriptions can
     // still consume the outer home/new ComposerScope, which does not own the form.
@@ -168,7 +187,7 @@ export function detectNativeChatVoiceBinding(
       scope,
       context: [...contexts][0],
       composerContext,
-      backendConversationId: hasBackendId ? backendId : undefined,
+      backendConversationId: hasBackendId ? (backendId as string) : undefined,
     };
   }
 }
@@ -187,7 +206,9 @@ interface ChatVoiceTarget {
   clearTimeout: typeof clearTimeout;
 }
 
-/** The Chat service request must not enter the Codex new-thread overlay. */
+/** Instant Connect is intercepted only while the Chat hook is bound.
+ * A failed hashed bind must not reject the official composer wave.
+ */
 export function startNativeChatVoiceForRequest(
   request: unknown,
   target: object = globalThis,
@@ -199,8 +220,7 @@ export function startNativeChatVoiceForRequest(
   )
     return;
   const hook = (target as RecordValue)[HOOK_GLOBAL] as ChatVoiceHook | undefined;
-  if (!hook || hook.status === "disabled" || hook.status === "unsupported")
-    return Promise.reject(new Error("Native Chat voice is unavailable"));
+  if (hook?.status !== "active") return;
   return hook.start();
 }
 
@@ -226,7 +246,8 @@ export function installNativeChatVoiceHook(
     },
   });
   if (!config) return unavailable("disabled");
-  if (!supportsVoiceVersion(NATIVE_CHAT_VOICE_ASSETS, config.desktopVersion))
+  const hashed = hashedNativeChatVoiceSupported(config);
+  if (!hashed && !supportsVoiceVersion(NATIVE_CHAT_VOICE_ASSETS, config.desktopVersion))
     return unavailable("unsupported");
   const doc = target.document;
   if (!doc) return unavailable("unsupported");
@@ -272,13 +293,15 @@ export function installNativeChatVoiceHook(
     mounted = undefined;
     boundScope = undefined;
   };
-  const findBinding = () => {
-    if (!modules || !nativeChatVoicePreferenceAllowsStart(target)) return;
+  const visibleComposer = (): Element | undefined => {
     const forms = [...doc.querySelectorAll("[data-chatgpt-composer]")].filter(
       (form) => form.getBoundingClientRect().width > 0 && !form.closest("[hidden], [inert]"),
     );
-    if (forms.length !== 1) return;
-    const form = forms[0];
+    return forms.length === 1 ? forms[0] : undefined;
+  };
+  const findBinding = () => {
+    if (!modules || !nativeChatVoicePreferenceAllowsStart(target)) return;
+    const form = visibleComposer();
     if (!form) return;
     return detectNativeChatVoiceBinding(form, {
       scopeDefinition: modules.shared.Qst as NativeChatVoiceModules["scopeDefinition"],
@@ -303,6 +326,7 @@ export function installNativeChatVoiceHook(
     status: "pending",
     async start() {
       if (disposed || starting) return;
+      rememberVoiceProductExperience({ productExperience: "chat" }, target);
       const current = findBinding();
       if (!current || !modules || current.appNode !== mounted?.node)
         throw new Error("Select a ChatGPT conversation to start Chat voice");
@@ -356,34 +380,142 @@ export function installNativeChatVoiceHook(
     },
   };
   target[HOOK_GLOBAL] = handle;
+  const onWaveClick = (): void => {
+    rememberVoiceProductExperience({ productExperience: "chat" }, target);
+    const run =
+      hashed && handle.status !== "active"
+        ? startHashedChatInstantConnect(importModule)
+        : handle.start();
+    void Promise.resolve(run).catch((error: unknown) => {
+      chatVoiceDebug("native-chat-start-failed", {
+        hashed,
+        pending: handle.status !== "active",
+        message:
+          error instanceof Error && error.message ? error.message.slice(0, 80) : "unspecified",
+      });
+      if (button) button.title = "Chat voice could not start. Try again.";
+    });
+  };
+  const placeComposerWave = (composer: Element, disabled: boolean): void => {
+    const visibleControl = (control: HTMLButtonElement) =>
+      control.getBoundingClientRect().width > 0 && !control.closest("[hidden], [inert]");
+    const sends = [...composer.querySelectorAll<HTMLButtonElement>('button[type="submit"]')].filter(
+      visibleControl,
+    );
+    const official = [
+      ...composer.querySelectorAll<HTMLButtonElement>(
+        'button[aria-label="Start new voice chat"], button[aria-label="Start voice chat"]',
+      ),
+    ];
+    const send = sends.length === 1 ? sends[0] : undefined;
+    // Empty ChatGPT home has no Send. Occupy the official voice slot, then hide it.
+    const anchor = send ?? official.find(visibleControl) ?? official[0];
+    if (!anchor?.parentElement) {
+      removeButton();
+      return;
+    }
+    if (!button || !composer.contains(button)) {
+      removeButton();
+      button = doc.createElement("button");
+      button.type = "button";
+      button.setAttribute(BUTTON, "");
+      button.setAttribute("aria-label", "Start Voice");
+      button.title = "Start Voice";
+      button.innerHTML =
+        '<svg class="icon-primary-action text-composer-primary" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 8v4m4-7v10m6-12v14m4-9v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+      button.addEventListener("click", onWaveClick);
+    }
+    if (button.nextElementSibling !== anchor) anchor.parentElement.insertBefore(button, anchor);
+    alignNativeChatVoiceButton(button, anchor, doc);
+    rememberVoiceProductExperience({ productExperience: "chat" }, target);
+    // The Codex entry opens onboarding/optimistic launch state before its
+    // service RPC. Only the native Chat START control belongs in this composer.
+    for (const control of official) {
+      if (!overlayButtons.has(control))
+        overlayButtons.set(control, [
+          control.style.getPropertyValue("display"),
+          control.style.getPropertyPriority("display"),
+        ]);
+      control.style.setProperty("display", "none", "important");
+    }
+    const styleSource =
+      (send && !send.disabled ? send : undefined) ??
+      official.find(visibleControl) ??
+      official[0] ??
+      send ??
+      anchor;
+    if (button && styleSource) {
+      button.disabled = disabled;
+      // Empty Send is disabled independently of whether voice can start.
+      const className = [
+        ...String(styleSource.className ?? "")
+          .split(/\s+/)
+          .filter(
+            (name) =>
+              name !== "opacity-50" &&
+              name !== "cursor-default" &&
+              name !== "cursor-not-allowed" &&
+              name !== "pointer-events-none",
+          ),
+        ...(button.disabled ? ["opacity-50", "cursor-default"] : []),
+      ].join(" ");
+      if (button.className !== className) button.className = className;
+      const pointerEvents = button.disabled ? "none" : "auto";
+      if (button.style.pointerEvents !== pointerEvents) button.style.pointerEvents = pointerEvents;
+    }
+  };
+  const showHashedComposerWave = (): boolean => {
+    if (!hashed || !nativeChatVoicePreferenceAllowsStart(target)) return false;
+    const composer = visibleComposer();
+    if (!composer) return false;
+    mounted?.dispose();
+    mounted = undefined;
+    boundScope = undefined;
+    placeComposerWave(composer, starting);
+    handle.status = "pending";
+    return true;
+  };
   const refresh = async (): Promise<void> => {
     if (disposed) return;
     try {
       if (renderFailed) throw new Error();
       if (!modules) {
         const names = loadedAssetNames(doc, target.performance);
-        const assets = selectVoiceAssets(
-          NATIVE_CHAT_VOICE_ASSETS,
-          names,
-          config.desktopVersion,
-          config.desktopPlatform,
-        );
-        if (!assets) {
-          if (Date.now() - started >= 60_000) {
-            handle.status = "unsupported";
+        if (hashed) {
+          if (!names.some((name) => name.includes(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))) {
+            if (showHashedComposerWave()) return;
+            if (Date.now() - started >= 60_000) handle.status = "unsupported";
             return;
           }
-          return;
+          modules = await loadHashedNativeChatVoiceModules(importModule);
+        } else {
+          const assets = selectVoiceAssets(
+            NATIVE_CHAT_VOICE_ASSETS,
+            names,
+            config.desktopVersion,
+            config.desktopPlatform,
+          );
+          if (!assets) {
+            if (Date.now() - started >= 60_000) {
+              handle.status = "unsupported";
+              return;
+            }
+            return;
+          }
+          modules = await loadNativeChatVoiceModules(assets, importModule);
         }
-        const loaded = await loadNativeChatVoiceModules(assets, importModule);
         if (disposed) return;
-        modules = loaded;
       }
       const current = findBinding();
       selectDraft?.();
+      if (starting) {
+        if (current) boundScope = current.scope;
+        return;
+      }
       if (!current) {
         showHeadline();
         if (handle.activeCall) return;
+        if (showHashedComposerWave()) return;
         release();
         handle.status = "pending";
         return;
@@ -393,7 +525,10 @@ export function installNativeChatVoiceHook(
       if (!mounted) {
         const { scope } = current;
         const initial = modules.initial;
-        const previous = scope.get(initial.aT);
+        const stopObserving = observeNativeChatVoiceState(scope, initial);
+        // Hashed Chat never sets hOYb.H3: that flag freezes home and cancels NUX.
+        // Instant Connect still needs VoiceInstantConnectCacheController to run START.
+        const previous = hashed ? undefined : scope.get(initial.aT);
         const container = doc.createElement("div");
         container.setAttribute("data-codexhost-chat-voice-prewarm", "");
         doc.body.append(container);
@@ -411,7 +546,6 @@ export function installNativeChatVoiceHook(
             renderFailed = true;
           },
         });
-        const stopObserving = observeNativeChatVoiceState(scope, initial);
         let appChain: Map<unknown, unknown> | undefined;
         let composerChain: Map<unknown, unknown> | undefined;
         mounted = {
@@ -428,7 +562,10 @@ export function installNativeChatVoiceHook(
                 react.createElement(
                   next.composerContext.context,
                   { value: composerChain },
-                  react.createElement(modules?.prewarm.VoiceInstantConnectCacheController, null),
+                  react.createElement(
+                    modules?.prewarm.VoiceInstantConnectCacheController,
+                    record(modules?.prewarm.props) ? modules.prewarm.props : null,
+                  ),
                 ),
               ),
             );
@@ -437,11 +574,11 @@ export function installNativeChatVoiceHook(
             stopObserving();
             root.unmount();
             container.remove();
-            if (scope.get(initial.aT) === true) scope.set(initial.aT, previous);
+            if (!hashed && scope.get(initial.aT) === true) scope.set(initial.aT, previous);
             chatVoiceDebug("native-chat-unbound");
           },
         };
-        scope.set(initial.aT, true);
+        if (!hashed) scope.set(initial.aT, true);
         chatVoiceDebug("native-chat-bound", {
           hasConversationId: current.backendConversationId !== undefined,
         });
@@ -455,6 +592,8 @@ export function installNativeChatVoiceHook(
             isVoiceModeActive: boolean;
             isWorkMode: boolean;
             conversationId: unknown;
+            hasVoiceSessionStarted?: boolean;
+            server?: { connectionState?: unknown };
           };
         }
       ).getState();
@@ -466,63 +605,20 @@ export function installNativeChatVoiceHook(
       )
         restoreHeadline ??= hideNativeChatVoiceHomeHeadline(doc);
       else showHeadline();
-      const sends = [
-        ...current.composer.querySelectorAll<HTMLButtonElement>('button[type="submit"]'),
-      ].filter(
-        (control) =>
-          control.getBoundingClientRect().width > 0 && !control.closest("[hidden], [inert]"),
+      const voiceLive =
+        voiceState.isVoiceModeActive === true &&
+        (voiceState.hasVoiceSessionStarted === true ||
+          voiceState.server?.connectionState === "connected");
+      placeComposerWave(
+        current.composer,
+        starting || current.props.isStreaming === true || voiceLive,
       );
-      const send = sends.length === 1 ? sends[0] : undefined;
-      if (!send?.parentElement) removeButton();
-      else {
-        if (!button || !current.composer.contains(button)) {
-          removeButton();
-          button = doc.createElement("button");
-          button.type = "button";
-          button.setAttribute(BUTTON, "");
-          button.setAttribute("aria-label", "Start Voice");
-          button.title = "Start Voice";
-          button.innerHTML =
-            '<svg class="icon-primary-action text-composer-primary" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 8v4m4-7v10m6-12v14m4-9v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-          button.addEventListener("click", () => {
-            void handle.start().catch(() => {
-              if (button) button.title = "Chat voice could not start. Try again.";
-            });
-          });
-        }
-        if (button.nextElementSibling !== send) send.parentElement.insertBefore(button, send);
-        alignNativeChatVoiceButton(button, send, doc);
-      }
-      if (button)
-        // The Codex entry opens onboarding/optimistic launch state before its
-        // service RPC. Only the native Chat START control belongs in this composer.
-        for (const control of current.composer.querySelectorAll<HTMLButtonElement>(
-          'button[aria-label="Start new voice chat"], button[aria-label="Start voice chat"]',
-        )) {
-          if (!overlayButtons.has(control))
-            overlayButtons.set(control, [
-              control.style.getPropertyValue("display"),
-              control.style.getPropertyPriority("display"),
-            ]);
-          control.style.setProperty("display", "none", "important");
-        }
-      if (button && send) {
-        button.disabled =
-          starting || current.props.isStreaming === true || voiceState.isVoiceModeActive;
-        // Empty Send is disabled independently of whether voice can start.
-        const className = [
-          ...send.className
-            .split(/\s+/)
-            .filter((name) => name !== "opacity-50" && name !== "cursor-default"),
-          ...(button.disabled ? ["opacity-50", "cursor-default"] : []),
-        ].join(" ");
-        if (button.className !== className) button.className = className;
-      }
       handle.status = "active";
     } catch {
-      release();
-      handle.status = "unsupported";
       chatVoiceDebug("native-chat-binding-failed");
+      if (showHashedComposerWave()) return;
+      release();
+      handle.status = "pending";
       return;
     } finally {
       if (!disposed && handle.status !== "unsupported")

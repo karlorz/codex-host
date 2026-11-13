@@ -12,6 +12,10 @@ import {
   routeExternalVoiceLaunch,
 } from "../src/renderer-external-voice-launch.js";
 import { applySharedVoiceRoutes } from "../src/renderer-cpa-live-voice-preference.js";
+import {
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+} from "../src/renderer-hashed-native-chat-voice.js";
 
 const carrier = "codexhost/plugin-v1@grok-test-model-permission";
 const source = "composer_button_new_thread";
@@ -109,6 +113,47 @@ describe("native new-voice selection", () => {
     expect(hook.status).toBe("unsupported");
     expect(f.importModule).not.toHaveBeenCalled();
     expect(f.services.realtimeVoiceRuntime).toBe(f.runtime);
+    hook.dispose();
+  });
+
+  it("keeps hashed Chat requestRealtimeStart on native Instant Connect", async () => {
+    const f = hookFixture();
+    Reflect.set(
+      f.target[CPA_LIVE_VOICE_HOOK_GLOBAL],
+      "desktopVersion",
+      HASHED_WEBPACK_VOICE_VERSION,
+    );
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopPlatform", "darwin");
+    f.names.splice(0, f.names.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const nativeStart = vi.fn().mockResolvedValue(undefined);
+    Object.assign(f.target, {
+      __codexhostNativeChatVoiceV1: { status: "active", start: nativeStart },
+    });
+    applySharedVoiceRoutes(f.target, {
+      chatExperience: "chatgpt",
+      chatConnection: "desktop",
+      workConnection: "gateway",
+    });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GaA7") return { appServices: f.services };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    const hook = installExternalVoiceLaunchHook({
+      target: f.target,
+      importModule: async (url) => {
+        expect(url).toBe(`app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}`);
+        return { __webpack_require__: require };
+      },
+    });
+    await settle();
+    expect(hook.status).toBe("active");
+    const request = { source: "composer_button_new_thread", productExperience: "chat" };
+    await f.services.realtimeVoiceRuntime.requestRealtimeStart(request);
+    expect(nativeStart).toHaveBeenCalledOnce();
+    expect(f.start).not.toHaveBeenCalled();
     hook.dispose();
   });
 
@@ -331,8 +376,8 @@ describe("native Chat service interception", () => {
     hook.dispose();
   });
 
-  it.each(["absent", "disabled", "unsupported"])(
-    "rejects native Chat when its binding is %s before the overlay can launch",
+  it.each(["absent", "disabled", "unsupported", "pending"])(
+    "leaves official Instant Connect on Desktop when the Chat hook is %s",
     async (status) => {
       const f = hookFixture();
       const chatStart = vi.fn();
@@ -343,19 +388,17 @@ describe("native Chat service interception", () => {
       const hook = installExternalVoiceLaunchHook(f);
       try {
         await settle();
-        await expect(
-          f.services.realtimeVoiceRuntime.requestRealtimeStart({
-            ...request(),
-            productExperience: "chat",
-          }),
-        ).rejects.toThrow("Native Chat voice is unavailable");
+        await f.services.realtimeVoiceRuntime.requestRealtimeStart({
+          ...request(),
+          productExperience: "chat",
+        });
         expect(chatStart).not.toHaveBeenCalled();
-        expect(f.start).not.toHaveBeenCalled();
+        expect(f.start).toHaveBeenCalledOnce();
         await f.services.realtimeVoiceRuntime.requestRealtimeStart({
           ...request(),
           productExperience: "work",
         });
-        expect(f.start).toHaveBeenCalledOnce();
+        expect(f.start).toHaveBeenCalledTimes(2);
       } finally {
         hook.dispose();
       }

@@ -305,8 +305,9 @@ export class CdpClient {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new Error(`CDP command '${method}' timed out`));
+        // A timeout does not cancel inspector work in the Renderer. Retire this
+        // connection instead of adding more commands behind the unanswered one.
+        this.#disconnect(new CdpConnectionClosedError(`CDP command '${method}' timed out`));
       }, this.#commandTimeoutMs);
       this.#pending.set(id, { resolve, reject, timeout });
       try {

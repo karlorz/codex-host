@@ -40,6 +40,7 @@ for relative in \
   app/web-modules/node_modules/koffi/package.json \
   app/renderer-extension.js \
   app/cpa-live-voice-hook.js \
+  app/overlay-voice-bootstrap.js \
   licenses/Node.js-LICENSE.txt \
   licenses/Anthropic-SDK-LICENSE.txt \
   licenses/Claude-Agent-SDK-LICENSE.md \

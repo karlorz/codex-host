@@ -11,6 +11,10 @@ export {
 } from "./renderer-rpc-submission.js";
 export { findRendererAppScopeStore } from "./renderer-host-rpc-discovery.js";
 export {
+  installRendererRpcForHostHook,
+  rendererRpcForHostOwns,
+} from "./renderer-rpc-for-host-hooks.js";
+export {
   NATIVE_SCHEDULE_SIDEBAR_ROW_SELECTOR,
   readNativeScheduleSidebarThread,
 } from "./renderer-native-schedule-sidebar.js";

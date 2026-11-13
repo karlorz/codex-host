@@ -5,6 +5,11 @@ import {
   CLIENT_OWNED_VOICE_ASSETS,
   rememberVoiceProductExperience,
 } from "./renderer-client-owned-voice.js";
+import {
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  hashedNativeChatVoiceSupported,
+  resolveHashedWebpackRequire,
+} from "./renderer-hashed-native-chat-voice.js";
 import type { RendererHostRouting } from "@codexhost/desktop-control/renderer-bindings";
 import {
   AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET,
@@ -30,6 +35,10 @@ type RecordValue = Record<string, unknown>;
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hashedAppServices(value: unknown): RecordValue | undefined {
+  return isRecord(value) && isRecord(value.appServices) ? value.appServices : undefined;
 }
 
 function lastAgentPluginRoute(owner: object): string | undefined {
@@ -122,12 +131,14 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
   if (existing) return existing;
   const config = readCpaLiveVoiceHookConfig(target);
   if (!config) return { status: "disabled", dispose() {} };
+  const hashed = hashedNativeChatVoiceSupported(config);
   if (
-    config.auditedDesktopVersion !== AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION ||
-    config.auditedAppInitialAsset !== AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET ||
-    (config.desktopVersion !== undefined &&
-      config.desktopVersion !== config.auditedDesktopVersion &&
-      !supportsVoiceVersion(CLIENT_OWNED_VOICE_ASSETS, config.desktopVersion))
+    !hashed &&
+    (config.auditedDesktopVersion !== AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION ||
+      config.auditedAppInitialAsset !== AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET ||
+      (config.desktopVersion !== undefined &&
+        config.desktopVersion !== config.auditedDesktopVersion &&
+        !supportsVoiceVersion(CLIENT_OWNED_VOICE_ASSETS, config.desktopVersion)))
   )
     return { status: "unsupported", dispose() {} };
   const importModule: (url: string) => Promise<RecordValue> =
@@ -151,57 +162,59 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
     if (disposed) return;
     try {
       const names = loadedAssetNames(target.document, target.performance);
-      const assets = selectVoiceAssets(
-        LAUNCH_ASSETS,
-        names,
-        config.desktopVersion,
-        config.desktopPlatform,
-      );
-      if (assets) {
-        module ??= await importModule(`app://-/assets/${assets.shared}`);
-        if (disposed) return;
-        const services = module?.[assets.services];
-        if (isRecord(services)) {
-          const original = services.realtimeVoiceRuntime;
-          if (typeof original === "function" || isRecord(original)) {
-            const start: unknown = Reflect.get(original, "requestRealtimeStart");
-            if (typeof start !== "function") {
-              handle.status = "unsupported";
-              return;
-            }
-            const launch = (...args: unknown[]): unknown => {
-              let request = args[0];
-              const chatStart = startNativeChatVoiceForRequest(request, target);
-              if (chatStart) return chatStart;
-              try {
-                request = routeExternalVoiceLaunch(
-                  request,
-                  target.__codexhostHostRoutingV1,
-                  target,
-                );
-              } catch {
-                // Retired or disconnected owners cannot claim native traffic.
-              }
-              return Reflect.apply(start, original, [request, ...args.slice(1)]);
-            };
-            const wrapped = new Proxy(original, {
-              get(service, key, receiver) {
-                return key === "requestRealtimeStart"
-                  ? launch
-                  : Reflect.get(service, key, receiver);
-              },
-            });
-            if (!Reflect.set(services, "realtimeVoiceRuntime", wrapped)) {
-              handle.status = "unsupported";
-              return;
-            }
-            restore = () => {
-              if (services.realtimeVoiceRuntime === wrapped)
-                services.realtimeVoiceRuntime = original;
-            };
-            handle.status = "active";
-            return;
+      const wrapRuntime = (services: RecordValue): boolean => {
+        const original = services.realtimeVoiceRuntime;
+        if (typeof original !== "function" && !isRecord(original)) return false;
+        const start: unknown = Reflect.get(original, "requestRealtimeStart");
+        if (typeof start !== "function") return false;
+        const launch = (...args: unknown[]): unknown => {
+          let request = args[0];
+          const chatStart = startNativeChatVoiceForRequest(request, target);
+          if (chatStart) return chatStart;
+          try {
+            request = routeExternalVoiceLaunch(request, target.__codexhostHostRoutingV1, target);
+          } catch {
+            // Retired or disconnected owners cannot claim native traffic.
           }
+          return Reflect.apply(start, original, [request, ...args.slice(1)]);
+        };
+        const wrapped = new Proxy(original, {
+          get(service, key, receiver) {
+            return key === "requestRealtimeStart" ? launch : Reflect.get(service, key, receiver);
+          },
+        });
+        if (!Reflect.set(services, "realtimeVoiceRuntime", wrapped)) return false;
+        restore = () => {
+          if (services.realtimeVoiceRuntime === wrapped) services.realtimeVoiceRuntime = original;
+        };
+        handle.status = "active";
+        return true;
+      };
+      if (hashed) {
+        if (names.some((name) => name.includes(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))) {
+          const req = await resolveHashedWebpackRequire(importModule);
+          if (disposed) return;
+          let ga: unknown;
+          try {
+            ga = req?.("GaA7");
+          } catch {
+            ga = undefined;
+          }
+          const services = hashedAppServices(ga);
+          if (services && wrapRuntime(services)) return;
+        }
+      } else {
+        const assets = selectVoiceAssets(
+          LAUNCH_ASSETS,
+          names,
+          config.desktopVersion,
+          config.desktopPlatform,
+        );
+        if (assets) {
+          module ??= await importModule(`app://-/assets/${assets.shared}`);
+          if (disposed) return;
+          const services = module?.[assets.services];
+          if (isRecord(services) && wrapRuntime(services)) return;
         }
       }
     } catch {

@@ -1,4 +1,5 @@
 import { THREAD_STEERING_CONTEXT_PARAM } from "@codexhost/shared-contracts";
+import { installRendererRpcForHostHook } from "@codexhost/desktop-control/renderer-bindings";
 import { prepareRpcSteeringQueue } from "./renderer-rpc-steering-queue.js";
 import { inspectRendererSteeringDelivery } from "./renderer-steering-delivery.js";
 
@@ -30,7 +31,7 @@ export function installRendererRpcSteering(value: unknown): (() => void) | null 
   const descriptor = Object.getOwnPropertyDescriptor(value, "forHost");
   if (!descriptor?.writable) return null;
   const controller = value as unknown as Controller;
-  const original = controller.forHost;
+  let original = controller.forHost;
   const cached = new WeakMap<object, Rpc>();
   let disposed = false;
   const wrap = (rpc: Rpc, hostId: string, owner: Rpc = rpc): Rpc => {
@@ -228,10 +229,13 @@ export function installRendererRpcSteering(value: unknown): (() => void) | null 
     cached.set(rpc, wrapped);
     return wrapped;
   };
-  const forHost = (hostId: string) => wrap(original.call(controller, hostId), hostId);
-  controller.forHost = forHost;
+  const hook = installRendererRpcForHostHook(controller, (upstream) => {
+    original = upstream as Controller["forHost"];
+    return (hostId) => wrap(original(hostId), hostId);
+  });
+  if (!hook) return null;
   return () => {
     disposed = true;
-    if (controller.forHost === forHost) Object.defineProperty(controller, "forHost", descriptor);
+    hook.release();
   };
 }

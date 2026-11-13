@@ -395,7 +395,10 @@ describe("production Desktop Controller", () => {
     expect(startAttachmentServer).toHaveBeenCalledOnce();
   });
 
-  it("does not inject the Renderer on skipped Desktop 26.1106", async () => {
+  it("does not inject the Renderer on Windows Desktop 26.1106", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
     const previous = process.env.CODEXHOST_DESKTOP_VERSION;
     process.env.CODEXHOST_DESKTOP_VERSION = "26.1106.51428";
     const abort = new AbortController();
@@ -415,6 +418,7 @@ describe("production Desktop Controller", () => {
         monitorIntervalMs: 1,
       });
     } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
       if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
       else process.env.CODEXHOST_DESKTOP_VERSION = previous;
     }
@@ -429,6 +433,64 @@ describe("production Desktop Controller", () => {
         failures: 1,
       }),
     ]);
+  });
+
+  it("installs and monitors the Renderer on macOS Desktop 26.1106.51428", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "darwin" });
+    const previous = process.env.CODEXHOST_DESKTOP_VERSION;
+    process.env.CODEXHOST_DESKTOP_VERSION = "26.1106.51428";
+    const abort = new AbortController();
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+    const publishStatus = vi.fn();
+    let monitorCycles = 0;
+    try {
+      await runDesktopController(controllerOptions(), abort.signal, {
+        readRenderer: vi.fn(async (filePath: string) =>
+          filePath.endsWith("overlay-voice-bootstrap.js")
+            ? "overlay voice bootstrap"
+            : filePath.endsWith("cpa-live-voice-hook.js")
+              ? "overlay hook"
+              : "production renderer",
+        ),
+        install,
+        startAttachmentServer: vi.fn(async () => attachmentServer()),
+        ready: vi.fn(),
+        publishStatus,
+        sleep: vi.fn(async () => {
+          if (++monitorCycles >= 2) abort.abort();
+        }),
+        monitorIntervalMs: 1,
+      });
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
+      else process.env.CODEXHOST_DESKTOP_VERSION = previous;
+    }
+
+    expect(install).toHaveBeenCalledOnce();
+    expect(session.ensureInstalled).toHaveBeenCalledOnce();
+    expect(install.mock.calls[0]?.[0].overlayHookSource).toContain("overlay hook");
+    expect(install.mock.calls[0]?.[0].overlayVoiceBootstrapSource).toContain(
+      "overlay voice bootstrap",
+    );
+    expect(publishStatus.mock.calls.map(([document]) => document.renderer.state)).toEqual([
+      "installing",
+      "installed",
+    ]);
+    expect(session.close).toHaveBeenCalledOnce();
   });
 
   it("publishes Renderer integration failure and recovery for the console", async () => {

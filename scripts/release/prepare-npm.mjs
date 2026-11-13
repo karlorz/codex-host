@@ -281,6 +281,7 @@ export function expectedNpmPackagePaths(target) {
     "app/host-runtime.mjs",
     "app/renderer-extension.js",
     "app/cpa-live-voice-hook.js",
+    "app/overlay-voice-bootstrap.js",
     ...preinstalledHarnessPluginPaths(),
     "licenses/Anthropic-SDK-LICENSE.txt",
     "licenses/Agent-Client-Protocol-SDK-LICENSE.txt",
@@ -1059,6 +1060,7 @@ export async function validateNpmPackage({ packageRoot, target, root }) {
         "app/desktop-controller.mjs",
         "app/renderer-extension.js",
         "app/cpa-live-voice-hook.js",
+        "app/overlay-voice-bootstrap.js",
       ].includes(file.relative)
     ) {
       forbiddenReferences.push("@anthropic-ai/", "@codexhost/adapter-claude-code");
@@ -1264,6 +1266,11 @@ export async function prepareNpmPackage({
     path.join(root, "packages", "renderer-extension", "dist", "cpa-live-voice-hook.js"),
     path.join(packageRoot, "app", "cpa-live-voice-hook.js"),
     "CPA live-voice overlay hook Bundle",
+  );
+  await copyReleaseFile(
+    path.join(root, "packages", "renderer-extension", "dist", "overlay-voice-bootstrap.js"),
+    path.join(packageRoot, "app", "overlay-voice-bootstrap.js"),
+    "overlay voice bootstrap Bundle",
   );
   await copyReleaseFile(
     path.join(root, "packages", "renderer-extension", "dist", "console.js"),

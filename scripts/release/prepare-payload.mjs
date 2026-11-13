@@ -295,6 +295,7 @@ export function expectedPayloadPaths(target) {
     "app/host-runtime.mjs",
     "app/renderer-extension.js",
     "app/cpa-live-voice-hook.js",
+    "app/overlay-voice-bootstrap.js",
     ...preinstalledHarnessPluginPaths(),
     "licenses/Node.js-LICENSE.txt",
     "licenses/Copilot-SDK-LICENSE.txt",
@@ -367,6 +368,7 @@ export async function validatePayload({ payloadRoot, target, root }) {
         "app/desktop-controller.mjs",
         "app/renderer-extension.js",
         "app/cpa-live-voice-hook.js",
+        "app/overlay-voice-bootstrap.js",
       ].includes(file.relative)
     ) {
       forbiddenReferences.push("@anthropic-ai/", "@codexhost/adapter-claude-code");
@@ -478,6 +480,11 @@ export async function prepareReleasePayload({ target, root = repositoryRoot }) {
     path.join(root, "packages", "renderer-extension", "dist", "cpa-live-voice-hook.js"),
     path.join(payloadRoot, "app", "cpa-live-voice-hook.js"),
     "CPA live-voice overlay hook Bundle",
+  );
+  await copyReleaseFile(
+    path.join(root, "packages", "renderer-extension", "dist", "overlay-voice-bootstrap.js"),
+    path.join(payloadRoot, "app", "overlay-voice-bootstrap.js"),
+    "overlay voice bootstrap Bundle",
   );
   await copyReleaseFile(
     path.join(root, "packages", "renderer-extension", "dist", "console.js"),

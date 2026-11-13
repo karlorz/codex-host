@@ -24,6 +24,8 @@ interface SocketRequest {
 
 class FakeSocket {
   readonly requests: SocketRequest[] = [];
+  readonly unanswered = new Set<string>();
+  closed = false;
   evaluation: unknown = { result: { type: "number", value: 42 } };
   releaseError = false;
   readonly #listeners = new Map<string, Set<SocketListener>>();
@@ -45,6 +47,7 @@ class FakeSocket {
   send(data: string): void {
     const request = JSON.parse(data) as SocketRequest;
     this.requests.push(request);
+    if (this.unanswered.has(request.method)) return;
     const result = request.method === "Runtime.evaluate" ? this.evaluation : { accepted: true };
     queueMicrotask(() => {
       if (request.method === "Target.setDiscoverTargets") {
@@ -67,6 +70,7 @@ class FakeSocket {
   }
 
   close(): void {
+    this.closed = true;
     this.#emit("close", {});
   }
 
@@ -76,6 +80,26 @@ class FakeSocket {
 }
 
 describe("CDP client", () => {
+  it("closes a timed-out session and rejects further commands without sending them", async () => {
+    const socket = new FakeSocket();
+    socket.unanswered.add("Runtime.enable");
+    const client = await CdpClient.connect("ws://127.0.0.1:9222/devtools/page/page-1", {
+      socketFactory: () => socket,
+      commandTimeoutMs: 10,
+    });
+    try {
+      await expect(client.command("Runtime.enable")).rejects.toThrow(
+        "CDP command 'Runtime.enable' timed out",
+      );
+      expect(socket.closed).toBe(true);
+      await expect(client.command("Debugger.enable")).rejects.toBeInstanceOf(
+        CdpConnectionClosedError,
+      );
+      expect(socket.requests.map(({ method }) => method)).toEqual(["Runtime.enable"]);
+    } finally {
+      client.close();
+    }
+  });
   it("rejects pending and subsequent commands immediately when the target socket closes", async () => {
     const socket = new FakeSocket();
     const client = await CdpClient.connect("ws://127.0.0.1:9222/devtools/page/page-1", {

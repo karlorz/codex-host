@@ -6,6 +6,16 @@ import {
   startNativeChatVoiceForRequest,
 } from "../src/renderer-native-chat-voice.js";
 import {
+  HASHED_NATIVE_CHAT_PREWARM_ASSET,
+  HASHED_NATIVE_CHAT_START_ASSET,
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+} from "../src/renderer-hashed-native-chat-voice.js";
+import {
+  lastVoiceLaunchProductExperience,
+  rememberVoiceProductExperience,
+} from "../src/renderer-client-owned-voice.js";
+import {
   CHAT_LIVE_VOICE_STORAGE_KEY,
   applySharedVoiceRoutes,
 } from "../src/renderer-cpa-live-voice-preference.js";
@@ -122,6 +132,18 @@ describe("native Chat composer binding", () => {
       expect(detectNativeChatVoiceBinding(f.composer, f)).toBeUndefined();
     },
   );
+
+  it("uses a ChatGPT UUID on composer props when the hashed selector is absent", () => {
+    const f = fixture();
+    const conversationId = "6ad6391c-9a48-83e8-8a22-21548902d6d4";
+    f.props.conversationId = conversationId;
+    f.props.composerSelectionContext.conversationId = conversationId;
+    f.composerNode.value.chatGptSelectionContext.conversationId = conversationId;
+    f.get.mockImplementation(() => {
+      throw new Error("unknown selector");
+    });
+    expect(detectNativeChatVoiceBinding(f.composer, f)?.backendConversationId).toBe(conversationId);
+  });
 
   it.each([null, undefined])("accepts an unsaved native Chat draft with backend ID %s", (id) => {
     const f = fixture();
@@ -281,17 +303,19 @@ describe("Chat voice service launch boundary", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it("fails through the pending native Chat binding instead of accepting a stale conversation", async () => {
-    const start = vi.fn().mockRejectedValue(new Error("Select a ChatGPT conversation"));
-    await expect(
-      startNativeChatVoiceForRequest(
-        { productExperience: "chat" },
-        {
-          __codexhostNativeChatVoiceV1: { status: "pending", start },
-        },
-      ),
-    ).rejects.toThrow("Select a ChatGPT conversation");
-  });
+  it.each(["pending", "unsupported", "disabled"] as const)(
+    "leaves official Instant Connect alone when the Chat hook is %s",
+    (status) => {
+      const start = vi.fn();
+      expect(
+        startNativeChatVoiceForRequest(
+          { productExperience: "chat" },
+          { __codexhostNativeChatVoiceV1: { status, start } },
+        ),
+      ).toBeUndefined();
+      expect(start).not.toHaveBeenCalled();
+    },
+  );
 });
 
 function installFixture() {
@@ -351,6 +375,8 @@ function installFixture() {
       setProperty: (key: string, value: string, priority: string) =>
         styleValues.set(key, [value, priority]),
     },
+    getBoundingClientRect: () => ({ width: 28 }),
+    closest: () => null,
   };
   const overlayButtons = [overlayButton];
   Object.assign(f.composer, {
@@ -468,7 +494,10 @@ function installFixture() {
   };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  rememberVoiceProductExperience({ productExperience: "" });
+});
 describe("native Chat voice lifecycle installation", () => {
   it("starts 26.1027 Chat with its native scopes, runtime and public prewarm wrapper", async () => {
     vi.useFakeTimers();
@@ -614,6 +643,377 @@ describe("native Chat voice lifecycle installation", () => {
     }
     expect(f.browserEnabled()).toBe(false);
     expect(f.listeners.size).toBe(0);
+  });
+
+  it("starts 26.1106 Chat from hashed Instant Connect and hides the Codex overlay voice control", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const startVoice = vi.fn().mockResolvedValue(true);
+    const getVoiceNuxMode = vi.fn(async () => "wingman");
+    const dispatchVoiceCommand = vi.fn();
+    const clearSessionCreate = vi.fn();
+    const initializeVoiceSession = vi.fn(async () => ({
+      getVoiceNuxMode,
+      dispatchVoiceCommand,
+      clearSessionCreate,
+      startVoiceWithIntroduction: startVoice,
+    }));
+    const prewarm = vi.fn();
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: prewarm };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "hOYb") return { H3: f.initial.aT };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: { j9r7: { exports: {} }, oWM3: { exports: {} } } },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(f.browserEnabled()).toBe(false);
+      expect(f.createRoot).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.overlayButton.style.getPropertyValue("display")).toBe("none");
+      expect(f.createElement).toHaveBeenCalledWith(prewarm, expect.anything());
+      expect(require.c.j9r7).toBeUndefined();
+      expect(require.c.oWM3).toBeUndefined();
+      await hook.start();
+      expect(f.browserEnabled()).toBe(false);
+      expect(initializeVoiceSession).toHaveBeenCalledOnce();
+      expect(getVoiceNuxMode).toHaveBeenCalledExactlyOnceWith(f.scope);
+      expect(clearSessionCreate).toHaveBeenCalledExactlyOnceWith(f.scope, { resetTimings: true });
+      expect(startVoice).toHaveBeenCalledExactlyOnceWith(f.scope, f.props, expect.any(Function), {
+        kind: "full",
+        showIntroduction: true,
+      });
+      expect(dispatchVoiceCommand).not.toHaveBeenCalled();
+      expect(f.start).not.toHaveBeenCalled();
+      getVoiceNuxMode.mockResolvedValue("wingman");
+      await hook.start();
+      expect(startVoice).toHaveBeenCalledOnce();
+      expect(clearSessionCreate).toHaveBeenCalledTimes(2);
+      expect(dispatchVoiceCommand).toHaveBeenCalledExactlyOnceWith(f.scope, {
+        type: "START",
+        args: { conversationId: f.props.conversationId, eventSource: "composer" },
+      });
+    } finally {
+      hook.dispose();
+    }
+    expect(f.browserEnabled()).toBe(false);
+  });
+
+  it("starts 26.1106 Chat without Meet Voice after native NUX is none", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const startVoice = vi.fn().mockResolvedValue(true);
+    const dispatchVoiceCommand = vi.fn();
+    const clearSessionCreate = vi.fn();
+    const initializeVoiceSession = vi.fn(async () => ({
+      getVoiceNuxMode: vi.fn(async () => "none"),
+      dispatchVoiceCommand,
+      clearSessionCreate,
+      startVoiceWithIntroduction: startVoice,
+    }));
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "hOYb") return { H3: f.initial.aT };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      f.setActive(true);
+      f.setConnected(false);
+      f.setSessionStarted(false);
+      await hook.start();
+      expect(startVoice).not.toHaveBeenCalled();
+      expect(clearSessionCreate).toHaveBeenCalledExactlyOnceWith(f.scope, { resetTimings: true });
+      expect(dispatchVoiceCommand).toHaveBeenNthCalledWith(
+        1,
+        f.scope,
+        { type: "STOP", reason: "failed" },
+        { prepend: true },
+      );
+      expect(dispatchVoiceCommand).toHaveBeenNthCalledWith(2, f.scope, {
+        type: "START",
+        args: { conversationId: f.props.conversationId, eventSource: "composer" },
+      });
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("mounts 26.1106 Start Voice in the official voice slot when Chat home has no Send", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    Object.assign(f.overlayButton, {
+      parentElement: f.parent,
+      className: "native-voice-button",
+      getBoundingClientRect: () => ({ width: 28 }),
+      closest: () => null,
+    });
+    f.composer.querySelectorAll = vi.fn((selector: string) =>
+      selector === 'button[type="submit"]' ? [] : f.overlayButtons,
+    );
+    const initializeVoiceSession = vi.fn(async () => ({
+      startVoiceWithIntroduction: vi.fn().mockResolvedValue(true),
+    }));
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "hOYb") return { H3: f.initial.aT };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(f.browserEnabled()).toBe(false);
+      expect(f.createRoot).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore.mock.calls[0]?.[1]).toBe(f.overlayButton);
+      expect(f.overlayButton.style.getPropertyValue("display")).toBe("none");
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("keeps 26.1106 Start Voice clickable when empty Send is disabled", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    Object.assign(f.send, {
+      disabled: true,
+      className: "native-send-button opacity-50 cursor-default pointer-events-none",
+    });
+    Object.assign(f.overlayButton, { className: "native-voice-button" });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7")
+          return {
+            initializeVoiceSession: vi.fn(async () => ({ startVoiceWithIntroduction: vi.fn() })),
+          };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "hOYb") return { H3: f.initial.aT };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      f.setActive(true);
+      f.setConnected(false);
+      f.setSessionStarted(false);
+      await vi.advanceTimersByTimeAsync(500);
+      const voice = f.elements.find((element) => element.title === "Start Voice");
+      expect(voice?.disabled).toBe(false);
+      expect(String(voice?.className)).not.toContain("pointer-events-none");
+      expect((voice?.style as { pointerEvents?: string } | undefined)?.pointerEvents).toBe("auto");
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("keeps 26.1106 Start Voice beside Send when hashed Instant Connect bind fails", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    Object.assign(f.composer, { __reactFiber$fixture: {} });
+    Object.assign(f.send, {
+      disabled: true,
+      className: "native-send-button opacity-50 cursor-default pointer-events-none",
+    });
+    const requestRealtimeStart = vi.fn(async () => undefined);
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7")
+          return {
+            initializeVoiceSession: vi.fn(async () => ({ startVoiceWithIntroduction: vi.fn() })),
+          };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "hOYb") return { H3: f.initial.aT };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        if (id === "GaA7")
+          return { appServices: { realtimeVoiceRuntime: { requestRealtimeStart } } };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("pending");
+      expect(f.createRoot).not.toHaveBeenCalled();
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore.mock.calls[0]?.[1]).toBe(f.send);
+      const voice = f.elements.find((element) => element.title === "Start Voice");
+      expect(voice?.disabled).toBe(false);
+      expect(String(voice?.className)).not.toContain("pointer-events-none");
+      const click = (voice?.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([type]) => type === "click",
+      )?.[1] as (() => void) | undefined;
+      expect(click).toEqual(expect.any(Function));
+      click?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(lastVoiceLaunchProductExperience()).toBe("chat");
+      expect(requestRealtimeStart).toHaveBeenCalledWith({
+        productExperience: "chat",
+        source: "composer_button_new_thread",
+      });
+      expect(f.start).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("keeps 26.1106 Start Voice when hashed Instant Connect modules are missing", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const requestRealtimeStart = vi.fn(async () => undefined);
+    const runtime = Object.assign(function RealtimeVoiceRuntime() {}, { requestRealtimeStart });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GaA7") return { appServices: { realtimeVoiceRuntime: runtime } };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET)) return { __webpack_require__: require };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("pending");
+      expect(f.parent.insertBefore).toHaveBeenCalledOnce();
+      expect(f.parent.insertBefore.mock.calls[0]?.[1]).toBe(f.send);
+      const voice = f.elements.find((element) => element.title === "Start Voice");
+      const click = (voice?.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([type]) => type === "click",
+      )?.[1] as (() => void) | undefined;
+      click?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(lastVoiceLaunchProductExperience()).toBe("chat");
+      expect(requestRealtimeStart).toHaveBeenCalledOnce();
+    } finally {
+      hook.dispose();
+    }
   });
 
   it.each([
@@ -884,6 +1284,24 @@ describe("native Chat voice lifecycle installation", () => {
     expect(voice?.type).toBe("button");
     await hook.start();
     expect(f.start).toHaveBeenCalledOnce();
+    hook.dispose();
+  });
+
+  it("keeps Start Voice clickable when empty Send is disabled", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.send, {
+      disabled: true,
+      className: "native-send-button opacity-50 cursor-default pointer-events-none",
+    });
+    Object.assign(f.overlayButton, { className: "native-voice-button" });
+    const hook = installNativeChatVoiceHook(f);
+    await vi.advanceTimersByTimeAsync(0);
+    const voice = f.elements.find((element) => element.title === "Start Voice");
+    expect(voice?.disabled).toBe(false);
+    expect(String(voice?.className)).toContain("native-voice-button");
+    expect(String(voice?.className)).not.toContain("pointer-events-none");
+    expect((voice?.style as { pointerEvents?: string } | undefined)?.pointerEvents).toBe("auto");
     hook.dispose();
   });
 

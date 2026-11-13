@@ -3,11 +3,14 @@ import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
 import {
   CLIENT_OWNED_VOICE_INITIAL_ASSET,
   CLIENT_OWNED_VOICE_SHARED_ASSET,
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
   HOME_COMPOSER_MODE_STORAGE_KEY,
   installClientOwnedVoiceHook,
   isExternalHarnessComposer,
   isWorkComposerSurface,
   rememberVoiceProductExperience,
+  VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY,
   wrapClientOwnedVoiceFetch,
   type NativeVoiceBridge,
 } from "../src/renderer-client-owned-voice.js";
@@ -119,6 +122,72 @@ describe("client-owned voice gateway", () => {
     expect(f.listeners.size).toBe(0);
     dispose();
     expect(f.client.fetch).toBe(f.original);
+  });
+  it("routes overlay Work calls marked originator=codex_work_desktop", async () => {
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(f.client, f.bridge, () => true, f.responseError);
+    await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledOnce();
+  });
+  it("passes Chat Instant Connect through when overlay originator is Work", async () => {
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(f.client, f.bridge, () => true, f.responseError);
+    await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+  it("passes overlay Chat Instant Connect through even when Work gateway is on", async () => {
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+    );
+    await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+  it("Host-creates overlay Work /wham after a Work launch", async () => {
+    rememberVoiceProductExperience({ productExperience: "work" });
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+    );
+    await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledOnce();
+  });
+  it("hosts overlay Chat Instant Connect through the Chat gateway when Chat selects Codex", async () => {
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => false,
+      f.responseError,
+      () => true,
+      () => false,
+      () => false,
+      () => true,
+    );
+    await f.client.fetch(url, options(chatBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledOnce();
   });
   it("strips Desktop account credentials and cookies before crossing the bridge", async () => {
     const f = fixture();
@@ -629,6 +698,341 @@ describe("client-owned voice gateway", () => {
     expect(f.client.fetch).toBe(f.original);
   });
 
+  it("wraps 26.1106.51428 hashed webpack WebFetch and Host bridge", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async (url) => {
+        expect(url).toBe(`app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}`);
+        return { __webpack_require__: require };
+      },
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(hook.activation).toEqual({
+        assetSeen: true,
+        importStarted: true,
+        importResolved: true,
+        factoryHooked: false,
+        wrapperActive: true,
+      });
+      expect(require).toHaveBeenCalledWith("GDNt");
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+    expect(f.client.fetch).toBe(f.original);
+  });
+
+  it("hooks overlay GDNt factory without executing an incomplete webpack module", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const cache: Record<string, { exports: Record<string, unknown> }> = {
+      GDNt: { exports: {} },
+    };
+    const factories: Record<string, (module?: unknown, exports?: Record<string, unknown>) => void> =
+      {
+        GDNt(module, exports) {
+          if (exports) exports._n = fetchClass;
+        },
+      };
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "TL6G") return { O1: f.bridge };
+        if (id === "eShZ") return { s1: f.responseError };
+        if (id === "GDNt") throw new Error("Cannot read properties of undefined (reading 'call')");
+        throw new Error(id);
+      },
+      { m: factories, c: cache },
+    );
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cache.GDNt).toBeUndefined();
+      expect(hook.status).toBe("pending");
+      expect(hook.activation).toMatchObject({
+        importResolved: true,
+        factoryHooked: true,
+        wrapperActive: false,
+      });
+      const exports: Record<string, unknown> = {};
+      factories.GDNt({}, exports);
+      expect(hook.status).toBe("active");
+      expect(hook.activation?.wrapperActive).toBe(true);
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("uses remembered Work launch ownership on hashed overlay, not the overlay URL", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const values = new Map<string, string>([
+      [
+        "codexhost.voice-routes-cache.v1",
+        JSON.stringify({
+          chatExperience: "chatgpt",
+          chatConnection: "desktop",
+          workConnection: "gateway",
+        }),
+      ],
+      [CPA_LIVE_VOICE_STORAGE_KEY, "0"],
+    ]);
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: { getItem: (key: string) => values.get(key) ?? null },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await f.client.fetch(url, options(speechBody()));
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("publishes Chat from a visible Chat composer even if Work storage is stale", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const chatComposer = {
+      getBoundingClientRect: () => ({ width: 640 }),
+      closest: () => null,
+    };
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        localStorage: {
+          getItem: (key: string) =>
+            key === HOME_COMPOSER_MODE_STORAGE_KEY
+              ? "work"
+              : key === "codexhost.voice-routes-cache.v1"
+                ? JSON.stringify({
+                    chatExperience: "chatgpt",
+                    chatConnection: "desktop",
+                    workConnection: "gateway",
+                  })
+                : null,
+        },
+        document: {
+          querySelectorAll: (selector: string) => {
+            if (selector.includes("script[src]"))
+              return [
+                { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+              ];
+            if (selector === "[data-chatgpt-composer]") return [chatComposer];
+            return [];
+          },
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.original).toHaveBeenCalledOnce();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("passes hashed overlay Chat Instant Connect to native when Chat is Desktop default", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : key === VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY
+                ? "chat"
+                : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      const request = options(speechBody(), { originator: "codex_work_desktop" });
+      await f.client.fetch(url, request);
+      expect(f.original).toHaveBeenCalledOnce();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("records hashed webpack import failure without wrapping", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => {
+        throw new Error("runtime chunk missing");
+      },
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("pending");
+      expect(hook.activation).toMatchObject({
+        assetSeen: true,
+        importStarted: true,
+        importResolved: false,
+        importFailed: "runtime chunk missing",
+        factoryHooked: false,
+        wrapperActive: false,
+      });
+    } finally {
+      hook.dispose();
+    }
+  });
+
   it("initializes the 26.1023 fetch owner without invoking reused legacy exports", async () => {
     vi.useFakeTimers();
     const f = fixture();
@@ -782,6 +1186,24 @@ describe("explicit Chat launch ownership", () => {
     await f.client.fetch(url, workOptions());
     expect(f.original).not.toHaveBeenCalled();
     expect(f.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("passes overlay Chat Instant Connect through when Work gateway existingCall would 404", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+    );
+    await f.client.fetch(url, options(speechBody(), { originator: "Codex Desktop" }));
+    expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
   });
 });
 

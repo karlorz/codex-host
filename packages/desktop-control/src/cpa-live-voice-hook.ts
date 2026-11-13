@@ -11,6 +11,32 @@ export const AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION = "26.1007.30912";
 export const AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET = "app-initial-6350d04672d0.js";
 export const DESKTOP_VERSION_ENV = "CODEXHOST_DESKTOP_VERSION";
 
+/** Overlay CDP injection is for Work/Chat pins plus macOS 26.1106.51428 hashed
+ * webpack voice wrap. Unqualified Desktops keep native avatar-overlay voice.
+ * Overlay `Runtime.enable` runs once per overlay target; later ticks reuse
+ * that CDP session so they do not race Desktop's compact Voice Chat starter.
+ * 26.1106.51428 current-document injection uses overlay-voice-bootstrap.js,
+ * not the full overlay hook IIFE.
+ */
+export const HASHED_WEBPACK_OVERLAY_VOICE_DESKTOP_VERSION = "26.1106.51428";
+const OVERLAY_VOICE_HOOK_DESKTOP_VERSIONS = [
+  AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION,
+  "26.1016.61520",
+  "26.1016.62342",
+  "26.1021.31345",
+  "26.1023.51421",
+  "26.1027.30824",
+  "26.1027.61615",
+  HASHED_WEBPACK_OVERLAY_VOICE_DESKTOP_VERSION,
+] as const;
+
+/** Compact Voice Chat on this Desktop evaluates the small overlay bootstrap. */
+export function overlayVoiceBootstrapPreferred(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return environment[DESKTOP_VERSION_ENV]?.trim() === HASHED_WEBPACK_OVERLAY_VOICE_DESKTOP_VERSION;
+}
+
 /** Process env wins for one launch. Otherwise the ~/.codexhost inject file (default on). */
 export function cpaLiveVoiceHookEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
   const value = environment[CPA_LIVE_VOICE_ENV];
@@ -51,6 +77,16 @@ export function detectInstalledDesktopVersion(
     }
   }
   return undefined;
+}
+
+/** Overlay hook CDP is skipped when the launcher supplied an unqualified Desktop. */
+export function cpaLiveVoiceOverlayHookAllowed(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!cpaLiveVoiceHookEnabled(environment)) return false;
+  const version = environment[DESKTOP_VERSION_ENV]?.trim();
+  if (!version) return true;
+  return OVERLAY_VOICE_HOOK_DESKTOP_VERSIONS.some((pin) => pin === version);
 }
 
 export function cpaLiveVoiceHookBootstrap(

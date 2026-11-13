@@ -59,6 +59,9 @@ export interface InstallRendererCdpControlOptions {
   rendererCdpEndpoint: string;
   rendererSource: string;
   overlayHookSource?: string;
+  /** Small overlay voice wrap. When set, current-document evaluate and
+   * new-document registration use this instead of the full overlay hook IIFE. */
+  overlayVoiceBootstrapSource?: string;
   enabledAgents?: readonly string[];
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -319,23 +322,38 @@ async function overlayHookAlreadyEnabled(renderer: RendererCdpClient): Promise<b
 async function installOverlayHook(
   target: CdpTarget,
   overlayHookSource: string,
+  overlayClients: Map<string, RendererCdpClient>,
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
+  overlayVoiceBootstrapSource?: string,
 ): Promise<void> {
   const timeoutMessage = "Overlay hook installation timed out";
+  const currentDocumentSource = overlayVoiceBootstrapSource ?? overlayHookSource;
   const run = <T>(operation: () => Promise<T>): Promise<T> =>
     runWithCdpSignal(signal, timeoutMessage, operation);
-  const renderer = await connectRendererTarget(target, operations, signal, timeoutMessage);
+  let renderer = overlayClients.get(target.id);
+  const registered = renderer !== undefined;
+  renderer ??= await connectRendererTarget(target, operations, signal, timeoutMessage);
+  const connected = renderer;
   try {
-    await run(() => renderer.command("Runtime.enable"));
-    await run(() => renderer.command("Page.enable"));
-    if (await run(() => overlayHookAlreadyEnabled(renderer))) return;
-    await run(() =>
-      renderer.command("Page.addScriptToEvaluateOnNewDocument", { source: overlayHookSource }),
-    );
-    await run(() => evaluateSource(renderer, overlayHookSource));
-  } finally {
-    renderer.close();
+    if (!registered) {
+      await run(() => connected.command("Runtime.enable"));
+      await run(() => connected.command("Page.enable"));
+      overlayClients.set(target.id, connected);
+    }
+    if (await run(() => overlayHookAlreadyEnabled(connected))) return;
+    if (!registered) {
+      await run(() =>
+        connected.command("Page.addScriptToEvaluateOnNewDocument", {
+          source: currentDocumentSource,
+        }),
+      );
+    }
+    await run(() => evaluateSource(connected, currentDocumentSource));
+  } catch (error) {
+    overlayClients.delete(target.id);
+    connected.close();
+    throw error;
   }
 }
 
@@ -428,7 +446,9 @@ async function installAuxiliaryRenderers(
   rendererSource: string,
   enabledAgents: readonly string[] | undefined,
   overlayHookSource: string | undefined,
+  overlayVoiceBootstrapSource: string | undefined,
   browserStyleClients: Map<string, RendererCdpClient>,
+  overlayClients: Map<string, RendererCdpClient>,
   operations: RendererCdpControlOperations,
   signal: AbortSignal,
 ): Promise<void> {
@@ -439,10 +459,12 @@ async function installAuxiliaryRenderers(
       "Auxiliary Renderer CDP target discovery timed out",
     );
     const liveTargets = new Set(targets.map((target) => target.id));
-    for (const [id, client] of browserStyleClients) {
-      if (!liveTargets.has(id)) {
-        client.close();
-        browserStyleClients.delete(id);
+    for (const clients of [browserStyleClients, overlayClients]) {
+      for (const [id, client] of clients) {
+        if (!liveTargets.has(id)) {
+          client.close();
+          clients.delete(id);
+        }
       }
     }
     await Promise.allSettled([
@@ -453,7 +475,14 @@ async function installAuxiliaryRenderers(
         ),
       ...(overlayHookSource
         ? selectAvatarOverlayRendererTargets(targets).map((overlay) =>
-            installOverlayHook(overlay, overlayHookSource, operations, signal),
+            installOverlayHook(
+              overlay,
+              overlayHookSource,
+              overlayClients,
+              operations,
+              signal,
+              overlayVoiceBootstrapSource,
+            ),
           )
         : []),
       ...targets
@@ -504,7 +533,9 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     private readonly rendererCdpEndpoint: string,
     private readonly rendererSource: string,
     private readonly overlayHookSource: string | undefined,
+    private readonly overlayVoiceBootstrapSource: string | undefined,
     private readonly browserStyleClients: Map<string, RendererCdpClient>,
+    private readonly overlayClients: Map<string, RendererCdpClient>,
     private readonly enabledAgents: readonly string[] | undefined,
     private readonly timeoutMs: number,
     private readonly pollIntervalMs: number,
@@ -575,7 +606,9 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
       this.rendererSource,
       this.enabledAgents,
       this.overlayHookSource,
+      this.overlayVoiceBootstrapSource,
       this.browserStyleClients,
+      this.overlayClients,
       this.operations,
       discoveryTimeoutSignal(this.timeoutMs),
     );
@@ -600,6 +633,8 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     this.renderer.close();
     for (const client of this.browserStyleClients.values()) client.close();
     this.browserStyleClients.clear();
+    for (const client of this.overlayClients.values()) client.close();
+    this.overlayClients.clear();
   }
 }
 
@@ -638,12 +673,15 @@ export async function createRendererCdpControlSession(
     operations,
   );
   const browserStyleClients = new Map<string, RendererCdpClient>();
+  const overlayClients = new Map<string, RendererCdpClient>();
   await installAuxiliaryRenderers(
     options.rendererCdpEndpoint,
     options.rendererSource,
     enabledAgents,
     options.overlayHookSource,
+    options.overlayVoiceBootstrapSource,
     browserStyleClients,
+    overlayClients,
     operations,
     discoveryTimeoutSignal(timeoutMs, options.signal),
   );
@@ -652,7 +690,9 @@ export async function createRendererCdpControlSession(
     options.rendererCdpEndpoint,
     options.rendererSource,
     options.overlayHookSource,
+    options.overlayVoiceBootstrapSource,
     browserStyleClients,
+    overlayClients,
     enabledAgents,
     timeoutMs,
     pollIntervalMs,
