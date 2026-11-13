@@ -120,6 +120,9 @@ test("mounts the live picker in the transcript row and keeps the Composer free",
   await expect(
     page.locator('[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]'),
   ).toHaveCount(1);
+  await expect(
+    page.locator('[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]'),
+  ).toHaveAttribute("data-placement", "in-chat");
   await expect(page.locator("#composer [data-codexhost-question]")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Chat message" })).toHaveText("chat draft");
   const record = page.locator(
@@ -152,6 +155,46 @@ test("Appearance can restore every option in question history", async ({ page })
   await expect(record.getByText("Windows", { exact: true })).toHaveCount(0);
 });
 
+test("in-chat live picker grows with the transcript instead of scrolling inside the card", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 420, height: 480 });
+  await page.evaluate(async () => {
+    const question = Reflect.get(window, "fixture").questions[0];
+    question.questions[0].options = Array.from({ length: 16 }, (_, index) => ({
+      value: `opt-${index}`,
+      label: `Option ${index + 1}`,
+      description: `Long description for option ${index + 1} so the in-chat card is taller than the overlay cap.`,
+    }));
+    await Reflect.get(window, "controller").refresh();
+  });
+  const card = page.locator(
+    '[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]',
+  );
+  await expect(card).toHaveAttribute("data-placement", "in-chat");
+  const layout = await card.evaluate((root) => {
+    const surface = root.shadowRoot?.querySelector(".card");
+    const body = root.shadowRoot?.querySelector(".body");
+    if (!(surface instanceof HTMLElement) || !(body instanceof HTMLElement)) {
+      throw new Error("missing card parts");
+    }
+    const cardStyle = getComputedStyle(surface);
+    const bodyStyle = getComputedStyle(body);
+    return {
+      maxHeight: cardStyle.maxHeight,
+      overflow: cardStyle.overflowY,
+      bodyOverflow: bodyStyle.overflowY,
+      innerScroll: body.scrollHeight > body.clientHeight + 1,
+      height: surface.getBoundingClientRect().height,
+    };
+  });
+  expect(layout.maxHeight).toBe("none");
+  expect(layout.overflow).toBe("visible");
+  expect(layout.bodyOverflow).toBe("visible");
+  expect(layout.innerScroll).toBe(false);
+  expect(layout.height).toBeGreaterThan(560);
+});
+
 test("overlay mode moves only the live picker above the Composer", async ({ page }) => {
   const live = page.locator("[data-codexhost-question]");
   await live.getByRole("checkbox", { name: "Windows", exact: true }).check();
@@ -161,6 +204,7 @@ test("overlay mode moves only the live picker above the Composer", async ({ page
   await expect
     .poll(async () => live.evaluate((node) => node.nextElementSibling?.id === "composer"))
     .toBe(true);
+  await expect(live).toHaveAttribute("data-placement", "overlay");
   await expect(
     page.locator('[data-local-conversation-item-target-ids="item-live"] [data-codexhost-question]'),
   ).toHaveCount(0);

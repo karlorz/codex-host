@@ -108,6 +108,64 @@ export function createQuestionCard(
       event.preventDefault();
   });
   const shadow = root.attachShadow({ mode: "open" });
+  let lastFocus: HTMLElement | undefined;
+  let lastScrollTop = 0;
+  let suppressScroll = false;
+  shadow.addEventListener("focusin", (event) => {
+    if (event.target instanceof HTMLElement) lastFocus = event.target;
+  });
+  shadow.addEventListener(
+    "scroll",
+    (event) => {
+      if (suppressScroll) return;
+      if (event.target instanceof HTMLElement && event.target.classList.contains("body")) {
+        lastScrollTop = event.target.scrollTop;
+      }
+    },
+    { capture: true, passive: true },
+  );
+  const bodyElement = () => {
+    const body = shadow.querySelector(".body");
+    return body instanceof HTMLElement ? body : null;
+  };
+  const snapshotScroll = () => {
+    const body = bodyElement();
+    if (body) lastScrollTop = body.scrollTop;
+  };
+  const onNodeRemoved = (event: Event) => {
+    if (event.target === root) snapshotScroll();
+  };
+  document.addEventListener("DOMNodeRemoved", onNodeRemoved, true);
+  const bodyScrollTop = () => {
+    if (root.isConnected) snapshotScroll();
+    return lastScrollTop;
+  };
+  const setBodyScrollTop = (value: number) => {
+    lastScrollTop = value;
+    const apply = () => {
+      const body = bodyElement();
+      if (!body) return;
+      suppressScroll = true;
+      body.scrollTop = value;
+      suppressScroll = false;
+    };
+    apply();
+    document.defaultView?.requestAnimationFrame(apply);
+  };
+  const restoreFocus = () => {
+    if (!lastFocus || !shadow.contains(lastFocus)) return;
+    const active = document.activeElement;
+    if (
+      active &&
+      active !== document.body &&
+      active !== document.documentElement &&
+      active !== root &&
+      !root.contains(active)
+    )
+      return;
+    if (shadow.activeElement === lastFocus) return;
+    lastFocus.focus({ preventScroll: true });
+  };
   const style = document.createElement("style");
   style.textContent = QUESTION_CARD_CSS;
   const surface = document.createElement("div");
@@ -276,6 +334,7 @@ export function createQuestionCard(
   const actions = document.createElement("div");
   actions.className = "actions";
   const readAnswers = () => Object.fromEntries([...readers].map(([id, read]) => [id, read()]));
+  const interaction = { restoreFocus, bodyScrollTop, setBodyScrollTop };
   if (record) {
     for (const control of controls) control.disabled = true;
     if (footer.childNodes.length > 0) surface.append(footer);
@@ -283,11 +342,13 @@ export function createQuestionCard(
       root,
       readAnswers,
       historyMode,
+      ...interaction,
       get autoResolution() {
         return autoResolution;
       },
       updateAutoResolution() {},
       dispose() {
+        document.removeEventListener("DOMNodeRemoved", onNodeRemoved, true);
         if (countdownTimer !== undefined) document.defaultView?.clearInterval(countdownTimer);
         root.remove();
       },
@@ -344,6 +405,7 @@ export function createQuestionCard(
     root,
     readAnswers,
     historyMode,
+    ...interaction,
     get autoResolution() {
       return autoResolution;
     },
@@ -355,6 +417,7 @@ export function createQuestionCard(
       updateCountdown();
     },
     dispose() {
+      document.removeEventListener("DOMNodeRemoved", onNodeRemoved, true);
       if (countdownTimer !== undefined) document.defaultView?.clearInterval(countdownTimer);
       root.remove();
     },
