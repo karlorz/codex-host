@@ -66,6 +66,17 @@ export const QUESTION_CARD_CSS = `
   .answer-label { min-width: 0; }
   svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .body { min-height: 0; overflow: auto; }
+  :host([data-placement="in-chat"]) .card,
+  :host([data-codexhost-question-record]) .card {
+    max-height: none;
+    overflow: visible;
+  }
+  :host([data-placement="in-chat"]) .body,
+  :host([data-codexhost-question-record]) .body {
+    overflow: visible;
+    min-height: min-content;
+    flex-shrink: 0;
+  }
   fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 14px; }
   fieldset:last-child { margin-bottom: 0; }
   legend { width: 100%; padding: 0 6px; margin-bottom: 14px; font: inherit; }

@@ -362,6 +362,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessQuestionInChatHelp: Object.freeze([
     "Codex's own questions always use the Codex Desktop layout.",
     "Some single-choice and text questions still use the Desktop card.",
+    "In-chat cards grow with the conversation and do not scroll inside the card. Overlay cards keep a height limit above the message box.",
     "Answered questions remain after reopening a chat only if the Harness's own history records them.",
     "Desktop still folds thinking and tool calls. The answered card stays visible as full-width history during the turn, then with the visible reply.",
     "Update both the Host and the Desktop extension, including remote Hosts.",
@@ -755,6 +756,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessQuestionInChatHelp: Object.freeze([
     "Codex 自己的提问始终使用 Codex Desktop 的布局。",
     "部分单选和文本提问仍使用 Desktop 卡片。",
+    "对话中的提问卡片随会话变高，不在卡片内滚动。叠加在输入框上方时仍有高度限制。",
     "只有 Harness 自己的历史记录了提问和答案时，重新打开会话才会再次显示已回答的提问。",
     "Desktop 仍会折叠思考和工具调用。已回答的卡片在回合进行中也保持全宽历史，随后留在可见回复处。",
     "Host 和 Desktop 扩展需要一起更新，包括远程 Host。",

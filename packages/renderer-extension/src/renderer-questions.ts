@@ -14,7 +14,6 @@ import {
 import { createQuestionCard } from "./renderer-question-card.js";
 import { installQuestionActivity } from "./renderer-question-activity.js";
 import {
-  elementIsShown,
   ensureQuestionHistorySlot,
   findLiveQuestionMount,
   findVisibleHistoryMount,
@@ -42,13 +41,13 @@ export interface QuestionContext {
     sendRequest(method: string, params: unknown, options?: RendererRequestOptions): unknown;
   };
 }
+function sameOwner(a: QuestionContext | null, b: QuestionContext | null): boolean {
+  if (!a || !b) return a === b;
+  return a.hostId === b.hostId && a.threadId === b.threadId && a.route === b.route;
+}
+
 function same(a: QuestionContext | null, b: QuestionContext | null): boolean {
-  return (
-    a?.hostId === b?.hostId &&
-    a?.threadId === b?.threadId &&
-    a?.composer === b?.composer &&
-    a?.route === b?.route
-  );
+  return sameOwner(a, b) && a?.composer === b?.composer;
 }
 
 function sharedCard(question: ThreadQuestion | undefined): question is ThreadQuestion {
@@ -100,7 +99,7 @@ export function installRendererQuestions(
   let context: QuestionContext | null = null;
   let card: ReturnType<typeof createQuestionCard> | null = null;
   let cardKey: string | null = null;
-  let mountedPlacement: "in-chat" | "overlay" | "jump" | null = null;
+  let layoutKey: string | null = null;
   let jump: HTMLButtonElement | null = null;
   let stopActivity: (() => void) | undefined;
   const unsupported = new WeakSet<object>();
@@ -134,7 +133,7 @@ export function installRendererQuestions(
     card?.dispose();
     card = null;
     cardKey = null;
-    mountedPlacement = null;
+    layoutKey = null;
     clearJump();
   };
   const clearRecords = () => {
@@ -145,52 +144,49 @@ export function installRendererQuestions(
     if (live) coverNativeComposerRequest(current.composer);
     else uncoverNativeComposerRequest(current.composer.ownerDocument);
   };
-  const liveMount = (
-    document: Document,
-    anchor: ThreadQuestionPendingAnchor | undefined,
-  ): Element | null => {
-    if (!anchor?.itemId) return null;
-    return findLiveQuestionMount(document, anchor.itemId, anchor.turnId);
-  };
-  const resolveLivePlacement = (
-    document: Document,
-    anchor: ThreadQuestionPendingAnchor | undefined,
-  ): "in-chat" | "overlay" | "jump" => {
-    if (placement !== "in-chat") return "overlay";
-    if (liveMount(document, anchor)) return "in-chat";
-    if (anchor?.itemId) return "jump";
-    return "overlay";
+  const applyPlacement = (mode: "in-chat" | "overlay") => {
+    if (!card) return;
+    card.root.dataset.placement = mode;
   };
   const placeLive = (
     current: QuestionContext,
     anchor: ThreadQuestionPendingAnchor | undefined,
-  ): "in-chat" | "overlay" | "jump" => {
+  ): void => {
+    if (!card) return;
     const document = current.composer.ownerDocument;
-    const placement = resolveLivePlacement(document, anchor);
-    if (!card) return placement;
-    if (placement === "in-chat") {
-      const mount = liveMount(document, anchor);
+    if (placement === "in-chat" && anchor?.itemId) {
+      const mount = findLiveQuestionMount(document, anchor.itemId, anchor.turnId);
       if (mount) {
-        ensureQuestionHistorySlot(document, mount).append(card.root);
-        return "in-chat";
+        clearJump();
+        const host = ensureQuestionHistorySlot(document, mount);
+        if (card.root.parentElement !== host) host.append(card.root);
+        applyPlacement("in-chat");
+        return;
       }
     }
-    if (placement === "jump") {
-      jump = createJumpPill(document, () => {
-        void jumpRevealsQuestionRow(
-          document,
-          current.hostId,
-          current.threadId,
-          anchor?.itemId,
-        ).then(() => {
-          if (!disposed) void refresh();
+    if (placement === "in-chat" && anchor?.itemId) {
+      if (card.root.isConnected) card.root.remove();
+      if (jump?.isConnected) {
+        if (jump.nextElementSibling !== current.composer) current.composer.before(jump);
+      } else {
+        jump?.remove();
+        jump = createJumpPill(document, () => {
+          void jumpRevealsQuestionRow(
+            document,
+            current.hostId,
+            current.threadId,
+            anchor?.itemId,
+          ).then(() => {
+            if (!disposed) void refresh();
+          });
         });
-      });
-      current.composer.before(jump);
-      return "jump";
+        current.composer.before(jump);
+      }
+      return;
     }
-    current.composer.before(card.root);
-    return "overlay";
+    clearJump();
+    if (card.root.nextElementSibling !== current.composer) current.composer.before(card.root);
+    applyPlacement("overlay");
   };
   const syncRecords = (
     current: QuestionContext,
@@ -256,14 +252,19 @@ export function installRendererQuestions(
     const next = readContext();
     if (!same(context, next)) {
       if (context && context.threadId !== next?.threadId) listUnobserved(context);
-      if (context) syncNativeCover(context, false);
-      clear();
-      clearRecords();
+      if (!sameOwner(context, next)) {
+        if (context) syncNativeCover(context, false);
+        clear();
+        clearRecords();
+        revision++;
+      } else if (context && next && context.composer !== next.composer) {
+        syncNativeCover(context, false);
+      }
       context = next;
-      revision++;
     }
-    const current = context;
-    if (!current || inFlight || unsupported.has(current.route)) return;
+    const active = context;
+    if (!active || inFlight || unsupported.has(active.route)) return;
+    let current: QuestionContext = active;
     const startedRevision = revision;
     inFlight = true;
     try {
@@ -283,7 +284,10 @@ export function installRendererQuestions(
         current.route.sendRequest(THREAD_QUESTIONS_LIST_METHOD, listParams, listOptions),
         recordsPromise,
       ]);
-      if (disposed || revision !== startedRevision || !same(current, readContext())) return;
+      const latest = readContext();
+      if (disposed || revision !== startedRevision || !sameOwner(current, latest) || !latest)
+        return;
+      current = latest;
       const question = threadQuestionsResultSchema.parse(raw).questions[0];
       const live = sharedCard(question) ? question : undefined;
       let closed: ThreadQuestionRecord[] = [];
@@ -308,31 +312,32 @@ export function installRendererQuestions(
         live.turnId,
         live.interactionId,
       ]);
+      const nextLayout = JSON.stringify([live.title ?? "", live.questions]);
       const anchor = pendingAnchors.find(
         (candidate) => candidate.interactionId === live.interactionId,
       );
-      if (cardKey === key && mountedPlacement) {
-        const expected = resolveLivePlacement(current.composer.ownerDocument, anchor);
-        const stable =
-          mountedPlacement === expected &&
-          (expected === "jump"
-            ? jump?.isConnected === true
-            : card?.root.isConnected === true &&
-              (expected !== "in-chat" || elementIsShown(card.root)));
-        if (stable) {
-          card?.updateAutoResolution(live.autoResolution);
-          syncNativeCover(current, true);
-          syncRecordsSafe(current, closed, live.interactionId);
-          return;
+      if (cardKey === key && layoutKey === nextLayout && card) {
+        const scrollTop = card.bodyScrollTop();
+        const restore = !card.root.isConnected;
+        const previousParent = card.root.parentElement;
+        card.updateAutoResolution(live.autoResolution);
+        placeLive(current, anchor);
+        if (restore || card.root.parentElement !== previousParent) {
+          if (restore) card.restoreFocus();
+          card.setBodyScrollTop(scrollTop);
         }
+        syncNativeCover(current, true);
+        syncRecordsSafe(current, closed, live.interactionId);
+        return;
       }
       clear(cardKey === key);
       cardKey = key;
+      layoutKey = nextLayout;
       card = createQuestionCard(
         current.composer.ownerDocument,
         live,
         async (answers, cancelled) => {
-          if (disposed || !same(current, readContext()) || cardKey !== key)
+          if (disposed || !sameOwner(current, readContext()) || cardKey !== key)
             throw new Error("Question owner changed");
           const raw = await current.route.sendRequest(
             THREAD_QUESTION_RESPOND_METHOD,
@@ -347,7 +352,7 @@ export function installRendererQuestions(
           );
           threadQuestionRespondResultSchema.parse(raw);
           drafts.delete(key);
-          if (same(current, context)) {
+          if (sameOwner(current, context)) {
             // An older in-flight list must not resurrect an already answered card.
             revision++;
             if (cardKey === key) clear(false);
@@ -356,14 +361,14 @@ export function installRendererQuestions(
         },
         drafts.get(key),
       );
-      mountedPlacement = placeLive(current, anchor);
+      placeLive(current, anchor);
       syncNativeCover(current, true);
       const mounted = card;
       stopActivity = installQuestionActivity(
         window,
         card.root,
         () =>
-          same(current, readContext()) &&
+          sameOwner(current, readContext()) &&
           card === mounted &&
           mounted.autoResolution?.resetOnActivity === true,
         async () => {
@@ -376,7 +381,7 @@ export function installRendererQuestions(
             },
             { priority: "background", timeoutMs: 4000 },
           );
-          if (disposed || card !== mounted || !same(current, readContext())) return;
+          if (disposed || card !== mounted || !sameOwner(current, readContext())) return;
           const ack = threadQuestionActivityResultSchema.parse(raw).autoResolution;
           if (ack) mounted.updateAutoResolution(ack);
         },
@@ -384,7 +389,7 @@ export function installRendererQuestions(
       syncRecordsSafe(current, closed, live.interactionId);
     } catch (error) {
       if (isUnsupportedMethod(error, THREAD_QUESTIONS_LIST_METHOD)) unsupported.add(current.route);
-      if (revision === startedRevision && same(current, context)) {
+      if (revision === startedRevision && sameOwner(current, context)) {
         clear();
         syncNativeCover(current, false);
       }

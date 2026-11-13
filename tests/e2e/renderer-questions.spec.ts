@@ -406,10 +406,37 @@ test("covers a sibling native Desktop question card so the shared picker stays t
   await expect(page.getByRole("checkbox", { name: "Alpha", exact: true })).toBeVisible();
 });
 
-test("recovers a card removed by a native rerender without losing the draft", async ({ page }) => {
+test("reattaches the same overlay card after a native rerender so Other text and focus stay", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 420, height: 480 });
+  const card = page.locator("[data-codexhost-question]");
+  await expect(card).toHaveAttribute("data-placement", "overlay");
   await page.getByRole("checkbox", { name: "Gamma", exact: true }).check();
-  await page.locator("[data-codexhost-question]").evaluate((root) => root.remove());
+  const other = page.getByLabel("Choose letters: Other", { exact: true });
+  await other.fill("keep typing");
+  await other.evaluate((input) => input.focus());
+  await page.evaluate(() => {
+    const state = Reflect.get(window, "fixture");
+    state.questions[0].autoResolution = {
+      deadlineUnixMs: Date.now() + 120000,
+      action: "recommended",
+      resetOnActivity: true,
+    };
+    const root = document.querySelector("[data-codexhost-question]");
+    const composer = document.querySelector("#composer");
+    if (!(root instanceof HTMLElement) || !(composer instanceof HTMLElement)) {
+      throw new Error("missing card or composer");
+    }
+    root.dataset.keep = "1";
+    composer.replaceWith(composer.cloneNode(true));
+    root.remove();
+  });
+  await page.evaluate(() => Reflect.get(window, "controller").refresh());
+  await expect(card).toHaveAttribute("data-keep", "1");
   await expect(page.getByRole("checkbox", { name: "Gamma", exact: true })).toBeChecked();
+  await expect(other).toHaveValue("keep typing");
+  expect(await other.evaluate((input) => input.getRootNode().activeElement === input)).toBe(true);
 });
 
 for (const scheme of ["dark", "light"] as const) {
@@ -529,9 +556,17 @@ test("scrolls long question content while keeping the footer usable in a small w
 }) => {
   await page.setViewportSize({ width: 420, height: 480 });
   const card = page.locator("[data-codexhost-question]");
-  expect(
-    await card.locator(".body").evaluate((body) => body.scrollHeight > body.clientHeight),
-  ).toBe(true);
+  await expect(card).toHaveAttribute("data-placement", "overlay");
+  const overlayLayout = await card.locator(".body").evaluate((body) => {
+    if (!(body instanceof HTMLElement)) throw new Error("missing body");
+    const cardEl = body.closest(".card");
+    return {
+      innerScroll: body.scrollHeight > body.clientHeight,
+      maxHeight: cardEl instanceof HTMLElement ? getComputedStyle(cardEl).maxHeight : "",
+    };
+  });
+  expect(overlayLayout.innerScroll).toBe(true);
+  expect(overlayLayout.maxHeight).not.toBe("none");
   const cancel = page.getByRole("button", { name: "Skip", exact: true });
   await expect(cancel).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeInViewport({
