@@ -17,7 +17,10 @@ appcast and exact source pins at each sync. Shipping a fork tag does not
 re-pin or qualify a newer Desktop.
 
 Work and Chat remain pinned to **26.1027.61615**. Keep that daily driver;
-do not install or re-pin a newer Sparkle Desktop. Public Sparkle latest is
+do not install or re-pin a newer Sparkle Desktop. Windows Store daily driver
+is product **26.1106.51428** (MSIX **26.1106.6628.0**); see
+[windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
+Public Sparkle latest is
 **26.1106.51428** build **26605**. Compat Daily reports that feed as pin-drift
 on [#37](https://github.com/karlorz/codex-host/issues/37) /
 [#38](https://github.com/karlorz/codex-host/issues/38). Those issues track

@@ -115,6 +115,12 @@ Compat Daily tracks it on [#37](https://github.com/karlorz/codex-host/issues/37)
 and [#38](https://github.com/karlorz/codex-host/issues/38). Upstream `v0.18.0`
 draft-model binding for 26.1106 is independent of these voice assets. Unknown
 or mixed assets fail closed. Keep 26.1027; this is not a remap queue.
+Windows Store product **26.1106.51428** (MSIX **26.1106.6628.0**) is the
+Windows daily driver. CodexHost Renderer injection hangs that window on the
+splash, so the Desktop Controller skips injection on 26.1106/26.1103 product
+versions. Host and Web still run. This is not a Live Voice qualification of
+26.1106. Windows daily-driver steps are in
+[windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
 
 ## Desktop 26.1103.41825 (skipped)
 

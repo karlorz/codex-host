@@ -20,6 +20,7 @@ import {
   installRendererCdpControlSession,
   type RendererCdpControlSession,
 } from "./renderer-cdp-control-session.js";
+import { rendererInjectionSkipReason } from "./renderer-injection-skip.js";
 
 export interface DesktopControllerOptions {
   rendererCdpEndpoint: string;
@@ -228,6 +229,7 @@ export async function runDesktopController(
   let session: RendererCdpControlSession | undefined;
   let nextRecoveryAt = 0;
   let recoveryDelayMs = RECOVERY_RETRY_INITIAL_MS;
+  const skipReason = rendererInjectionSkipReason(process.env.CODEXHOST_DESKTOP_VERSION);
   const bootstrap = cpaLiveVoiceHookBootstrap();
   const status = createRendererStatusReporter(
     (document) =>
@@ -298,11 +300,13 @@ export async function runDesktopController(
     session = undefined;
   };
   const ensureSession = async (): Promise<RendererCdpControlSession> => {
+    if (skipReason) throw new Error(skipReason);
     if (!session) session = await createSession();
     else await session.ensureInstalled();
     return session;
   };
   const recoverSession = async (): Promise<RendererCdpControlSession> => {
+    if (skipReason) throw new Error(skipReason);
     try {
       const current = await ensureSession();
       recordRecoverySuccess();
@@ -349,8 +353,12 @@ export async function runDesktopController(
       state: "compatible",
       issues: [],
     });
+    if (skipReason) {
+      nextRecoveryAt = Number.POSITIVE_INFINITY;
+      status.failed(new Error(skipReason));
+    }
     await useSession(async () => {
-      if (session) return;
+      if (session || skipReason) return;
       try {
         session = await createSession();
         recordRecoverySuccess();

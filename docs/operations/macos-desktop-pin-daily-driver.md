@@ -34,6 +34,8 @@ codexhost tag does not re-pin or qualify a newer Desktop.
 
 The daily driver is `/Applications/ChatGPT.app` at **26.1027.61615**. Unaudited
 Sparkle builds stay skipped, including **26.1106.51428** and **26.1103.41825**.
+Windows Store uses a separate pin in
+[windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
 Open `compat-broken` pin-drift issues ([#37](https://github.com/karlorz/codex-host/issues/37),
 [#38](https://github.com/karlorz/codex-host/issues/38)) are live alerts, not a
 queue to install the public feed. Upstream `v0.18.0` Desktop 26.1106 support is
