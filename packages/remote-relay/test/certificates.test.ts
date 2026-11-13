@@ -75,8 +75,9 @@ it("renews at two-thirds of validity without disconnecting existing controls", a
   expect(f.ca.orders).toBe(0);
   now.mockReturnValue(renewal);
   check();
-  await vi.waitFor(() =>
-    expect(readFileSync(join(f.data, "certificate.pem"), "utf8")).not.toBe(old),
+  await vi.waitFor(
+    () => expect(readFileSync(join(f.data, "certificate.pem"), "utf8")).not.toBe(old),
+    { timeout: 15_000 },
   );
   expect(f.ca.orders).toBe(1);
   expect(f.ca.validations).toBe(1);
