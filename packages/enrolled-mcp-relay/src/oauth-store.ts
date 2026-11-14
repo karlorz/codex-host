@@ -5,6 +5,8 @@ export interface OAuthClient {
   clientId: string;
   clientName?: string;
   redirectUris: string[];
+  operationalClient?: string;
+  dispatchGrant?: "legacy-four" | "full-dispatch";
 }
 
 export interface OAuthAuthCode {

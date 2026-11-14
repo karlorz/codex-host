@@ -103,6 +103,7 @@ describe("Renderer settings localization", () => {
     expect(english.enrollment.refresh).toBe("Refresh");
     expect(chinese.enrollment.confirmRevoke).toBe("确认撤销");
     expect(Object.keys(chinese.enrollment)).toEqual(Object.keys(english.enrollment));
+    expect(Object.keys(chinese.mcpClients)).toEqual(Object.keys(english.mcpClients));
     expect(Object.keys(chinese.pageLabels)).toEqual(Object.keys(english.pageLabels));
     expect(Object.isFrozen(english)).toBe(true);
     expect(Object.isFrozen(chinese.pageLabels)).toBe(true);
@@ -118,6 +119,7 @@ describe("Renderer settings localization", () => {
       "手机与浏览器",
       "其他电脑（SSH）",
       "客户端登记",
+      "MCP 客户端",
       "账号",
       "会话导入",
       "用量统计",

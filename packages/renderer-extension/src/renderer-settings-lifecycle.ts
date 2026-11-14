@@ -5,6 +5,7 @@ import type { RemoteConnectionsControl } from "./remote-connections-control.js";
 import type { LoadedSessionsClient } from "./settings/loaded-sessions-table.js";
 import type { HarnessSchedulesPageOptions } from "./settings/harness-schedules-page.js";
 import type { RendererEnrollmentClient } from "./settings/enrollment-page.js";
+import type { RendererExternalClientsClient } from "./settings/mcp-clients-page.js";
 import { readCodexLocaleSettings, type CodexLocaleSettings } from "./codex-locale-adapter.js";
 import {
   rendererSettingsMessages,
@@ -39,6 +40,7 @@ export interface RendererSettingsLifecycleOptions {
   getLoadedSessionsClient?(): LoadedSessionsClient | null;
   getRemoteConnections?(): RemoteConnectionsControl | null;
   getEnrollmentClient?(): RendererEnrollmentClient | null;
+  getExternalClientsClient?(): RendererExternalClientsClient | null;
   requestUsageStatistics?: RendererUsageStatisticsRequest;
   requestVoiceSettings?: VoiceSettingsRequestClient;
   /** Machines the usage statistics page may read besides the local Host. */
@@ -107,6 +109,7 @@ export function installRendererSettingsLifecycle(
           }
         : undefined,
       options.getEnrollmentClient ?? (() => null),
+      options.getExternalClientsClient ?? (() => null),
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

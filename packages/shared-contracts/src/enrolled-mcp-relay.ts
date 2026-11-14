@@ -47,8 +47,11 @@ export const relayLinkHelloAckSchema = z.strictObject({
 export const relayLinkRequestSchema = z.strictObject({
   requestId: z.string().min(1).max(128),
   deadlineMs: z.number().int().positive(),
-  route: z.enum(RELAY_ALLOWED_ROUTES),
+  route: z.string().min(1).max(128),
   body: z.record(z.string(), z.unknown()),
+  operationalClient: z.string().min(1).max(64).optional(),
+  oauthClientId: z.string().min(1).max(128).optional(),
+  dispatchGrant: z.enum(["legacy-four", "full-dispatch"]).optional(),
 });
 
 export const relayLinkErrorSchema = z.strictObject({

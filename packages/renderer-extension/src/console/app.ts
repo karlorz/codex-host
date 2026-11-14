@@ -18,6 +18,7 @@ import { createConsoleRemoteConnections } from "./remote-connections.js";
 import { createRendererModelClient } from "../renderer-model-client.js";
 import { createRendererSessionImportClient } from "../renderer-session-import-client.js";
 import { createRendererEnrollmentClient } from "../renderer-enrollment-client.js";
+import { createRendererExternalClientsClient } from "../renderer-external-clients-client.js";
 import { createConnectDevicesPage } from "./pages/connect-devices.js";
 import accountsCss from "../settings/accounts.css";
 import enrollmentCss from "../settings/enrollment.css";
@@ -143,6 +144,9 @@ export function startConsoleApp(document: Document): void {
   const enrollmentClient = createRendererEnrollmentClient((method, params) =>
     manager.sendRequest(method, params),
   );
+  const externalClientsClient = createRendererExternalClientsClient((method, params) =>
+    manager.sendRequest(method, params),
+  );
   const updateClient = consoleUpdateClient();
   const remoteConnections = createConsoleRemoteConnections(manager);
   const settingsPages = createDefaultRendererSettingsPages(
@@ -159,6 +163,7 @@ export function startConsoleApp(document: Document): void {
     undefined,
     undefined,
     () => enrollmentClient,
+    () => externalClientsClient,
   );
   const navigate = (pageId: string): void => {
     navigation.classList.remove("is-open");
@@ -185,6 +190,7 @@ export function startConsoleApp(document: Document): void {
         ),
         hostPage(required(settingsPages, "remote-connections"), messages, state),
         hostPage(required(settingsPages, "enrollment"), messages, state),
+        hostPage(required(settingsPages, "mcp-clients"), messages, state),
         hostPage(required(settingsPages, "accounts"), messages, state),
         hostPage(required(settingsPages, "session-import"), messages, state),
         createConnectDevicesPage(locale),

@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { EXTERNAL_CLIENT_NAME_PATTERN } from "@codexhost/shared-contracts";
+
 import { sha256Hex } from "./secret.js";
 import { consentHtml } from "./oauth-consent.js";
 import { verifyPassword } from "./oauth-password.js";
@@ -32,7 +34,14 @@ export function bearerToken(header: string | undefined): string | undefined {
   return match?.[1];
 }
 
-export type McpBearer = { ok: true } | { ok: false; revoked: boolean };
+export type McpBearer =
+  | {
+      ok: true;
+      clientId: string;
+      operationalClient?: string;
+      dispatchGrant?: "legacy-four" | "full-dispatch";
+    }
+  | { ok: false; revoked: boolean };
 
 export function inspectMcpBearer(header: string | undefined, oauth: RelayOAuth): McpBearer {
   const token = bearerToken(header);
@@ -41,7 +50,13 @@ export function inspectMcpBearer(header: string | undefined, oauth: RelayOAuth):
   if (!entry) return { ok: false, revoked: false };
   if (entry.revoked) return { ok: false, revoked: true };
   if (entry.resource !== oauth.resource) return { ok: false, revoked: false };
-  return { ok: true };
+  const client = oauth.store.getClient(entry.clientId);
+  return {
+    ok: true,
+    clientId: entry.clientId,
+    ...(client?.operationalClient ? { operationalClient: client.operationalClient } : {}),
+    ...(client?.dispatchGrant ? { dispatchGrant: client.dispatchGrant } : {}),
+  };
 }
 
 function json(
@@ -296,6 +311,25 @@ export function handleOAuthRequest(
       });
       return true;
     }
+    const operationalClient = (params.operational_client ?? "muse").trim();
+    if (!EXTERNAL_CLIENT_NAME_PATTERN.test(operationalClient)) {
+      if (wantsHtml) {
+        html(response, 400, consentHtml(params, "Operational client name is invalid"));
+        return true;
+      }
+      json(response, 400, {
+        error: "invalid_request",
+        error_description: "operational_client is not a valid Host client name",
+      });
+      return true;
+    }
+    const dispatchGrant =
+      params.dispatch_grant === "full-dispatch" ? "full-dispatch" : "legacy-four";
+    oauth.store.saveClient({
+      ...client,
+      operationalClient,
+      dispatchGrant,
+    });
     const code = randomBytes(24).toString("base64url");
     oauth.store.saveAuthCode({
       codeHash: sha256Hex(code),

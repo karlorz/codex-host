@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Writable } from "node:stream";
 
 import {
+  EXTERNAL_MCP_DISPATCH_ROUTES,
   RELAY_ALLOWED_ROUTES,
   RELAY_DEFAULT_HOP_IPV4,
   RELAY_DEFAULT_LINK_PORT,
@@ -32,9 +33,24 @@ import {
 } from "./delegation-cli-enrollment.js";
 import type { DelegationCliArguments } from "./delegation-cli-options.js";
 import { DelegationControlError } from "./delegation-types.js";
+import { ExternalClientRegistry, defaultExternalClientsPath } from "./external-clients.js";
 import { attachJsonl, writeJsonl } from "./relay-link-jsonl.js";
 
-const ALLOWED = new Set<string>(RELAY_ALLOWED_ROUTES);
+const LEGACY_ALLOWED = new Set<string>(RELAY_ALLOWED_ROUTES);
+const DISPATCH_ALLOWED = new Set<string>(EXTERNAL_MCP_DISPATCH_ROUTES);
+
+function stampLegacyEnrollmentBody(
+  callerThreadId: string,
+  route: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...body };
+  if (route === "/v1/thread/read" || route === "/v1/thread/wait" || route === "/v1/thread/send") {
+    next.callerThreadId = callerThreadId;
+    if (route !== "/v1/thread/send" && next.view === undefined) next.view = "result";
+  }
+  return next;
+}
 
 function assertHopAddress(value: string): string {
   if (value === "127.0.0.1" || isTailscaleIPv4(value)) return value;
@@ -71,13 +87,28 @@ async function readLinkSecret(filePath: string): Promise<string> {
 
 export async function handleRelayLinkRequest(input: {
   record: EnrollmentRecord;
-  request: { requestId: string; deadlineMs: number; route: string; body: Record<string, unknown> };
+  request: {
+    requestId: string;
+    deadlineMs: number;
+    route: string;
+    body: Record<string, unknown>;
+    operationalClient?: string;
+    oauthClientId?: string;
+    dispatchGrant?: "legacy-four" | "full-dispatch";
+  };
   resolveUpstream: () => Promise<string>;
+  clients?: ExternalClientRegistry;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }): Promise<RelayLinkReply> {
   const now = input.now ?? Date.now;
-  if (!ALLOWED.has(input.request.route)) {
+  const operationalClient = input.request.operationalClient;
+  const hopGrant = input.request.dispatchGrant ?? "legacy-four";
+  const named =
+    operationalClient && input.clients ? await input.clients.record(operationalClient) : undefined;
+  const fullDispatch = hopGrant === "full-dispatch" && named?.dispatchGrant === "full-dispatch";
+  const allowed = fullDispatch ? DISPATCH_ALLOWED : LEGACY_ALLOWED;
+  if (!allowed.has(input.request.route)) {
     return {
       requestId: input.request.requestId,
       status: 403,
@@ -89,29 +120,21 @@ export async function handleRelayLinkRequest(input: {
       },
     };
   }
-  const body = { ...input.request.body };
-  if (
-    input.request.route === "/v1/thread/read" ||
-    input.request.route === "/v1/thread/wait" ||
-    input.request.route === "/v1/thread/send"
-  ) {
-    if (body.hostId !== undefined) {
-      return {
-        requestId: input.request.requestId,
-        status: 403,
-        body: {
-          error: {
-            code: "UNAUTHORIZED_TARGET",
-            message: "hostId is rejected on the enrolled relay",
-          },
+  if (input.request.body.hostId !== undefined) {
+    return {
+      requestId: input.request.requestId,
+      status: 403,
+      body: {
+        error: {
+          code: "UNAUTHORIZED_TARGET",
+          message: "hostId is rejected on the enrolled relay",
         },
-      };
-    }
-    body.callerThreadId = input.record.threadId;
-    if (input.request.route !== "/v1/thread/send" && body.view === undefined) {
-      body.view = "result";
-    }
+      },
+    };
   }
+  const body = fullDispatch
+    ? { ...input.request.body }
+    : stampLegacyEnrollmentBody(input.record.threadId, input.request.route, input.request.body);
   const remaining = input.request.deadlineMs - now();
   if (remaining <= 0) {
     return {
@@ -124,16 +147,30 @@ export async function handleRelayLinkRequest(input: {
   try {
     const upstream = await input.resolveUpstream();
     posted = true;
-    const result = await (input.fetchImpl ?? fetch)(new URL(input.request.route, upstream), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${input.record.token}`,
-        "content-type": "application/json",
+    const result = await (input.fetchImpl ?? fetch)(
+      new URL(fullDispatch ? "/v1/external/dispatch" : input.request.route, upstream),
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${input.record.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(
+          fullDispatch
+            ? {
+                client: operationalClient,
+                route: input.request.route,
+                body,
+                ...(input.request.oauthClientId
+                  ? { oauthClientId: input.request.oauthClientId }
+                  : {}),
+              }
+            : body,
+        ),
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
       },
-      body: JSON.stringify(body),
-      redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    );
     const text = await result.text();
     if (text.length > RELAY_MAX_BODY_BYTES) {
       return {
@@ -177,6 +214,7 @@ export function serveRelayLinkSocket(input: {
   record: EnrollmentRecord;
   secret: string;
   resolveUpstream: () => Promise<string>;
+  clients?: ExternalClientRegistry;
   fetchImpl?: typeof fetch;
 }): Promise<void> {
   return new Promise((resolve) => {
@@ -204,8 +242,19 @@ export function serveRelayLinkSocket(input: {
         }
         void handleRelayLinkRequest({
           record: input.record,
-          request: parsed.data,
+          request: {
+            requestId: parsed.data.requestId,
+            deadlineMs: parsed.data.deadlineMs,
+            route: parsed.data.route,
+            body: parsed.data.body,
+            ...(parsed.data.operationalClient
+              ? { operationalClient: parsed.data.operationalClient }
+              : {}),
+            ...(parsed.data.oauthClientId ? { oauthClientId: parsed.data.oauthClientId } : {}),
+            ...(parsed.data.dispatchGrant ? { dispatchGrant: parsed.data.dispatchGrant } : {}),
+          },
           resolveUpstream: input.resolveUpstream,
+          ...(input.clients ? { clients: input.clients } : {}),
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         }).then((reply) => {
           if (input.socket.destroyed) return;
@@ -267,6 +316,7 @@ export async function runEnrollmentRelayLink(input: {
       socket,
       record,
       secret,
+      clients: new ExternalClientRegistry(defaultExternalClientsPath(input.environment)),
       resolveUpstream: async () =>
         (await readLiveEnrollmentEndpoint(input.environment)) ?? record.endpoint,
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),

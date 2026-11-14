@@ -115,6 +115,15 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
     return create(clientId);
   }
 
+  async threadWorkspace(threadId: string): Promise<string | undefined> {
+    try {
+      const owner = await this.#registrationForThread(threadId);
+      return owner.threadWorkspace?.(threadId);
+    } catch {
+      return undefined;
+    }
+  }
+
   async inspect(input: HarnessInspectInput) {
     if (this.#harnessCatalog) return this.#harnessCatalog.inspect(input);
     const registrations = [...this.#registrations];

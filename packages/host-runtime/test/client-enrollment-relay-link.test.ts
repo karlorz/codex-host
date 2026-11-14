@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELAY_ENROLLMENT_CLIENT_ID } from "@codexhost/shared-contracts";
 
 import { handleRelayLinkRequest } from "../src/client-enrollment-relay-link.js";
+import { ExternalClientRegistry } from "../src/external-clients.js";
 import {
   allowlistDigest,
   MACHINE_ENROLLMENT_TTL_MS,
@@ -157,6 +158,111 @@ describe("enroll relay-link Mac side", () => {
     });
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).callerThreadId).toBe("muse-own");
     expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body)).callerThreadId).toBe("muse-own");
+  });
+
+  it("dispatches full-grant tools as the operational client without muse caller stamping", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codexhost-relay-dispatch-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const clients = new ExternalClientRegistry(path.join(dir, "external-clients.json"));
+    await clients.create("grok-bot", {
+      connectionMode: "public-relay",
+      dispatchGrant: "full-dispatch",
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      expect(String(url)).toContain("/v1/external/dispatch");
+      return new Response(JSON.stringify({ threadId: "child" }), { status: 200 });
+    });
+    const issued = record();
+    issued.allowlistDigest = allowlistDigest(issued.allowlist);
+    const reply = await handleRelayLinkRequest({
+      record: issued,
+      clients,
+      request: {
+        requestId: "d1",
+        deadlineMs: Date.now() + 5_000,
+        route: "/v1/delegate/start",
+        body: { harnessId: "codex", task: "ok", cwd: dir },
+        operationalClient: "grok-bot",
+        dispatchGrant: "full-dispatch",
+      },
+      resolveUpstream: async () => "http://127.0.0.1:9/",
+      fetchImpl,
+    });
+    expect(reply.status).toBe(200);
+    const posted = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      client?: string;
+      body?: { callerThreadId?: string };
+    };
+    expect(posted.client).toBe("grok-bot");
+    expect(posted.body?.callerThreadId).toBeUndefined();
+  });
+
+  it("keeps a hop full-grant from expanding until the Mac record is also full-dispatch", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codexhost-relay-legacy-mac-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const clients = new ExternalClientRegistry(path.join(dir, "external-clients.json"));
+    await clients.create("muse", {
+      connectionMode: "public-relay",
+      dispatchGrant: "legacy-four",
+    });
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const issued = record();
+    issued.allowlistDigest = allowlistDigest(issued.allowlist);
+    const reply = await handleRelayLinkRequest({
+      record: issued,
+      clients,
+      request: {
+        requestId: "legacy",
+        deadlineMs: Date.now() + 5_000,
+        route: "/v1/delegate/start",
+        body: { harnessId: "codex", task: "no", cwd: dir },
+        operationalClient: "muse",
+        dispatchGrant: "full-dispatch",
+      },
+      resolveUpstream: async () => "http://127.0.0.1:9/",
+      fetchImpl,
+    });
+    expect(reply.status).toBe(403);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("forwards the hop OAuth client id and does not send the public bearer to Host", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "codexhost-relay-oauth-id-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    const clients = new ExternalClientRegistry(path.join(dir, "external-clients.json"));
+    await clients.create("grok-bot", {
+      connectionMode: "public-relay",
+      dispatchGrant: "full-dispatch",
+      oauthClientId: "oauth-grok",
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+      const headers = init?.headers as { authorization?: string };
+      expect(headers.authorization).toBe("Bearer muse-token");
+      return new Response(JSON.stringify({ threadId: "child" }), { status: 200 });
+    });
+    const issued = record();
+    issued.allowlistDigest = allowlistDigest(issued.allowlist);
+    await handleRelayLinkRequest({
+      record: issued,
+      clients,
+      request: {
+        requestId: "oauth",
+        deadlineMs: Date.now() + 5_000,
+        route: "/v1/harness/list",
+        body: {},
+        operationalClient: "grok-bot",
+        oauthClientId: "oauth-grok",
+        dispatchGrant: "full-dispatch",
+      },
+      resolveUpstream: async () => "http://127.0.0.1:9/",
+      fetchImpl,
+    });
+    const posted = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      oauthClientId?: string;
+    };
+    expect(posted.oauthClientId).toBe("oauth-grok");
   });
 
   it("refuses a non-muse client without reading Host env", async () => {

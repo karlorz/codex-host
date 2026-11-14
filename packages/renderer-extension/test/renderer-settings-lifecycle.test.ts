@@ -212,6 +212,7 @@ describe("Renderer Settings lifecycle", () => {
     expect(call?.[8]).toBe(requestUsageStatistics);
     expect(call?.[9]).toBe(usageStatisticsHosts);
     expect(call?.[12]).toBe(getEnrollmentClient);
+    expect(typeof call?.[13]).toBe("function");
     lifecycle.dispose();
   });
 

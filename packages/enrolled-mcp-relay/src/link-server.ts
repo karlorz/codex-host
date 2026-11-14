@@ -110,6 +110,9 @@ export async function listenEnrolledLink(input: {
             deadlineMs: request.deadlineMs,
             route: request.route,
             body: request.body,
+            ...(request.operationalClient ? { operationalClient: request.operationalClient } : {}),
+            ...(request.oauthClientId ? { oauthClientId: request.oauthClientId } : {}),
+            ...(request.dispatchGrant ? { dispatchGrant: request.dispatchGrant } : {}),
           };
           return await new Promise<RelayLinkReply>((resolve) => {
             const waitMs = Math.max(1, frame.deadlineMs - Date.now());

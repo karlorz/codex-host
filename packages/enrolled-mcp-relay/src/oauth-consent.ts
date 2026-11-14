@@ -37,10 +37,12 @@ export function consentHtml(params: Record<string, string>, error?: string): str
 </head>
 <body>
 <h1>codexhost-relay</h1>
-<p>Allow ${client} to use muse enrollment on karlmac-mini.</p>
+<p>Allow ${client} to use a Host operational client on karlmac-mini. OAuth registration alone does not grant Host authority.</p>
 ${alert}
 <form method="post" action="/authorize">
 ${hiddens}
+<p><label>Operational client <input name="operational_client" value="muse" required autocomplete="off"></label></p>
+<p><label><input type="checkbox" name="dispatch_grant" value="full-dispatch"> Allow full Host dispatch (delegate_start and thread listing)</label></p>
 <p><label>Operator password <input type="password" name="password" required autocomplete="current-password"></label></p>
 <p><button type="submit">Allow</button></p>
 </form>

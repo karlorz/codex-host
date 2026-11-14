@@ -4,7 +4,7 @@
 
 Host injects Runtime endpoint and token only into processes it started. An unmanaged same-user shell uses private `cli-credentials.json` (`local-cli`) when Host is running. Enrollment is a separate allowlisted collaborator identity, selected only with `--enrolled-client` or `CODEXHOST_ENROLL_CLIENT`. It issues a distinct client token and caller Thread after approval. A grok-bot store on disk is not an implicit default for thread commands.
 
-This is not the same product as same-Mac full dispatch on loopback `:4398`. That path, including `delegate start`, is documented in [external-clients.md](external-clients.md). Do not fold `enroll` into `client add`. Do not point a cloud connector at `:4398`.
+This is not the same product as operational MCP clients. Same-Mac `:4398`, Console MCP clients, workspace access, and the shared eleven-tool catalog are documented in [external-clients.md](external-clients.md). Muse's existing Mac enrollment stays; full public dispatch is a separate Console grant plus one reconnect. Do not fold `enroll` into `client add`. Do not point a cloud connector at `:4398`.
 
 ## Commands
 
@@ -130,7 +130,7 @@ Desktop Settings and the local console share an **Enrollment** page. It lists ac
 
 ## Out of scope
 
-- Direct Linux VM access to Mac loopback, general Web/Relay, and general remote Host routing. The outbound enrolled MCP relay (Mac connects out; hop OAuth; client `muse` only) is in product scope as specified in [enrolled-mcp-relay.md](enrolled-mcp-relay.md). The Mac link, tailnet hop process, split listen, hop public OAuth, Origin CA, sg01 Caddy site, and Muse Codex Host connector are in place. Unauthenticated public `POST /mcp` returns 401 with `resource_metadata`. That scope does not include inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, enroll revoke through the relay, `delegate start`, or multi-client relay.
+- Direct Linux VM access to Mac loopback, general Web/Relay, and general remote Host routing. Enrollment itself remains an allowlisted collaborator product and still denies `delegate start`. Shared operational MCP dispatch for Muse and Grok Bot is documented in [external-clients.md](external-clients.md) and [enrolled-mcp-relay.md](enrolled-mcp-relay.md). The Mac link, tailnet hop, hop public OAuth, Origin CA, sg01 Caddy site, and Muse Codex Host connector are in place. Unauthenticated public `POST /mcp` returns 401 with `resource_metadata`. Enrollment scope does not include inbound Mac Runtime, Tailscale Funnel, a public `:4397`, cancel-through-relay, or enroll revoke through the relay.
 - Copying `CODEXHOST_*` from Cursor/parent processes, launchd, or shared files
 - Attaching a client to a parent Thread id as if it were that chat
 - Unattended first pairing, a daemon, or `launchctl setenv`

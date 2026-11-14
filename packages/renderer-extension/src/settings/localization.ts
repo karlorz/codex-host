@@ -333,6 +333,44 @@ export interface RendererSettingsMessages {
     readonly revoke: string;
     readonly revoking: string;
   };
+  readonly mcpClients: {
+    readonly description: string;
+    readonly helpLabel: string;
+    readonly help: readonly string[];
+    readonly columns: readonly string[];
+    readonly empty: string;
+    readonly unavailable: string;
+    readonly failed: string;
+    readonly loading: string;
+    readonly refresh: string;
+    readonly add: string;
+    readonly adding: string;
+    readonly name: string;
+    readonly access: string;
+    readonly accessAll: string;
+    readonly accessSelected: string;
+    readonly workspaces: string;
+    readonly workspacesHint: string;
+    readonly connection: string;
+    readonly connectionPublic: string;
+    readonly connectionLocal: string;
+    readonly connectionDirect: string;
+    readonly grant: string;
+    readonly grantLegacy: string;
+    readonly grantFull: string;
+    readonly oauthClientId: string;
+    readonly directUrl: string;
+    readonly directUrlHint: string;
+    readonly connectOAuth: string;
+    readonly copyUrl: string;
+    readonly copied: string;
+    readonly tokenOnce: string;
+    readonly confirmRevoke: string;
+    readonly revoke: string;
+    readonly revoking: string;
+    readonly save: string;
+    readonly saving: string;
+  };
   readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
 }
 
@@ -715,11 +753,58 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     revoke: "Revoke",
     revoking: "Revoking…",
   }),
+  mcpClients: Object.freeze({
+    description:
+      "Trusted operational MCP clients. Add a client, choose Thread access, then connect OAuth. An OAuth app name is not Host authority. Muse uses the public relay, never loopback.",
+    helpLabel: "About MCP clients",
+    help: Object.freeze([
+      "Muse and Grok Bot share the same 11-tool Host catalog. Each client has its own identity, access, and revocation.",
+      "All Host Threads is the default. Selected workspaces limits reads, writes, listings, waits, events, watches, and new delegation destinations in those roots.",
+      "Public relay is the default connector URL. Local is loopback :4398 on this Mac. Direct uses a path that already reaches this Mac; Host does not open a new public listener.",
+      "Revoke immediately ends later API use, including established sessions. Already-started tasks keep running. Cancellation is separate.",
+    ]),
+    columns: Object.freeze(["Client", "Access", "Connection", "Grant", "URL", "Actions"]),
+    empty: "No MCP clients. Add muse or grok-bot here before connecting OAuth.",
+    unavailable: "MCP clients require the local Host.",
+    failed: "Could not load MCP clients.",
+    loading: "Loading MCP clients…",
+    refresh: "Refresh",
+    add: "Add client",
+    adding: "Adding…",
+    name: "Client name",
+    access: "Thread access",
+    accessAll: "All Host Threads",
+    accessSelected: "Selected workspaces",
+    workspaces: "Workspace roots",
+    workspacesHint:
+      "One absolute path per line. Symlinks are resolved. Unresolved paths are denied.",
+    connection: "Connection",
+    connectionPublic: "Public relay (default)",
+    connectionLocal: "Local loopback",
+    connectionDirect: "Direct / already reachable",
+    grant: "Dispatch grant",
+    grantLegacy: "Legacy four tools (Muse staging)",
+    grantFull: "Full Host dispatch",
+    oauthClientId: "Bound OAuth client id (optional)",
+    directUrl: "Direct MCP URL",
+    directUrlHint:
+      "https://host/mcp or http://100.x.x.x/mcp on Tailscale. Host does not open a listener.",
+    connectOAuth: "Connect OAuth at this URL after the Host record exists.",
+    copyUrl: "Copy URL",
+    copied: "Copied",
+    tokenOnce: "Same-Mac token (shown once). Store it privately; it is not listed again.",
+    confirmRevoke: "Confirm revoke",
+    revoke: "Revoke",
+    revoking: "Revoking…",
+    save: "Save",
+    saving: "Saving…",
+  }),
   pageLabels: Object.freeze({
     connections: "Connections",
     "mobile-web": "Phone & browser",
     "remote-connections": "Other computers (SSH)",
     enrollment: "Enrollment",
+    "mcp-clients": "MCP clients",
     appearance: "General",
     voice: "Voice",
     accounts: "Accounts",
@@ -1088,11 +1173,56 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     revoke: "撤销",
     revoking: "正在撤销…",
   }),
+  mcpClients: Object.freeze({
+    description:
+      "受信任的运营 MCP 客户端。先添加客户端、选择 Thread 访问范围，再连接 OAuth。仅有 OAuth 应用名称不能获得 Host 权限。Muse 使用公网中继，不得指向回环地址。",
+    helpLabel: "关于 MCP 客户端",
+    help: Object.freeze([
+      "Muse 与 Grok Bot 共用同一套 11 个 Host 工具。每个客户端有独立身份、访问范围和撤销。",
+      "默认可访问全部 Host Thread。选定工作区会限制这些根目录内的读写、列表、等待、事件、监视以及新的委派目标。",
+      "默认连接是公网中继。本机为回环 :4398。Direct 使用已经能到达本机的路径；Host 不会新开公网监听。",
+      "撤销会立即禁止后续 API 使用，包括已建立的会话。已经开始的任务继续运行。取消任务是单独操作。",
+    ]),
+    columns: Object.freeze(["客户端", "访问", "连接", "授权", "URL", "操作"]),
+    empty: "暂无 MCP 客户端。连接 OAuth 前请先在此添加 muse 或 grok-bot。",
+    unavailable: "MCP 客户端需要正在运行的本地 Host。",
+    failed: "无法加载 MCP 客户端。",
+    loading: "正在加载 MCP 客户端…",
+    refresh: "刷新",
+    add: "添加客户端",
+    adding: "正在添加…",
+    name: "客户端名称",
+    access: "Thread 访问",
+    accessAll: "全部 Host Thread",
+    accessSelected: "选定工作区",
+    workspaces: "工作区根目录",
+    workspacesHint: "每行一个绝对路径。符号链接会被解析。无法解析的路径会被拒绝。",
+    connection: "连接",
+    connectionPublic: "公网中继（默认）",
+    connectionLocal: "本机回环",
+    connectionDirect: "Direct / 已可达",
+    grant: "调度授权",
+    grantLegacy: "旧版四工具（Muse 过渡）",
+    grantFull: "完整 Host 调度",
+    oauthClientId: "绑定的 OAuth client id（可选）",
+    directUrl: "Direct MCP URL",
+    directUrlHint: "https://host/mcp，或 Tailscale 上的 http://100.x.x.x/mcp。Host 不会新开监听。",
+    connectOAuth: "Host 记录存在后再用此 URL 连接 OAuth。",
+    copyUrl: "复制 URL",
+    copied: "已复制",
+    tokenOnce: "本机令牌（只显示一次）。请私下保存；列表不会再次显示。",
+    confirmRevoke: "确认撤销",
+    revoke: "撤销",
+    revoking: "正在撤销…",
+    save: "保存",
+    saving: "正在保存…",
+  }),
   pageLabels: Object.freeze({
     connections: "连接",
     "mobile-web": "手机与浏览器",
     "remote-connections": "其他电脑（SSH）",
     enrollment: "客户端登记",
+    "mcp-clients": "MCP 客户端",
     appearance: "通用",
     voice: "语音",
     accounts: "账号",

@@ -95,6 +95,10 @@ import {
 import { HarnessDisplaySettingsStore } from "./harness-display-settings.js";
 import type { EnrollmentAuthority } from "./client-enrollment-authority.js";
 import { handleEnrollmentHostRequest, isEnrollmentHostMethod } from "./client-enrollment-host.js";
+import {
+  handleExternalClientHostRequest,
+  isExternalClientHostMethod,
+} from "./external-client-host.js";
 import { isModelPriceOverridesMethod } from "./model-price-overrides-file.js";
 import { HARNESS_DISPLAY_CHANGED_METHOD } from "@codexhost/shared-contracts";
 import {
@@ -1032,6 +1036,7 @@ export class AppServerHost {
         list: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.list(input)),
         canHandleStart: (input) => this.#canHandleDelegationStart(input),
         ownsThread: (threadId) => this.#ownsDelegationThread(threadId),
+        threadWorkspace: (threadId) => this.#delegationCoordinator.threadWorkspace(threadId),
         executionHostId: (threadId) => {
           const thread = this.#externalRuntime.get(threadId);
           return thread ? this.#executionHosts.get(thread) : undefined;
@@ -1835,6 +1840,7 @@ export class AppServerHost {
         request.method.startsWith("codexhost/account/") ||
         request.method.startsWith("codexhost/update/") ||
         isEnrollmentHostMethod(request.method) ||
+        isExternalClientHostMethod(request.method) ||
         isModelPriceOverridesMethod(request.method)
       )
     ) {
@@ -1932,6 +1938,19 @@ export class AppServerHost {
     if (isEnrollmentHostMethod(request.method)) {
       const reply = await handleEnrollmentHostRequest({
         enrollment: this.#options.enrollment,
+        method: request.method,
+        params: request.params ?? {},
+      });
+      await this.#writer.json(
+        "error" in reply
+          ? rpcError(request, reply.error.code, reply.error.message)
+          : rpcEnvelope(request, { result: jsonValueSchema.parse(reply.result) }),
+      );
+      return;
+    }
+    if (isExternalClientHostMethod(request.method)) {
+      const reply = await handleExternalClientHostRequest({
+        environment: this.#options.environment ?? process.env,
         method: request.method,
         params: request.params ?? {},
       });

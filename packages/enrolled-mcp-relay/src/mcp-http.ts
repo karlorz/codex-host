@@ -1,19 +1,21 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import {
+  EXTERNAL_MCP_TOOL_DESCRIPTORS,
   RELAY_MAX_BODY_BYTES,
   RELAY_MCP_TOOL_NAMES,
   RELAY_OFFLINE_TIMEOUT_MS,
   RELAY_UPSTREAM_TIMEOUT_MS,
   RELAY_WAIT_TIMEOUT_MAX_MS,
+  mapExternalMcpToolCall,
   relayEnrollStatusInputSchema,
   relayEnrollStatusResultSchema,
   relayThreadReadInputSchema,
   relayThreadSendInputSchema,
   relayThreadWaitInputSchema,
-  type RelayAllowedRoute,
   type RelayEnrollStatusResult,
   type RelayLinkReply,
+  ExternalMcpArgumentError,
 } from "@codexhost/shared-contracts";
 
 import { bindListeningPort } from "./listen.js";
@@ -22,8 +24,15 @@ import {
   handleOAuthRequest,
   inspectMcpBearer,
   unauthorizedAuthenticate,
+  type McpBearer,
   type RelayOAuth,
 } from "./oauth-http.js";
+
+type DispatchIdentity = {
+  operationalClient?: string;
+  oauthClientId?: string;
+  dispatchGrant?: "legacy-four" | "full-dispatch";
+};
 
 const TOOLS = [
   {
@@ -157,9 +166,10 @@ async function readBodyString(request: IncomingMessage): Promise<string> {
 
 async function callMac(
   links: LinkListener,
-  route: RelayAllowedRoute,
+  route: string,
   body: Record<string, unknown>,
   timeoutMs: number,
+  identity: DispatchIdentity = {},
 ): Promise<RelayLinkReply> {
   const session = links.session();
   if (!session) {
@@ -176,10 +186,26 @@ async function callMac(
     deadlineMs: Date.now() + timeoutMs,
     route,
     body,
+    ...(identity.operationalClient ? { operationalClient: identity.operationalClient } : {}),
+    ...(identity.oauthClientId ? { oauthClientId: identity.oauthClientId } : {}),
+    ...(identity.dispatchGrant ? { dispatchGrant: identity.dispatchGrant } : {}),
   });
 }
 
-function replyToTool(reply: RelayLinkReply, route: RelayAllowedRoute): unknown {
+function identityFrom(bearer: McpBearer | undefined): DispatchIdentity {
+  if (!bearer || !bearer.ok) return {};
+  return {
+    ...(bearer.operationalClient ? { operationalClient: bearer.operationalClient } : {}),
+    ...(bearer.clientId ? { oauthClientId: bearer.clientId } : {}),
+    ...(bearer.dispatchGrant ? { dispatchGrant: bearer.dispatchGrant } : {}),
+  };
+}
+
+function isFullDispatch(identity: DispatchIdentity): boolean {
+  return identity.dispatchGrant === "full-dispatch";
+}
+
+function replyToTool(reply: RelayLinkReply, route: string): unknown {
   const reason =
     reply.error?.details && typeof reply.error.details === "object"
       ? (reply.error.details as { reason?: unknown }).reason
@@ -221,7 +247,33 @@ function replyToTool(reply: RelayLinkReply, route: RelayAllowedRoute): unknown {
   return toolResult(reply.body);
 }
 
-async function callTool(links: LinkListener, name: string, args: unknown): Promise<unknown> {
+async function callTool(
+  links: LinkListener,
+  name: string,
+  args: unknown,
+  identity: DispatchIdentity = {},
+): Promise<unknown> {
+  if (isFullDispatch(identity)) {
+    try {
+      const mapped = mapExternalMcpToolCall(name, args);
+      if (!links.session()) return offlineError();
+      const timeoutMs =
+        mapped.route === "/v1/thread/wait"
+          ? (typeof mapped.body.timeoutMs === "number"
+              ? mapped.body.timeoutMs
+              : RELAY_WAIT_TIMEOUT_MAX_MS) + 1_000
+          : mapped.route === "/v1/events/poll"
+            ? (typeof mapped.body.timeoutMs === "number" ? mapped.body.timeoutMs : 0) + 1_000
+            : RELAY_UPSTREAM_TIMEOUT_MS;
+      const reply = await callMac(links, mapped.route, mapped.body, timeoutMs, identity);
+      return replyToTool(reply, mapped.route);
+    } catch (error) {
+      if (error instanceof ExternalMcpArgumentError) {
+        return toolError(error.code, error.message);
+      }
+      return toolError("UNAUTHORIZED_TARGET", "This tool is not exposed");
+    }
+  }
   if (!RELAY_MCP_TOOL_NAMES.includes(name as (typeof RELAY_MCP_TOOL_NAMES)[number])) {
     return toolError("UNAUTHORIZED_TARGET", "This tool is not exposed");
   }
@@ -229,7 +281,13 @@ async function callTool(links: LinkListener, name: string, args: unknown): Promi
   if (name === "enroll_status") {
     const parsed = relayEnrollStatusInputSchema.safeParse(args ?? {});
     if (!parsed.success) return toolError("INVALID_ARGUMENT", "Invalid enroll_status arguments");
-    const reply = await callMac(links, "/v1/enroll/status", {}, RELAY_OFFLINE_TIMEOUT_MS + 5_000);
+    const reply = await callMac(
+      links,
+      "/v1/enroll/status",
+      {},
+      RELAY_OFFLINE_TIMEOUT_MS + 5_000,
+      identity,
+    );
     return replyToTool(reply, "/v1/enroll/status");
   }
   if (name === "thread_read") {
@@ -240,6 +298,7 @@ async function callTool(links: LinkListener, name: string, args: unknown): Promi
       "/v1/thread/read",
       { ...parsed.data, view: parsed.data.view ?? "result" },
       RELAY_UPSTREAM_TIMEOUT_MS,
+      identity,
     );
     return replyToTool(reply, "/v1/thread/read");
   }
@@ -252,6 +311,7 @@ async function callTool(links: LinkListener, name: string, args: unknown): Promi
       "/v1/thread/wait",
       { ...parsed.data, view: parsed.data.view ?? "result", timeoutMs },
       timeoutMs + 1_000,
+      identity,
     );
     return replyToTool(reply, "/v1/thread/wait");
   }
@@ -262,6 +322,7 @@ async function callTool(links: LinkListener, name: string, args: unknown): Promi
     "/v1/thread/send",
     parsed.data as unknown as Record<string, unknown>,
     RELAY_UPSTREAM_TIMEOUT_MS,
+    identity,
   );
   return replyToTool(reply, "/v1/thread/send");
 }
@@ -299,12 +360,14 @@ export async function listenEnrolledMcp(input: {
         writeJson(response, 404, { error: { code: "UNAUTHORIZED_TARGET", message: "Not found" } });
         return;
       }
+      let identity: DispatchIdentity = {};
       if (oauth) {
         const bearer = inspectMcpBearer(request.headers.authorization, oauth);
         if (!bearer.ok) {
           writeMcpUnauthorized(response, oauth, bearer.revoked);
           return;
         }
+        identity = identityFrom(bearer);
       }
       if (request.method !== "POST") {
         writeJson(response, 404, { error: { code: "UNAUTHORIZED_TARGET", message: "Not found" } });
@@ -353,7 +416,13 @@ export async function listenEnrolledMcp(input: {
         return;
       }
       if (message.method === "tools/list") {
-        writeJson(response, 200, rpcResult(message.id, { tools: TOOLS }));
+        writeJson(
+          response,
+          200,
+          rpcResult(message.id, {
+            tools: isFullDispatch(identity) ? EXTERNAL_MCP_TOOL_DESCRIPTORS : TOOLS,
+          }),
+        );
         return;
       }
       if (message.method === "tools/call") {
@@ -374,7 +443,7 @@ export async function listenEnrolledMcp(input: {
           );
           return;
         }
-        const result = await callTool(input.links, name, args ?? {});
+        const result = await callTool(input.links, name, args ?? {}, identity);
         writeJson(response, 200, rpcResult(message.id, result));
         return;
       }

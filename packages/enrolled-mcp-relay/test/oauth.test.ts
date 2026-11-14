@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RELAY_MCP_TOOL_NAMES } from "@codexhost/shared-contracts";
+import { EXTERNAL_MCP_TOOL_NAMES, RELAY_MCP_TOOL_NAMES } from "@codexhost/shared-contracts";
 
 import { hashPassword } from "../src/oauth-password.js";
 import { RelayOAuthStore } from "../src/oauth-store.js";
@@ -44,6 +44,7 @@ async function startOauthRelay(store = new RelayOAuthStore()) {
 async function issueAccessClient(
   origin: string,
   resource = `${origin}/mcp`,
+  extra: Record<string, string> = {},
 ): Promise<{ access: string; clientId: string }> {
   const pair = pkce();
   const registered = await fetch(`${origin}/register`, {
@@ -68,6 +69,7 @@ async function issueAccessClient(
       response_type: "code",
       resource,
       password: PASSWORD,
+      ...extra,
     }),
   });
   expect(authorize.status).toBe(302);
@@ -143,6 +145,55 @@ describe("enrolled MCP relay OAuth", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { result: { tools: { name: string }[] } };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([...RELAY_MCP_TOOL_NAMES]);
+  });
+
+  it("lists the eleven-tool catalog after operator consent binds a full-dispatch client", async () => {
+    const { relay } = await startOauthRelay();
+    const origin = relay.mcpOrigin;
+    const { access } = await issueAccessClient(origin, `${origin}/mcp`, {
+      operational_client: "grok-bot",
+      dispatch_grant: "full-dispatch",
+    });
+    const listed = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${access}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { result: { tools: { name: string }[] } };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([...EXTERNAL_MCP_TOOL_NAMES]);
+  });
+
+  it("keeps DCR registration from granting Host tools until operator consent binds a client", async () => {
+    const { relay, store } = await startOauthRelay();
+    const origin = relay.mcpOrigin;
+    const registered = await fetch(`${origin}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_name: "claimed-name",
+        redirect_uris: ["http://127.0.0.1/cb"],
+      }),
+    });
+    expect(registered.status).toBe(201);
+    const client = (await registered.json()) as { client_id: string };
+    const saved = store.getClient(client.client_id);
+    expect(saved?.operationalClient).toBeUndefined();
+    expect(saved?.dispatchGrant).toBeUndefined();
+    const { access } = await issueAccessClient(origin);
+    const listed = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${access}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
     const body = (await listed.json()) as { result: { tools: { name: string }[] } };
     expect(body.result.tools.map((tool) => tool.name)).toEqual([...RELAY_MCP_TOOL_NAMES]);
   });

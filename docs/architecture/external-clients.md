@@ -1,15 +1,16 @@
 # 外部客户端
 
-外部客户端是不由 Host 拉起、但需要委派和跟进工作的本机进程，例如终端脚本、Claude Desktop、常驻 bot 的本机代理。它们通过一个固定端口的本机监听使用与 Host 内部相同的委派与 Thread 操作，并以持久事件日志获得完成通知。行为契约见 `openspec/changes/add-external-client-access`。
+外部客户端是不由 Host 拉起、但需要委派和跟进工作的运营调用方，例如终端脚本、Claude Desktop、Muse 与 Grok Bot 连接器。它们使用与 Host 内部相同的委派与 Thread 操作，并以持久事件日志获得完成通知。Console MCP clients 页是 Add client → 选择访问范围 → 连接 OAuth 的权威入口。OAuth 应用登记或自称的客户端名本身没有 Host 权限。
+
+共享工具集是现有的 11 个完整调度工具：`harness_list`、`harness_inspect`、`delegate_start`、`thread_read` / `wait` / `list` / `send` / `cancel` / `watch` / `watches`、`events_poll`。完成通知目前用 `thread_wait` 与 `events_poll`，没有自动 webhook。撤销立即禁止后续 API（包括已建立会话），已经开始的任务继续运行；取消任务是单独操作。
+
+每个客户端有独立身份、归属和撤销。默认访问全部 Host Thread。选定工作区会限制这些根目录内（含解析后的符号链接与外部 worktree）的读写、列表、等待、事件、监视，以及新的委派目标；无法解析的工作区对受限客户端失败关闭。这是 API 范围，不是原生 Harness 文件权限。
+
+连接按客户端选择：默认公网中继 `https://codexhost.karldigi.dev/mcp`；Local 是本机回环 `:4398`；Direct 使用已经能到达本机的网络路径，Host 不会因此新开公网监听或静默回退。Muse 不得指向回环。公网 OAuth bearer 不会被当作 Host 凭据；hop 把运营客户端身份带到 Host 调度。
 
 ## 与 enrollment 的关系
 
-这是两个产品，不是同一接入的两个版本：
-
-- 本文：同一台 Mac、同一系统用户的完整委派（`local-cli`、`client add`、回环 `:4398/mcp`）。工具集包含 `delegate_start`。
-- [Client enrollment](client-enrollment.md)：allowlist 协作者。不走公网 `:4398`。Muse 的四工具 MCP 是 [Path 3 hop](enrolled-mcp-relay.md)，不是 enrollment CLI 本身，也不走本机 `:4398`。
-
-不要用 `enroll` 换 MCP，也不要把 enroll 折进 `client add`。不要把 Mac `:4398` 放到 Tailscale Funnel。
+Enrollment 仍是 allowlist 协作者产品，见 [client-enrollment.md](client-enrollment.md)。Muse 的 Mac 机器登记继续保留，过渡期内未批准完整调度的 hop 仍是四工具。完整调度需要 Console 中的运营客户端记录，并在 hop 同意页勾选完整调度后重连一次。不要把 Mac `:4398` 放到 Tailscale Funnel，也不要把 enroll 折进 `client add`。
 
 CLI 身份：thread 命令只有在 `--enrolled-client` 或 `CODEXHOST_ENROLL_CLIENT` 时才用 enrollment。否则用 Host 注入或 `cli-credentials.json`（`local-cli`）。磁盘上的 grok-bot 登记不是隐式默认。显式选中的 enrollment 过期时失败关闭，不会改成 `local-cli`。
 
@@ -87,6 +88,8 @@ CLI 身份：thread 命令只有在 `--enrolled-client` 或 `CODEXHOST_ENROLL_CL
 
 ## 边界
 
-- 本地监听只绑定 `127.0.0.1`，所有客户端拥有完整的委派权限；tailnet、公网、权限范围与 webhook 推送见 `openspec/changes/add-remote-client-access`。
+- 本机监听仍只绑定 `127.0.0.1`。访问范围是 Console 里的 All Threads 或 Selected workspaces，不是每个客户端都自动拥有全部权限。
+- 公网默认走 outbound hop `https://codexhost.karldigi.dev/mcp`。Direct 只接受已经可达的 `https://…/mcp` 或 Tailscale `http://100.x.x.x/mcp`；选择 Direct 不会新开监听、不会启用 Funnel，也不会静默改走公网中继。
+- 完成通知目前只用 `thread_wait` / `events_poll`，没有 webhook。不要把公网 OAuth bearer 当作 Host 凭据。
 - 外部客户端发起的 Thread 与其他 Thread 一样出现在 Desktop 侧栏；按客户端分组尚未提供。
 - npm 安装没有自带 Node：在 codexhost 会话之外运行 `codexhost client`、`codexhost events` 等命令时，需要 `CODEXHOST_CLI_NODE_PATH` 指向一个 Node。MCP 与 HTTP 客户端不受影响。

@@ -27,6 +27,7 @@ import {
   codexhostDataDirectory,
   defaultExternalClientsPath,
 } from "./external-clients.js";
+import { withExternalClientAccess } from "./external-client-access.js";
 import { ClientEventLog, eventRetentionDays } from "./external-client-events.js";
 import { cliCredentialsPath } from "./cli-credentials.js";
 import { externalClientMcp } from "./external-client-mcp.js";
@@ -251,11 +252,27 @@ export async function prepareDelegationRuntime(input: {
     consent: createUnavailableEnrollmentConsent(),
     createThread: (clientId) => registry.createEnrollmentThread(clientId),
   });
+  const cliToken = `chc_${randomBytes(32).toString("base64url")}`;
+  const clients = new ExternalClientRegistry(
+    defaultExternalClientsPath(input.environment),
+    cliToken,
+  );
+  const dispatchRoute = withExternalClientAccess(
+    externalClientRouter({ api: registry, watchApi: registry, events }),
+    { clients, workspaceOf: (threadId) => registry.threadWorkspace(threadId) },
+  );
   const server = await startDelegationControlServer({
     token,
     api: registry,
     watchApi: registry,
     enrollment,
+    externalClients: clients,
+    externalDispatch: ({ client, route, body }) =>
+      dispatchRoute(
+        { client, request: undefined as never, response: undefined as never },
+        route,
+        body,
+      ),
   });
   try {
     await enrollment.publishBootstrap(server.endpoint);
@@ -264,7 +281,13 @@ export async function prepareDelegationRuntime(input: {
       `codexhost enrollment bootstrap unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
     );
   }
-  const externalServer = await startExternalClients(input.environment, registry, events).then(
+  const externalServer = await startExternalClients(
+    input.environment,
+    events,
+    clients,
+    dispatchRoute,
+    cliToken,
+  ).then(
     (started) => {
       if (started)
         process.stderr.write(`codexhost external clients: listening on ${started.endpoint}\n`);
@@ -300,14 +323,13 @@ export async function prepareDelegationRuntime(input: {
 
 async function startExternalClients(
   environment: NodeJS.ProcessEnv,
-  registry: DelegationControlRegistry,
   events: ClientEventLog,
+  clients: ExternalClientRegistry,
+  route: ReturnType<typeof externalClientRouter>,
+  cliToken: string,
 ): Promise<ExternalClientServer | undefined> {
   const port = externalClientPort(environment);
   if (port === undefined) return undefined;
-  const cliToken = `chc_${randomBytes(32).toString("base64url")}`;
-  const clients = new ExternalClientRegistry(defaultExternalClientsPath(environment), cliToken);
-  const route = externalClientRouter({ api: registry, watchApi: registry, events });
   return startExternalClientServer({
     port,
     clients,

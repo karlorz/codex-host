@@ -45,6 +45,10 @@ import {
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
 import { createEnrollmentSettingsPage, type RendererEnrollmentClient } from "./enrollment-page.js";
+import {
+  createMcpClientsSettingsPage,
+  type RendererExternalClientsClient,
+} from "./mcp-clients-page.js";
 import { RendererRequestTransportError } from "../renderer-request-sender.js";
 import {
   RendererUpdateRequestTimeoutError,
@@ -93,6 +97,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "mobile-web",
   "remote-connections",
   "enrollment",
+  "mcp-clients",
   "accounts",
   "session-import",
   "usage-statistics",
@@ -704,6 +709,7 @@ export function createDefaultRendererSettingsPages(
     Promise.reject(new Error("Local Host connection is unavailable")),
   harnessSchedules?: HarnessSchedulesPageOptions,
   getEnrollmentClient: () => RendererEnrollmentClient | null = () => null,
+  getExternalClientsClient: () => RendererExternalClientsClient | null = () => null,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -713,6 +719,7 @@ export function createDefaultRendererSettingsPages(
     }),
     createRemoteConnectionsPage(messages, getRemoteConnections),
     createEnrollmentSettingsPage(messages, getEnrollmentClient),
+    createMcpClientsSettingsPage(messages, getExternalClientsClient),
     createAccountsSettingsPage(messages, getAccountClient),
     ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
     createSessionImportSettingsPage(
@@ -762,3 +769,4 @@ export function createDefaultRendererSettingsRegistry(
 
 export type { RendererCodexAccountClient } from "./accounts-page.js";
 export type { RendererEnrollmentClient } from "./enrollment-page.js";
+export type { RendererExternalClientsClient } from "./mcp-clients-page.js";

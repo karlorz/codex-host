@@ -316,6 +316,7 @@ export interface DelegationControlRegistration extends DelegationControlApi {
   executionHostId?(threadId: string): string | undefined;
   canHandleStart(input: DelegationStartInput): boolean | Promise<boolean>;
   ownsThread(threadId: string): boolean | Promise<boolean>;
+  threadWorkspace?(threadId: string): Promise<string | undefined>;
 }
 
 export type DelegationControlErrorCode =

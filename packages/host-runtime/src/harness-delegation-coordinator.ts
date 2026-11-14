@@ -216,6 +216,13 @@ export class HarnessDelegationCoordinator {
     return { harnesses: ["codex", ...this.#adapters.keys()] };
   }
 
+  async threadWorkspace(threadId: string): Promise<string | undefined> {
+    const record = await this.#repository.find(threadId);
+    if (record?.cwd) return record.cwd;
+    const metadata: ParentMetadata = await this.#officialThreadMetadata(threadId).catch(() => ({}));
+    return metadata.cwd;
+  }
+
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {
     if (input.harnessId === "codex") return this.#inspectOfficial(input);
     const adapter = this.#adapters.get(input.harnessId as ExternalHarnessId);

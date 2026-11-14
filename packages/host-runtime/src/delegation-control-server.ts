@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 
 import type { EnrollmentAuthority, EnrollmentPrincipal } from "./client-enrollment-authority.js";
+import { assertFullDispatchClient, type ExternalClientRegistry } from "./external-clients.js";
 import {
   parseEnrollmentPairing,
   type EnrollmentAllowlistEntry,
@@ -213,6 +214,12 @@ export async function startDelegationControlServer(input: {
   api: DelegationControlApi;
   watchApi?: DelegationWatchApi;
   enrollment?: EnrollmentAuthority;
+  externalClients?: ExternalClientRegistry;
+  externalDispatch?: (input: {
+    client: string;
+    route: string;
+    body: Record<string, unknown>;
+  }) => Promise<unknown>;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
     let principal: EnrollmentPrincipal | undefined;
@@ -265,6 +272,22 @@ export async function startDelegationControlServer(input: {
         return;
       }
       const body = await jsonBody(request);
+      if (request.url === "/v1/external/dispatch") {
+        if (!input.externalDispatch || !input.externalClients) {
+          throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
+        }
+        const client = String(body.client ?? "");
+        const route = String(body.route ?? "");
+        const payload =
+          typeof body.body === "object" && body.body !== null && !Array.isArray(body.body)
+            ? (body.body as Record<string, unknown>)
+            : {};
+        const oauthClientId =
+          typeof body.oauthClientId === "string" ? body.oauthClientId : undefined;
+        assertFullDispatchClient(await input.externalClients.record(client), oauthClientId);
+        writeJson(response, 200, await input.externalDispatch({ client, route, body: payload }));
+        return;
+      }
       if (request.url === "/v1/enroll/revoke") {
         if (!input.enrollment) {
           throw new DelegationControlError("INVALID_ARGUMENT", "Unknown Runtime control route");
