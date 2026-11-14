@@ -106,3 +106,24 @@ Windows Store build.
 This is not a Live Voice qualification of 26.1106. Voice pins stay in
 [cpa-live-voice-desktop-hook.md](cpa-live-voice-desktop-hook.md).
 macOS production remains [26.1027.61615](macos-desktop-pin-daily-driver.md).
+
+## Windows delivery acceptance
+
+Windows delivery acceptance is automated build, launch, and shortcut smoke on
+the daily driver. Attended Windows Chat, Codex, and Grok speech, microphone,
+and task checks are deferred at Karl's request. They are not blockers for this
+delivery and stay **UNVERIFIED**. Isolated `Runtime.enable` is attachment-only
+and does not qualify voice.
+
+The installed native identity is product **0.18.0-0** under
+`%LOCALAPPDATA%\Programs\codexhost`. Desktop and Start Menu `codexhost.lnk`
+shortcuts target `bin\codexhost-start.exe` with working directory the install
+root (`{app}`). Console uses the same stub with `--console`. Interactive
+session-1 Start Menu launch is the smoke path; session-0 SSH is not.
+
+Shortcut startup is ready when Store **OpenAI.Codex** 26.1106.51428 /
+26.1106.6628.0 is the unique installation root, the Host chain is Shim plus
+bundled Node under that root, Controller readiness is `compatible`, and
+`codexhost inspect --json` reports `runtime.running`. Production injection skip
+on 26.1106 is expected. Missing `experimental_realtime_*` is recorded, not
+rewritten. `reviewedEvidence` stays empty.

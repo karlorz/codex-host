@@ -56,9 +56,13 @@ use codexhost_platform::{
     prompt_running_desktop, show_error_dialog, terminate_process_by_id,
 };
 use compatibility::{MAX_CONTROLLER_READINESS_LINE_BYTES, parse_controller_readiness_line};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use desktop_attachment::wait_for_host_chain;
+#[cfg(target_os = "windows")]
+use desktop_attachment::wait_for_host_chain_with_roots;
 use desktop_attachment::{
     LauncherOwnership, RuntimeControl, acquire_launcher_ownership, allocate_runtime_control,
-    endpoint_ready, publish_runtime_descriptor, recover_stale_controller, wait_for_host_chain,
+    endpoint_ready, host_chain_ready_timeout, publish_runtime_descriptor, recover_stale_controller,
 };
 use installation_layout::InstalledResources;
 use native_harness_broker::run_native_harness_broker_cli;
@@ -851,7 +855,7 @@ fn supervise_desktop(
     let mut controller = start_desktop_controller(installation, options, control, environment)?;
     let desktop_pid = desktop.root_snapshot().id;
     startup_trace("waiting for Host chain");
-    if !wait_for_host_chain(desktop.root_snapshot(), options, Duration::from_secs(30))? {
+    if !wait_for_host_chain(desktop.root_snapshot(), options, host_chain_ready_timeout())? {
         let _ = stop_desktop_controller(&mut controller);
         let _ = desktop.shutdown(Duration::from_secs(2));
         return Err("Codex Desktop did not start the codexhost Host chain before timeout".into());
@@ -955,7 +959,12 @@ fn supervise_desktop(
         }
     };
     startup_trace("waiting for Host chain");
-    if !wait_for_host_chain(&desktop_snapshot, options, Duration::from_secs(30))? {
+    if !wait_for_host_chain_with_roots(
+        &desktop_snapshot,
+        options,
+        host_chain_ready_timeout(),
+        || desktop_root_process_ids_for_installation(installation).map_err(Into::into),
+    )? {
         let _ = stop_desktop_controller(&mut controller);
         let _ = desktop.kill();
         let _ = desktop.wait();

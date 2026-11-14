@@ -27,6 +27,10 @@ use crate::runtime_instance::{
 const ATTACHMENT_RETRY_INITIAL_DELAY: Duration = Duration::from_millis(100);
 const ATTACHMENT_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
 const ORPHANED_CONTROLLER_STOP_GRACE: Duration = Duration::from_secs(2);
+#[cfg(target_os = "windows")]
+const HOST_CHAIN_READY_TIMEOUT: Duration = Duration::from_secs(90);
+#[cfg(not(target_os = "windows"))]
+const HOST_CHAIN_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub(super) struct RuntimeControl {
@@ -109,14 +113,48 @@ pub(super) fn endpoint_ready(port: u16, timeout: Duration) -> bool {
     .is_ok()
 }
 
+pub(super) fn host_chain_ready_timeout() -> Duration {
+    HOST_CHAIN_READY_TIMEOUT
+}
+
+/// Prefer the unique current Desktop root for this installation.
+///
+/// Windows AppX/Electron can replace the activation PID after splash. Host-chain
+/// lookup must follow that single live root instead of the original snapshot.
+/// Zero or multiple roots keep the launched identity so an unmanaged Desktop is
+/// not treated as the Host chain.
+pub(super) fn host_chain_root_id(launched_id: u32, current_roots: &[u32]) -> u32 {
+    match current_roots {
+        [id] => *id,
+        _ => launched_id,
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(super) fn wait_for_host_chain(
     desktop: &ProcessSnapshot,
     options: &ResolvedLaunchOptions,
     timeout: Duration,
 ) -> Result<bool, Box<dyn Error>> {
+    wait_for_host_chain_with_roots(desktop, options, timeout, || Ok(vec![desktop.id]))
+}
+
+pub(super) fn wait_for_host_chain_with_roots(
+    launched: &ProcessSnapshot,
+    options: &ResolvedLaunchOptions,
+    timeout: Duration,
+    mut current_roots: impl FnMut() -> Result<Vec<u32>, Box<dyn Error>>,
+) -> Result<bool, Box<dyn Error>> {
     let started = Instant::now();
     while started.elapsed() < timeout {
-        if descendant_executable_pair_exists(desktop, &options.shim, &options.node)? {
+        let roots = current_roots().unwrap_or_else(|_| Vec::new());
+        let root_id = host_chain_root_id(launched.id, &roots);
+        let desktop = if root_id == launched.id {
+            launched.clone()
+        } else {
+            process_snapshot(root_id).unwrap_or_else(|_| launched.clone())
+        };
+        if descendant_executable_pair_exists(&desktop, &options.shim, &options.node)? {
             return Ok(true);
         }
         thread::sleep(Duration::from_millis(100));
@@ -519,6 +557,21 @@ mod tests {
     fn descriptor(port: u16) -> RuntimeDescriptor {
         RuntimeDescriptor::new(10, port, "0123456789abcdef0123456789abcdef".into())
             .expect("runtime descriptor")
+    }
+
+    #[test]
+    fn host_chain_follows_a_unique_live_root_only() {
+        assert_eq!(host_chain_root_id(10, &[20]), 20);
+        assert_eq!(host_chain_root_id(10, &[]), 10);
+        assert_eq!(host_chain_root_id(10, &[20, 21]), 10);
+        assert_eq!(
+            host_chain_ready_timeout(),
+            if cfg!(target_os = "windows") {
+                Duration::from_secs(90)
+            } else {
+                Duration::from_secs(30)
+            }
+        );
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]

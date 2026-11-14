@@ -33,6 +33,8 @@ fn production_launcher_uses_the_three_state_running_desktop_flow() {
     assert!(source.contains("StartupState::Attach"));
     assert!(source.contains("acquire_launcher_ownership"));
     assert!(source.contains("recover_stale_controller"));
+    assert!(source.contains("wait_for_host_chain_with_roots"));
+    assert!(source.contains("host_chain_ready_timeout"));
     assert!(source.contains("completely quit it before starting codexhost"));
     assert!(!source.contains("attach_unmanaged_desktop"));
     assert!(!source.contains(
