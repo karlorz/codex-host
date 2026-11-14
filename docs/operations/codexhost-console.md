@@ -42,7 +42,7 @@ type: warning
 
 ## 与会话 Web 的区别
 
-Console 是仅本机访问的诊断和管理网页，默认端口 `4399`，可由 `codexhost console` 打开。总览的“打开 Web”和“远程访问”按钮通过同一安装的 Launcher `web` 命令确保服务运行，并在默认浏览器打开登录链接，不依赖 Desktop；“远程访问”附带 `--connect-devices`，直接定位到 Web 的连接设备设置页。`codexhost web` 打开的是独立会话 Web，首次默认监听 `127.0.0.1:4400`，需要访问令牌，可用于手机连接；Host 和 Web 脱离终端运行，关闭页面不停止服务。无 Desktop 时 `codexhost` 改为打开会话 Web，不把 Console 当作聊天界面。命令和安装包路径见[独立 Web 应用](../product/standalone-web.md#安装版后台-web)。
+Console 是仅本机访问的诊断和管理网页，默认端口 `4399`，可由 `codexhost console` 打开。总览的“打开 Web”和“远程访问”按钮通过同一安装的 Launcher `web` 命令确保服务运行，并在默认浏览器打开登录链接，不依赖 Desktop；“远程访问”附带 `--connect-devices`，直接定位到 Web 的连接设备设置页。连接设备页从 Web 的就绪记录读取登录入口和访问状态，再用该入口向本机 Web 请求设备令牌（令牌不在就绪记录里）。监管进程退出后留下的同一安装 Web 会在这次打开时被替换，而不是一直显示未运行。`codexhost web` 打开的是独立会话 Web，首次默认监听 `127.0.0.1:4400`，需要访问令牌，可用于手机连接；Host 和 Web 脱离终端运行，关闭页面不停止服务。无 Desktop 时 `codexhost` 改为打开会话 Web，不把 Console 当作聊天界面。命令和安装包路径见[独立 Web 应用](../product/standalone-web.md#安装版后台-web)。
 
 `codexhost status` 只读查看后台 Host/Web 的状态、版本、Web 地址及自启状态；`codexhost stop` 依次停止托管 GUI、Web、Host、远程服务、Broker 和 Console，报告被中断的任务数，会话数据保留。自启项用 `codexhost autostart on|off|status` 管理，停止服务不关闭自启，也不撤销 Tailscale Serve。
 

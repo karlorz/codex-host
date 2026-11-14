@@ -354,6 +354,58 @@ pub(super) fn wait_for_known_controller_exit(
     }
 }
 
+pub(crate) fn command_line_arguments(command: &str) -> Vec<String> {
+    let mut arguments = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for character in command.chars() {
+        match (quote, character) {
+            (Some(delimiter), value) if value == delimiter => quote = None,
+            (Some(_), value) => current.push(value),
+            (None, '"' | '\'') => quote = Some(character),
+            (None, value) if value.is_whitespace() => {
+                if !current.is_empty() {
+                    arguments.push(std::mem::take(&mut current));
+                }
+            }
+            (None, value) => current.push(value),
+        }
+    }
+    if !current.is_empty() {
+        arguments.push(current);
+    }
+    arguments
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn process_arguments(process_id: u32) -> Result<Vec<String>, Box<dyn Error>> {
+    let output = Command::new("/bin/ps")
+        .args(["-ww", "-o", "command=", "-p", &process_id.to_string()])
+        .output()?;
+    if !output.status.success() {
+        return Err(format!("cannot read command line for PID {process_id}").into());
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if command.is_empty() {
+        return Err(format!("PID {process_id} has an empty command line").into());
+    }
+    Ok(command_line_arguments(&command))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn process_arguments(process_id: u32) -> Result<Vec<String>, Box<dyn Error>> {
+    let bytes = std::fs::read(format!("/proc/{process_id}/cmdline"))?;
+    let arguments = bytes
+        .split(|byte| *byte == 0)
+        .filter(|argument| !argument.is_empty())
+        .map(|argument| String::from_utf8_lossy(argument).into_owned())
+        .collect::<Vec<_>>();
+    if arguments.is_empty() {
+        return Err(format!("PID {process_id} has an empty command line").into());
+    }
+    Ok(arguments)
+}
+
 #[cfg(target_os = "macos")]
 fn process_command_lines() -> Result<Vec<(u32, String)>, Box<dyn Error>> {
     let output = Command::new("/bin/ps")

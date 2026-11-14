@@ -417,6 +417,61 @@ fn update_stop_leaves_console_and_remote_untouched() {
     );
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn ensure_replaces_orphaned_web_after_supervisor_exit() {
+    let fixture = Fixture::new();
+    assert!(
+        fixture.run("ensure").status.success(),
+        "initial Web ensure failed"
+    );
+    let record = fixture.record("web-service-ready.json");
+    let supervisor = record["pid"].as_u64().unwrap() as u32;
+    let web = record["web_pid"].as_u64().unwrap() as u32;
+    assert!(
+        Command::new("kill")
+            .args(["-KILL", &supervisor.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && Command::new("kill")
+            .args(["-0", &supervisor.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    {
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        Command::new("kill")
+            .args(["-0", &web.to_string()])
+            .status()
+            .unwrap()
+            .success(),
+        "orphaned Web Node exited with its supervisor"
+    );
+    let recovered = fixture.run("ensure");
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    let replaced = fixture.record("web-service-ready.json");
+    assert_ne!(replaced["web_pid"].as_u64().unwrap() as u32, web);
+    assert!(
+        !Command::new("kill")
+            .args(["-0", &web.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false),
+        "orphaned Web Node survived ensure"
+    );
+    assert_eq!(fixture.starts(), 2);
+}
+
 #[test]
 fn supervises_only_ready_web_and_serializes_ensure_and_stop() {
     #[cfg(windows)]

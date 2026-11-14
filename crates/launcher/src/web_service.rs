@@ -9,9 +9,12 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use codexhost_platform::{
-    configure_background_command, configure_detached_service_command, node_entrypoint_path,
-    spawn_supervised,
+    ProcessSnapshot, configure_background_command, configure_detached_service_command,
+    node_entrypoint_path, process_snapshot, spawn_supervised, terminate_process_group_instance,
+    terminate_process_identity,
 };
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use codexhost_platform::{process_identity, process_snapshots};
 use serde::{Deserialize, Serialize};
 
 use crate::host_service::{clean, lifecycle_lock, publish_status, readiness};
@@ -20,6 +23,7 @@ const SETTINGS_CHANGED_EXIT_CODE: i32 = 42;
 const READY: &str = "web-service-ready.json";
 const STOP: &str = "web-service.stop";
 pub(super) const FAILURE: &str = "web-service-failure.txt";
+const ORPHANED_WEB_STOP_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct WebAccess {
@@ -101,6 +105,7 @@ pub(super) fn ensure(options: &Options) -> Result<(), Box<dyn Error>> {
         }
         thread::sleep(Duration::from_millis(25));
     }
+    stop_orphaned_web(options)?;
     let launches = options.data.join("service-launches");
     fs::create_dir_all(&launches)?;
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
@@ -298,18 +303,159 @@ fn serve(options: &Options) -> Result<(), Box<dyn Error>> {
 }
 
 pub(super) fn stop(options: &Options) -> Result<bool, Box<dyn Error>> {
-    let Some(record) = owner(&options.data)? else {
-        return Ok(false);
+    let stopped_owner = if let Some(record) = owner(&options.data)? {
+        publish_status(&options.data.join(STOP), "stop\n")?;
+        let started = Instant::now();
+        while codexhost_platform::process_instance(record.pid, record.started_at_micros).is_some() {
+            if started.elapsed() > Duration::from_secs(10) {
+                return Err("Web shutdown timed out".into());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        true
+    } else {
+        false
     };
-    publish_status(&options.data.join(STOP), "stop\n")?;
+    let stopped_orphan = stop_orphaned_web(options)?;
+    Ok(stopped_owner || stopped_orphan)
+}
+
+#[cfg(test)]
+pub(super) fn command_line_matches_web(command: &str, runtime: &Path, data: &Path) -> bool {
+    arguments_match_web(
+        &crate::desktop_attachment::command_line_arguments(command),
+        runtime,
+        data,
+    )
+}
+
+fn arguments_match_web(arguments: &[String], runtime: &Path, data: &Path) -> bool {
+    let runtime = node_entrypoint_path(runtime);
+    let runtime = runtime.to_string_lossy();
+    let data = data.to_string_lossy();
+    if runtime.is_empty() || data.is_empty() {
+        return false;
+    }
+    if !arguments
+        .iter()
+        .any(|argument| argument == runtime.as_ref())
+    {
+        return false;
+    }
+    if !arguments.iter().any(|argument| argument == "--background") {
+        return false;
+    }
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--ch-data" {
+            if arguments.next().map(String::as_str) == Some(data.as_ref()) {
+                return true;
+            }
+        } else if let Some(value) = argument.strip_prefix("--ch-data=")
+            && value == data.as_ref()
+        {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn executable_looks_like_node(executable: &Path, expected_node: &Path) -> bool {
+    let name = executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if name == "node" || name.eq_ignore_ascii_case("node.exe") {
+        return true;
+    }
+    match (executable.canonicalize(), expected_node.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => executable == expected_node,
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn web_parent_exited(snapshot: &ProcessSnapshot) -> bool {
+    snapshot.parent_id <= 1 || process_identity(snapshot.parent_id).is_err()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn matching_orphaned_web(options: &Options) -> Result<Vec<ProcessSnapshot>, Box<dyn Error>> {
+    let current = std::process::id();
+    let mut matches = Vec::new();
+    for snapshot in process_snapshots()? {
+        if snapshot.id == current
+            || !executable_looks_like_node(&snapshot.executable, &options.node)
+            || !web_parent_exited(&snapshot)
+        {
+            continue;
+        }
+        let Ok(arguments) = crate::desktop_attachment::process_arguments(snapshot.id) else {
+            continue;
+        };
+        let Ok(live) = process_snapshot(snapshot.id) else {
+            continue;
+        };
+        if live.started_at_micros != snapshot.started_at_micros {
+            continue;
+        }
+        if arguments_match_web(&arguments, &options.runtime, &options.data) {
+            matches.push(snapshot);
+        }
+    }
+    Ok(matches)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn matching_orphaned_web(_options: &Options) -> Result<Vec<ProcessSnapshot>, Box<dyn Error>> {
+    Ok(Vec::new())
+}
+
+fn terminate_web_process(expected: &ProcessSnapshot, force: bool) -> Result<(), Box<dyn Error>> {
+    if expected.id == std::process::id() {
+        return Ok(());
+    }
+    terminate_process_identity(&expected.into(), force)?;
+    terminate_process_group_instance(expected, force)?;
+    Ok(())
+}
+
+fn wait_for_web_instances(expected: &[ProcessSnapshot], timeout: Duration) -> bool {
     let started = Instant::now();
-    while codexhost_platform::process_instance(record.pid, record.started_at_micros).is_some() {
-        if started.elapsed() > Duration::from_secs(10) {
-            return Err("Web shutdown timed out".into());
+    loop {
+        if expected.iter().all(|process| {
+            process_snapshot(process.id)
+                .ok()
+                .is_none_or(|live| live.started_at_micros != process.started_at_micros)
+        }) {
+            return true;
+        }
+        if started.elapsed() >= timeout {
+            return false;
         }
         thread::sleep(Duration::from_millis(25));
     }
-    Ok(true)
+}
+
+fn stop_orphaned_web(options: &Options) -> Result<bool, Box<dyn Error>> {
+    let matches = matching_orphaned_web(options)?;
+    if matches.is_empty() {
+        return Ok(false);
+    }
+    for process in &matches {
+        terminate_web_process(process, false)?;
+    }
+    if wait_for_web_instances(&matches, ORPHANED_WEB_STOP_GRACE) {
+        return Ok(true);
+    }
+    for process in &matches {
+        terminate_web_process(process, true)?;
+    }
+    if wait_for_web_instances(&matches, ORPHANED_WEB_STOP_GRACE) {
+        return Ok(true);
+    }
+    Err("leftover Web did not exit before timeout".into())
 }
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {

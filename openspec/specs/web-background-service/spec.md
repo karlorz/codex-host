@@ -52,7 +52,7 @@ Host 和 Web SHALL 脱离启动它们的终端和界面运行。重复运行或�
 - **THEN** 只启动一份服务，两条命令都成功
 
 ### Requirement: 监听地址与启动选项
-发行版 Web SHALL 默认只监听 `127.0.0.1:4400`。`codexhost web` SHALL 接受 `--host`、`--port`、`--public-url` 和 `--trusted-proxy`，给出的选项 MUST 被保存并用于之后的启动，空值清除该选项。选项与运行中的 Web 不一致时 SHALL 只重启 Web。端口被占用时 SHALL 提示失败，MUST 不自动换端口，也 MUST 不结束占用端口的进程。
+发行版 Web SHALL 默认只监听 `127.0.0.1:4400`。`codexhost web` SHALL 接受 `--host`、`--port`、`--public-url` 和 `--trusted-proxy`，给出的选项 MUST 被保存并用于之后的启动，空值清除该选项。选项与运行中的 Web 不一致时 SHALL 只重启 Web。端口被其他程序占用时 SHALL 提示失败，MUST 不自动换端口，也 MUST 不结束占用端口的其他程序。本安装在监管进程退出后留下的同一数据目录与运行入口 Web 按遗留后台 Web 处理。
 
 #### Scenario: 换端口后沿用
 - **WHEN** 用户运行 `codexhost web --port 4500`，之后运行 `codexhost`
@@ -65,6 +65,10 @@ Host 和 Web SHALL 脱离启动它们的终端和界面运行。重复运行或�
 #### Scenario: 开发命令遇到后台 Web
 - **WHEN** 后台 Web 占用 4400，用户运行 `npm start web`
 - **THEN** 命令提示端口被占用，不结束后台 Web
+
+#### Scenario: 遗留后台 Web
+- **WHEN** Web 监管进程已退出，同一数据目录和运行入口的后台 Node 仍占用端口（父进程已不存在或已交给 init/launchd），用户打开 Web 或连接设备
+- **THEN** 结束该遗留进程并重新拉起 Web，连接设备页可用；其他程序占用的端口不受影响。Windows 上该 Node 随监管进程的 Job 结束，不出现这一遗留。
 
 ### Requirement: 停止
 `codexhost stop` SHALL 不经确认关闭这台电脑上 codexhost 的全部进程：它拉起的 GUI、Web、Host、远程服务、Broker 和 Console，并在结束后输出被中断的任务数。GUI 和 Web MUST 先于 Host 停止，避免重新拉起 Host。没有安装的组件 SHALL 跳过。它 MUST 不关闭用户自己打开的 Codex Desktop，MUST 不修改自启项和 Tailscale 配置。会话记录 MUST 保留，被中断的任务 MUST 不自动继续。

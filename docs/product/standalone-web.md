@@ -47,7 +47,7 @@ codexhost stop
 
 首次后台启动默认监听 `127.0.0.1:4400`。`codexhost web` 的 `--host`、`--port`、`--public-url`、`--trusted-proxy`、`--relay` 经 Web 处理后保存在 `<web-data>/service.json`，后续启动沿用；传空字符串清除对应选项，无效值不覆盖保存内容。选项变化只重启 Web，Host 任务不受影响，Web 终端会断开。`--relay` 仅作为自建中转地址的开发覆盖，不改变官方中转卡片。本机连接设备页提供中转配置（无需重启）、首次启用设备访问和启动设置，见[远程访问](web-remote-access.md)。
 
-版本、安装位置及选项一致时复用服务。`codexhost` 或 `codexhost web` 发现 Host 或 Web 的版本、运行入口不一致时切换为当前安装；Host 被替换会中断任务并输出任务数，会话记录保留，任务不自动续跑。后台 Web 就绪后崩溃会退避重启，启动阶段失败不重试。`codexhost status` 只读显示 Host/Web 状态与版本、不含 token 的 Web 地址、最近失败原因和自启状态，不启动服务。
+版本、安装位置及选项一致时复用服务。`codexhost` 或 `codexhost web` 发现 Host 或 Web 的版本、运行入口不一致时切换为当前安装；Host 被替换会中断任务并输出任务数，会话记录保留，任务不自动续跑。后台 Web 就绪后崩溃会退避重启，启动阶段失败不重试。监管进程退出但 Node 仍占用同一数据目录和运行入口时（macOS / Linux 上 Node 可以在监管进程之后继续运行），`codexhost web`、控制台“打开 Web”和 `codexhost stop` 会结束该遗留进程再拉起或停止，不结束其他程序占用的端口。Windows 上 Node 与监管进程同属一个 Job，监管进程退出时 Node 一并结束，不会留下这一进程。`codexhost status` 只读显示 Host/Web 状态与版本、不含 token 的 Web 地址、最近失败原因和自启状态，不启动服务。
 
 `codexhost stop` 不确认，按 GUI、Web、Host、远程服务、Broker、Console 的顺序停止，并报告本地 Host 被中断的任务数；用户自行打开的 Desktop 不关闭。远程服务停止后，其他电脑重新连接可恢复远程服务。自启项、Serve 配置和会话数据保留。前台开发 Web 不属于此命令的停止范围，开发者使用下文的 `npm stop`。
 
