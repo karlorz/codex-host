@@ -114,6 +114,30 @@ describe("enrollment CLI identity", () => {
     });
   });
 
+  it("uses CODEXHOST_ENROLL_CLIENT even when Host Runtime env is set", async () => {
+    const dataDir = await tempDataDir();
+    await writeEnrollmentStore(
+      enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "muse"),
+      record(),
+    );
+    const connection = await resolveCliRuntimeConnection({
+      environment: {
+        CODEXHOST_DATA_DIR: dataDir,
+        [DELEGATION_ENROLL_CLIENT_ENV]: "muse",
+        [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+        [DELEGATION_RUNTIME_TOKEN_ENV]: HOST_TOKEN,
+        [DELEGATION_THREAD_ID_ENV]: "host-thread",
+      },
+      parsed: parseDelegationArguments(["thread", "read", "thread-1"]),
+      nowMs: NOW,
+    });
+    expect(connection).toMatchObject({
+      source: "enrollment",
+      token: "muse-token",
+      callerThreadId: "muse-thread",
+    });
+  });
+
   it("does not treat thread-list --client as enrollment identity", async () => {
     const dataDir = await tempDataDir();
     await writeEnrollmentStore(
@@ -125,15 +149,14 @@ describe("enrollment CLI identity", () => {
         enrollmentId: "enrollment-grok",
       }),
     );
-    const connection = await resolveCliRuntimeConnection({
-      environment: { CODEXHOST_DATA_DIR: dataDir },
-      parsed: parseDelegationArguments(["--client", "muse"]),
-      nowMs: NOW,
-    });
-    expect(connection).toMatchObject({
-      source: "enrollment",
-      token: "grok-token",
-      callerThreadId: "grok-thread",
+    await expect(
+      resolveCliRuntimeConnection({
+        environment: { CODEXHOST_DATA_DIR: dataDir },
+        parsed: parseDelegationArguments(["--client", "muse"]),
+        nowMs: NOW,
+      }),
+    ).rejects.toMatchObject({
+      details: { reason: "missing_runtime_environment" },
     });
     await expect(
       resolveCliRuntimeConnection({
@@ -143,6 +166,42 @@ describe("enrollment CLI identity", () => {
       }),
     ).rejects.toMatchObject({
       details: { reason: "missing_runtime_environment" },
+    });
+  });
+
+  it("does not load implicit grok-bot when enrollment was not selected", async () => {
+    const dataDir = await tempDataDir();
+    await writeEnrollmentStore(
+      enrollmentStorePath({ CODEXHOST_DATA_DIR: dataDir }, "grok-bot"),
+      record({
+        clientId: "grok-bot",
+        token: "grok-token",
+        threadId: "grok-thread",
+        enrollmentId: "enrollment-grok",
+        issuedAt: "2026-11-01T00:00:00.000Z",
+        expiresAt: "2026-11-02T00:00:00.000Z",
+      }),
+    );
+    await expect(
+      resolveCliRuntimeConnection({
+        environment: { CODEXHOST_DATA_DIR: dataDir },
+        parsed: parseDelegationArguments(["thread", "read", "thread-1"]),
+        nowMs: NOW,
+      }),
+    ).rejects.toMatchObject({
+      details: { reason: "missing_runtime_environment" },
+    });
+    await expect(
+      resolveCliRuntimeConnection({
+        environment: {
+          CODEXHOST_DATA_DIR: dataDir,
+          [DELEGATION_ENROLL_CLIENT_ENV]: "grok-bot",
+        },
+        parsed: parseDelegationArguments(["thread", "read", "thread-1"]),
+        nowMs: NOW,
+      }),
+    ).rejects.toMatchObject({
+      details: { reason: "expired", clientId: "grok-bot" },
     });
   });
 
@@ -275,10 +334,14 @@ describe("enrollment CLI identity", () => {
       clientId: "muse",
       enrollmentId: "enrollment-muse",
       authentication: {
-        source: "host-session",
+        source: "enrollment",
         clientId: "muse",
-        callerThreadId: "host-thread",
-        ignoredAmbient: [],
+        callerThreadId: "muse-thread",
+        ignoredAmbient: [
+          DELEGATION_RUNTIME_ENDPOINT_ENV,
+          DELEGATION_RUNTIME_TOKEN_ENV,
+          DELEGATION_THREAD_ID_ENV,
+        ],
       },
     });
     expect(JSON.stringify(view)).not.toContain("muse-token");
@@ -337,7 +400,7 @@ describe("enrollment CLI identity", () => {
   });
 
   it.each([DELEGATION_RUNTIME_ENDPOINT_ENV, DELEGATION_RUNTIME_TOKEN_ENV])(
-    "reports incomplete Host credentials when only %s is present",
+    "uses CODEXHOST_ENROLL_CLIENT when only %s is present",
     async (presentName) => {
       const dataDir = await tempDataDir();
       await writeEnrollmentStore(
@@ -360,30 +423,56 @@ describe("enrollment CLI identity", () => {
         }),
       ).toBe(0);
       expect(JSON.parse(outputText(output)).authentication).toMatchObject({
-        source: "incomplete-host-session",
-        missingEnvironmentVariables: [
-          presentName === DELEGATION_RUNTIME_ENDPOINT_ENV
-            ? DELEGATION_RUNTIME_TOKEN_ENV
-            : DELEGATION_RUNTIME_ENDPOINT_ENV,
-        ],
+        source: "enrollment",
+        clientId: "muse",
+        callerThreadId: "muse-thread",
+        ignoredAmbient: [presentName],
       });
-      const diagnosticOutput = new PassThrough();
-      const fetchImpl = vi.fn<typeof fetch>();
+      const fetchImpl = vi.fn<typeof fetch>(async () =>
+        Response.json({ threadId: "target-thread", status: "completed" }),
+      );
+      const readOutput = new PassThrough();
       expect(
         await runDelegationCli({
           arguments: ["thread", "read", "target-thread"],
           environment,
-          diagnosticOutput,
+          output: readOutput,
           fetchImpl,
           now: () => NOW,
         }),
-      ).toBe(1);
-      expect(fetchImpl).not.toHaveBeenCalled();
-      expect(JSON.parse(outputText(diagnosticOutput)).error.details.reason).toBe(
-        "missing_runtime_environment",
-      );
+      ).toBe(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      const call = fetchImpl.mock.calls[0];
+      if (!call) throw new Error("Expected a Runtime request");
+      expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer muse-token");
     },
   );
+
+  it("does not fall back to Host credentials when CODEXHOST_ENROLL_CLIENT store is missing", async () => {
+    const dataDir = await tempDataDir();
+    const diagnosticOutput = new PassThrough();
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({}));
+    expect(
+      await runDelegationCli({
+        arguments: ["thread", "send", "target-thread", "--message", "connectivity"],
+        environment: {
+          CODEXHOST_DATA_DIR: dataDir,
+          [DELEGATION_ENROLL_CLIENT_ENV]: "muse",
+          [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+          [DELEGATION_RUNTIME_TOKEN_ENV]: HOST_TOKEN,
+        },
+        output: new PassThrough(),
+        diagnosticOutput,
+        fetchImpl,
+        now: () => NOW,
+      }),
+    ).toBe(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.parse(outputText(diagnosticOutput)).error).toMatchObject({
+      code: "ENROLLMENT_INVALID",
+      details: { reason: "missing_store", clientId: "muse" },
+    });
+  });
 
   it.each(["expired", "insecure_store_mode"])(
     "does not use ambient Host credentials when the selected enrollment is %s",
@@ -403,37 +492,42 @@ describe("enrollment CLI identity", () => {
         ),
       );
       if (reason === "insecure_store_mode") await chmod(storePath, 0o644);
-      const diagnosticOutput = new PassThrough();
-      const fetchImpl = vi.fn<typeof fetch>();
-      expect(
-        await runDelegationCli({
-          arguments: [
-            "thread",
-            "send",
-            "target-thread",
-            "--message",
-            "connectivity",
-            "--enrolled-client",
-            "muse",
-          ],
-          environment: {
-            CODEXHOST_DATA_DIR: dataDir,
-            [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
-            [DELEGATION_RUNTIME_TOKEN_ENV]: HOST_TOKEN,
-          },
-          diagnosticOutput,
-          fetchImpl,
-          now: () => NOW,
-        }),
-      ).toBe(1);
-      expect(fetchImpl).not.toHaveBeenCalled();
-      const error = JSON.parse(outputText(diagnosticOutput)).error;
-      expect(error).toMatchObject({
-        code: "ENROLLMENT_INVALID",
-        details: { reason, clientId: "muse", storePath },
-      });
-      expect(JSON.stringify(error)).not.toContain("muse-token");
-      expect(JSON.stringify(error)).not.toContain(HOST_TOKEN);
+      for (const extra of [
+        { arguments: ["--enrolled-client", "muse"], environment: {} },
+        { arguments: [], environment: { [DELEGATION_ENROLL_CLIENT_ENV]: "muse" } },
+      ]) {
+        const diagnosticOutput = new PassThrough();
+        const fetchImpl = vi.fn<typeof fetch>();
+        expect(
+          await runDelegationCli({
+            arguments: [
+              "thread",
+              "send",
+              "target-thread",
+              "--message",
+              "connectivity",
+              ...extra.arguments,
+            ],
+            environment: {
+              CODEXHOST_DATA_DIR: dataDir,
+              [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+              [DELEGATION_RUNTIME_TOKEN_ENV]: HOST_TOKEN,
+              ...extra.environment,
+            },
+            diagnosticOutput,
+            fetchImpl,
+            now: () => NOW,
+          }),
+        ).toBe(1);
+        expect(fetchImpl).not.toHaveBeenCalled();
+        const error = JSON.parse(outputText(diagnosticOutput)).error;
+        expect(error).toMatchObject({
+          code: "ENROLLMENT_INVALID",
+          details: { reason, clientId: "muse", storePath },
+        });
+        expect(JSON.stringify(error)).not.toContain("muse-token");
+        expect(JSON.stringify(error)).not.toContain(HOST_TOKEN);
+      }
     },
   );
 
@@ -595,6 +689,28 @@ describe("enrollment CLI identity", () => {
     });
     expect(view.source).toBe("enrollment");
     expect(JSON.stringify(view)).not.toContain("secret");
+    const fromEnv = inspectCliAuthentication({
+      environment: {
+        [DELEGATION_ENROLL_CLIENT_ENV]: "muse",
+        [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:9",
+        [DELEGATION_RUNTIME_TOKEN_ENV]: "secret",
+      },
+      parsed: parseDelegationArguments(["thread", "read", "target-thread"]),
+      clientId: "muse",
+      enrollmentThreadId: "muse-thread",
+    });
+    expect(fromEnv.source).toBe("enrollment");
+    expect(JSON.stringify(fromEnv)).not.toContain("secret");
+    expect(
+      inspectCliAuthentication({
+        environment: { [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:9" },
+        parsed: parseDelegationArguments(["thread", "read", "target-thread"]),
+        clientId: "grok-bot",
+      }),
+    ).toMatchObject({
+      source: "incomplete-host-session",
+      missingEnvironmentVariables: [DELEGATION_RUNTIME_TOKEN_ENV],
+    });
   });
 
   it.each([false, true])(

@@ -2,6 +2,17 @@
 
 外部客户端是不由 Host 拉起、但需要委派和跟进工作的本机进程，例如终端脚本、Claude Desktop、常驻 bot 的本机代理。它们通过一个固定端口的本机监听使用与 Host 内部相同的委派与 Thread 操作，并以持久事件日志获得完成通知。行为契约见 `openspec/changes/add-external-client-access`。
 
+## 与 enrollment 的关系
+
+这是两个产品，不是同一接入的两个版本：
+
+- 本文：同一台 Mac、同一系统用户的完整委派（`local-cli`、`client add`、回环 `:4398/mcp`）。工具集包含 `delegate_start`。
+- [Client enrollment](client-enrollment.md)：allowlist 协作者。不走公网 `:4398`。Muse 的四工具 MCP 是 [Path 3 hop](enrolled-mcp-relay.md)，不是 enrollment CLI 本身，也不走本机 `:4398`。
+
+不要用 `enroll` 换 MCP，也不要把 enroll 折进 `client add`。不要把 Mac `:4398` 放到 Tailscale Funnel。
+
+CLI 身份：thread 命令只有在 `--enrolled-client` 或 `CODEXHOST_ENROLL_CLIENT` 时才用 enrollment。否则用 Host 注入或 `cli-credentials.json`（`local-cli`）。磁盘上的 grok-bot 登记不是隐式默认。显式选中的 enrollment 过期时失败关闭，不会改成 `local-cli`。
+
 ## 本机 CLI
 
 同一系统用户运行的终端脚本或 bot 可直接使用 `codexhost harness`、`delegate`、`thread` 和 `events`，无需 `client add` 或令牌环境变量。Host 必须已运行且外部监听已启用，CLI 不会自动启动 Host。

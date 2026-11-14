@@ -237,7 +237,7 @@ Unauthenticated or wrong/expired/`aud` mismatch (including a SkillWiki or grok-s
 
 Production CLI requires `--public-origin`, `--password-hash-file` (mode 600 scrypt hash), and `--oauth-state-dir` when `--link-listen` is not loopback. `codexhost-relay hash-password` reads the operator password from stdin and writes the hash. Operator cutover uses `list-clients` and `revoke-client --client-id <id>` or `revoke-client --all` with `--oauth-state-dir` (JSON client ids and names only; no tokens). The running hop loads OAuth state at start, so file revoke takes effect on the next hop process start. Loopback-only `--listen 127.0.0.1` may omit OAuth for local tailnet-slice tests.
 
-Issuer and resource are distinct from SkillWiki and grok-search. Revoking the grant on the hop cuts Muse off. Revoking the Mac enrollment cuts every tool (`ENROLLMENT_INVALID`). The hop holds no Host Runtime token and no enrollment token. Muse DCR for this hostname is unproven; SkillWiki and grok-search connectors on Muse are precedent only. First public Muse install is the live check.
+Issuer and resource are distinct from SkillWiki and grok-search. Revoking the grant on the hop cuts Muse off. Revoking the Mac enrollment cuts every tool (`ENROLLMENT_INVALID`). The hop holds no Host Runtime token and no enrollment token. The first Muse custom-connector install for this hostname completed DCR; grant-revoke on the hop still cuts Muse until the connector is reconnected. SkillWiki and grok-search connectors are separate resources.
 
 ## Public hostname
 
@@ -285,4 +285,4 @@ Open live checks:
 
 This file does not ship a public inbound Mac listener, a Tailscale Funnel, a public `:4397`, cancel-through-relay, enroll revoke through the relay, `delegate start`, multi-client tenancy, a Muse Harness plugin, or ChatGPT / `api.openai.com` conversation lookup.
 
-Path 2 `enroll serve` stays the contract for real tailnet peers. Path 1 SkillWiki-as-bus stays a parked backup and is not this relay.
+Path 2 `enroll serve` stays the command for a real tailnet peer such as cursor-box. Do not start a spare Path 2 listener. Muse Path 2 `:4397` was retired on 2026-11-14 after Path 3 public `POST /mcp` 401, Mac relay-link `connected`, and no ESTABLISHED clients on `:4397`. Keep `enroll relay-link`. Do not revoke muse. Path 1 SkillWiki-as-bus stays a parked backup and is not this relay.

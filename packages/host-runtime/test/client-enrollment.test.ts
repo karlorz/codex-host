@@ -38,6 +38,7 @@ import { parseDelegationArguments } from "../src/delegation-cli-options.js";
 import { DELEGATION_HELP, runDelegationCli } from "../src/delegation-cli.js";
 import { startDelegationControlServer } from "../src/delegation-control-server.js";
 import {
+  DELEGATION_ENROLL_CLIENT_ENV,
   DELEGATION_RUNTIME_ENDPOINT_ENV,
   DELEGATION_RUNTIME_TOKEN_ENV,
   DelegationControlError,
@@ -360,7 +361,10 @@ describe("client enrollment store and Runtime", () => {
       startedAt: "2026-11-07T00:00:00.000Z",
     });
     const connection = await resolveCliRuntimeConnection({
-      environment: { CODEXHOST_DATA_DIR: dataDir },
+      environment: {
+        CODEXHOST_DATA_DIR: dataDir,
+        [DELEGATION_ENROLL_CLIENT_ENV]: "grok-bot",
+      },
       parsed: { positionals: ["read"], options: new Map(), repeated: new Map() },
       nowMs: Date.parse("2026-11-07T00:00:00.000Z"),
     });
@@ -975,7 +979,7 @@ describe("client enrollment store and Runtime", () => {
       const readOutput = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID],
+          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID, "--enrolled-client", "grok-bot"],
           environment,
           output: readOutput,
           now: () => Date.parse("2026-11-07T12:00:00.000Z"),
@@ -986,7 +990,7 @@ describe("client enrollment store and Runtime", () => {
       const denied = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["thread", "read", "other"],
+          arguments: ["thread", "read", "other", "--enrolled-client", "grok-bot"],
           environment,
           diagnosticOutput: denied,
           now: () => Date.parse("2026-11-07T12:00:00.000Z"),
@@ -997,7 +1001,15 @@ describe("client enrollment store and Runtime", () => {
       const sendDenied = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["thread", "send", FIXTURE_PARENT_THREAD_ID, "--message", "hi"],
+          arguments: [
+            "thread",
+            "send",
+            FIXTURE_PARENT_THREAD_ID,
+            "--message",
+            "hi",
+            "--enrolled-client",
+            "grok-bot",
+          ],
           environment,
           diagnosticOutput: sendDenied,
           now: () => Date.parse("2026-11-07T12:00:00.000Z"),
@@ -1008,7 +1020,16 @@ describe("client enrollment store and Runtime", () => {
       const delegateDenied = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["delegate", "start", "--harness", "pi", "--task", "work"],
+          arguments: [
+            "delegate",
+            "start",
+            "--harness",
+            "pi",
+            "--task",
+            "work",
+            "--enrolled-client",
+            "grok-bot",
+          ],
           environment,
           diagnosticOutput: delegateDenied,
           now: () => Date.parse("2026-11-07T12:00:00.000Z"),
@@ -1085,7 +1106,7 @@ describe("client enrollment store and Runtime", () => {
       const tamper = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID],
+          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID, "--enrolled-client", "grok-bot"],
           environment,
           diagnosticOutput: tamper,
           now,
@@ -1117,15 +1138,13 @@ describe("client enrollment store and Runtime", () => {
       const afterRevoke = new PassThrough();
       expect(
         await runDelegationCli({
-          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID],
+          arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID, "--enrolled-client", "grok-bot"],
           environment,
           diagnosticOutput: afterRevoke,
           now,
         }),
       ).toBe(1);
-      expect(JSON.parse(outputText(afterRevoke)).error.details.reason).toBe(
-        "missing_runtime_environment",
-      );
+      expect(JSON.parse(outputText(afterRevoke)).error.details.reason).toBe("missing_store");
     } finally {
       await enrollment.close();
       await server.close();
@@ -1156,10 +1175,22 @@ describe("client enrollment store and Runtime", () => {
       expiresAt: "2026-11-02T00:00:00.000Z",
     });
     await writeEnrollmentStore(enrollmentStorePath(environment, "grok-bot"), expired);
-    const diagnosticOutput = new PassThrough();
+    const ignored = new PassThrough();
     expect(
       await runDelegationCli({
         arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID],
+        environment,
+        diagnosticOutput: ignored,
+        now: () => Date.parse("2026-11-07T12:00:00.000Z"),
+      }),
+    ).toBe(1);
+    expect(JSON.parse(outputText(ignored)).error.details.reason).toBe(
+      "missing_runtime_environment",
+    );
+    const diagnosticOutput = new PassThrough();
+    expect(
+      await runDelegationCli({
+        arguments: ["thread", "read", FIXTURE_PARENT_THREAD_ID, "--enrolled-client", "grok-bot"],
         environment,
         diagnosticOutput,
         now: () => Date.parse("2026-11-07T12:00:00.000Z"),

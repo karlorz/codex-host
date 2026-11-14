@@ -22,6 +22,7 @@ export { DELEGATION_HELP } from "./delegation-cli-help.js";
 
 import {
   DEFAULT_WATCH_TIMEOUT_MS,
+  DELEGATION_ENROLL_CLIENT_ENV,
   DELEGATION_RUNTIME_ENDPOINT_ENV,
   DELEGATION_THREAD_ID_ENV,
   NATIVE_CODEX_THREAD_ID_ENV,
@@ -310,7 +311,8 @@ export async function runDelegationCli(input: {
         if (
           !(error instanceof DelegationControlError) ||
           error.details?.reason !== "missing_runtime_environment" ||
-          parsed.options.has(ENROLLED_CLIENT_OPTION)
+          parsed.options.has(ENROLLED_CLIENT_OPTION) ||
+          Boolean(environment[DELEGATION_ENROLL_CLIENT_ENV])
         ) {
           throw error;
         }

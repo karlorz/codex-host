@@ -2,7 +2,9 @@
 
 `codexhost enroll` lets a local unmanaged client such as Grok Bot on the same Mac use Host Runtime without copying another process's `CODEXHOST_RUNTIME_*` variables or Thread id.
 
-Host injects Runtime endpoint and token only into processes it started. An unmanaged shell without an enrollment exits `RUNTIME_UNREACHABLE` / `missing_runtime_environment`. Enrollment issues a distinct client token and caller Thread identity after approval.
+Host injects Runtime endpoint and token only into processes it started. An unmanaged same-user shell uses private `cli-credentials.json` (`local-cli`) when Host is running. Enrollment is a separate allowlisted collaborator identity, selected only with `--enrolled-client` or `CODEXHOST_ENROLL_CLIENT`. It issues a distinct client token and caller Thread after approval. A grok-bot store on disk is not an implicit default for thread commands.
+
+This is not the same product as same-Mac full dispatch on loopback `:4398`. That path, including `delegate start`, is documented in [external-clients.md](external-clients.md). Do not fold `enroll` into `client add`. Do not point a cloud connector at `:4398`.
 
 ## Commands
 
@@ -32,7 +34,7 @@ The CLI writes the record to a user-private mode `600` store under `$CODEXHOST_D
 
 Native Thread creation starts no Turn. Failure prevents issuance and leaves an existing pairing valid. Reusing a machine pairing retains its original caller identity. A credential whose caller id has no native Thread can still access its allowlisted targets; obtaining a native own Thread requires attended replacement and a refreshed handoff. Runtime port changes alone do not require replacement.
 
-Later `codexhost thread *` uses Host-injected `CODEXHOST_RUNTIME_ENDPOINT` / `CODEXHOST_RUNTIME_TOKEN` when both are present, unless `--enrolled-client <id>` is set. That option uses the named enrollment and fails if the store is missing or invalid; it does not fall back to Host credentials. When neither Host env nor `--enrolled-client` is set, the CLI reads `CODEXHOST_ENROLL_CLIENT` (default `grok-bot`). A missing default store keeps `missing_runtime_environment`.
+Later `codexhost thread *` uses Host-injected `CODEXHOST_RUNTIME_ENDPOINT` / `CODEXHOST_RUNTIME_TOKEN` when both are present, unless `--enrolled-client <id>` or `CODEXHOST_ENROLL_CLIENT` is set. Either selector uses the named enrollment and fails if the store is missing or invalid; it does not fall back to Host or `local-cli` credentials. When neither selector is set, the CLI uses Host env or `local-cli`. A grok-bot store on disk is not an implicit default. `enroll status` still defaults the inspected store to `grok-bot`.
 
 ## Authorization
 
@@ -68,7 +70,7 @@ Enrollment defaults to machine pairing for that client id, like an SSH authorize
 
 A Host-authenticated session issues enrollment. Later `thread read` / `thread send` from an unmanaged shell should pass `--enrolled-client <id>`. That uses the enrollment store even when Host Runtime env is inherited, and fails if the store is missing or invalid.
 
-`enroll status` uses the same client selector (`--client`, `--enrolled-client`, or `CODEXHOST_ENROLL_CLIENT`, default `grok-bot`) and reports `authentication.source` without the token: `host-session` when both Host Runtime variables are set and `--enrolled-client` is omitted, `incomplete-host-session` with the missing variable names when only one is set, and `enrollment` when `--enrolled-client` is set or both Host Runtime variables are absent. For a loopback store, `endpoint` is the live Runtime bootstrap port when published; the on-disk client file is not rewritten and tokens are not rotated. A tailnet handoff keeps its Tailscale URL. Partial Host credentials fail with `missing_runtime_environment` on thread commands; they do not fall back to enrollment. The store file must remain mode `600`. Invalid stores fail closed with `expired`, `insecure_store_mode`, or `missing_store`, including client id and path.
+`enroll status` uses the same client selector (`--client`, `--enrolled-client`, or `CODEXHOST_ENROLL_CLIENT`, default `grok-bot`) and reports `authentication.source` without the token: `host-session` when both Host Runtime variables are set and enrollment was not selected, `incomplete-host-session` with the missing variable names when only one is set and enrollment was not selected, and `enrollment` when `--enrolled-client` or `CODEXHOST_ENROLL_CLIENT` is set or both Host Runtime variables are absent. Thread commands use that enrollment store when `--enrolled-client` or `CODEXHOST_ENROLL_CLIENT` is set. Either selector wins over inherited Host credentials and stays fail-closed: an expired, missing, or insecure selected store does not fall back to Host or `local-cli`. When neither selector is set, thread commands use Host Runtime variables or `local-cli` credentials; they do not load implicit grok-bot. For a loopback store, `endpoint` is the live Runtime bootstrap port when published; the on-disk client file is not rewritten and tokens are not rotated. A tailnet handoff keeps its Tailscale URL. When neither enrollment selector is set, partial Host credentials fail with `missing_runtime_environment` on thread commands; they do not fall back to enrollment. The store file must remain mode `600`. Invalid selected stores fail closed with `expired`, `insecure_store_mode`, or `missing_store`, including client id and path.
 
 ```sh
 codexhost enroll --client muse \
@@ -108,9 +110,7 @@ codexhost enroll serve --client cursor-box-grok --listen <mac-tailscale-ipv4> --
 
 Each enrolled client needs its own listener, port, and handoff file. Default port `4398` is one listener, not a shared enrollment endpoint. A second client such as `muse` must use another port and a new exclusive export path. Copying another client's handoff does not authorize `muse`: Thread commands, status, revoke, and serve reject a store whose recorded client differs from the selected client with `client_mismatch`.
 
-```sh
-codexhost enroll serve --client muse --listen <mac-tailscale-ipv4> --port 4397 --export-file /private/client-handoff/muse.json
-```
+Muse does not keep a Path 2 listener while Path 3 is the live Muse connector. `enroll serve` remains the command for a real tailnet peer such as `cursor-box-grok`. Do not start a spare Path 2 listener for cursor-box or a second Muse `:4397` alongside `enroll relay-link`. The retired Muse example was `enroll serve --client muse --port 4397`; do not run it.
 
 `serve` runs as a separate foreground CLI process using only the client's local enrollment store. On POSIX it requires a user-owned mode-700 export directory. It creates a new mode-600 handoff file exclusively, and reports only endpoint, client, PID, expiry and file path. It does not replace the running Runtime or stop Desktop. The caller can remove Host credentials from this process's environment before starting it.
 

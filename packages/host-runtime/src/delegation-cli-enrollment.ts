@@ -147,7 +147,8 @@ export function inspectCliAuthentication(input: {
   ignoredAmbient: string[];
   missingEnvironmentVariables?: string[];
 } {
-  const enrolled = option(input.parsed, ENROLLED_CLIENT_OPTION);
+  const enrolled =
+    option(input.parsed, ENROLLED_CLIENT_OPTION) || input.environment[DELEGATION_ENROLL_CLIENT_ENV];
   const endpoint = input.environment[DELEGATION_RUNTIME_ENDPOINT_ENV];
   const token = input.environment[DELEGATION_RUNTIME_TOKEN_ENV];
   if (enrolled) {
@@ -239,10 +240,17 @@ export async function resolveCliRuntimeConnection(input: {
 }): Promise<CliRuntimeConnection> {
   rejectEnrollmentAttackOptions(input.environment, input.parsed);
   const enrolledClient = option(input.parsed, ENROLLED_CLIENT_OPTION);
-  if (enrolledClient) {
+  const fromEnv = input.environment[DELEGATION_ENROLL_CLIENT_ENV];
+  const selectedClient = enrolledClient ?? fromEnv;
+  // `--client` lists another client's work. Thread-command identity is
+  // `--enrolled-client` or CODEXHOST_ENROLL_CLIENT. Either selector wins over
+  // inherited Host credentials and stays fail-closed. If neither is set, do
+  // not load implicit grok-bot; fall through to local-cli. enroll status still
+  // defaults the inspected store to grok-bot via selectedEnrollmentClientId.
+  if (selectedClient) {
     return loadEnrollmentConnection({
       environment: input.environment,
-      clientId: parseEnrollmentClientId(enrolledClient),
+      clientId: parseEnrollmentClientId(selectedClient),
       nowMs: input.nowMs,
       explicit: true,
     });
@@ -261,15 +269,7 @@ export async function resolveCliRuntimeConnection(input: {
       ...(callerThreadId ? { callerThreadId } : {}),
     };
   }
-  if (endpoint || token) throw missingRuntimeEnvironmentError(endpoint, token);
-  // `--client` lists another client's work; identity is --enrolled-client or CODEXHOST_ENROLL_CLIENT.
-  const fromEnv = input.environment[DELEGATION_ENROLL_CLIENT_ENV];
-  return loadEnrollmentConnection({
-    environment: input.environment,
-    clientId: parseEnrollmentClientId(fromEnv ?? DEFAULT_ENROLLMENT_CLIENT_ID),
-    nowMs: input.nowMs,
-    explicit: Boolean(fromEnv),
-  });
+  throw missingRuntimeEnvironmentError(endpoint, token);
 }
 
 function enrollmentClientEndpoint(

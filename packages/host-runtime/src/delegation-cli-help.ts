@@ -36,7 +36,7 @@ The response confirms cwd and parent. Use its Thread reference with thread read,
   "thread send": `codexhost thread send <thread> --message <text> [--enrolled-client <id>] [--format json|compact]
 Start a new Turn in an idle writable Thread and return immediately.
 THREAD_BUSY means the target already has an active Turn. No new Turn started. Wait or read until idle, then send again. Messages are not queued. Cancellation requires a cancel grant, distinct from send. For an enrolled client, THREAD_BUSY is returned after allowlist authorization.
---enrolled-client uses that enrollment even when Host Runtime env is set. A missing or invalid enrollment fails without using Host credentials.
+--enrolled-client or CODEXHOST_ENROLL_CLIENT uses that enrollment even when Host Runtime env is set. A missing or invalid selected enrollment fails without using Host or local-cli credentials.
 To be notified when that Turn ends, run thread watch after sending.`,
   "thread cancel": `codexhost thread cancel <thread> [--enrolled-client <id>] [--format json|compact]
 Request cancellation of the active Turn while preserving the Thread and history.
@@ -77,7 +77,7 @@ Enrollment defaults to machine pairing with a recorded expiry (ten years unless 
 Does not copy another process's Runtime environment, a Runtime descriptor, or a parent env file.`,
   "enroll status": `codexhost enroll status [--client <id>] [--enrolled-client <id>] [--format json|compact]
 Show the local enrollment store for this login without printing the token.
-Selects the client from --client, --enrolled-client, or CODEXHOST_ENROLL_CLIENT (default grok-bot). Reports authentication.source for what thread commands would use: host-session when both Host Runtime variables are set, incomplete-host-session with missing variable names when only one is set, enrollment when --enrolled-client is set or both Host Runtime variables are absent. Invalid stores fail closed with client, path, and reason (expired, insecure_store_mode, missing_store).`,
+Selects the inspected store from --client, --enrolled-client, or CODEXHOST_ENROLL_CLIENT (default grok-bot). Reports authentication.source: host-session when both Host Runtime variables are set and enrollment was not selected, incomplete-host-session with missing variable names when only one is set and enrollment was not selected, enrollment when --enrolled-client or CODEXHOST_ENROLL_CLIENT is set or both Host Runtime variables are absent. Thread commands use enrollment when --enrolled-client or CODEXHOST_ENROLL_CLIENT is set; that selector wins over inherited Host credentials and stays fail-closed. Otherwise they use Host Runtime variables or local-cli credentials. A grok-bot store on disk is not an implicit default. Invalid selected stores fail closed with client, path, and reason (expired, insecure_store_mode, missing_store).`,
   "enroll revoke": `codexhost enroll revoke [--client <id>] [--enrolled-client <id>] [--format json|compact]
 Revoke the enrollment at the Host Runtime and delete the local store. Later commands fail closed.
 Uses the same client selector as enroll status.`,
@@ -122,7 +122,7 @@ export const DELEGATION_HELP = `usage:
   codexhost events
 
 Use <command> --help for its options. Use harness list to discover targets.
-Outside a codexhost session, the CLI reads private cli-credentials.json from the local data directory automatically. The Host and its external listener must be running. No client add or token environment variable is needed; these calls share the local-cli identity. Explicit client credentials override discovery.
+Outside a codexhost session, the CLI reads private cli-credentials.json from the local data directory automatically. The Host and its external listener must be running. No client add or token environment variable is needed; these calls share the local-cli identity. Explicit client credentials override discovery. Thread commands use enrollment only when --enrolled-client or CODEXHOST_ENROLL_CLIENT is set; a grok-bot store on disk is not an implicit default.
 ${COMMON_HELP}
 `;
 
