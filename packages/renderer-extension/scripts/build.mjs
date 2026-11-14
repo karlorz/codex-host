@@ -1,10 +1,18 @@
-import { build } from "esbuild";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { build } from "esbuild";
 
 import { tailwindEsbuildPlugin } from "./tailwind-esbuild-plugin.mjs";
+import { writeVoiceImplementationRevision } from "./voice-implementation-identity.mjs";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
+await writeVoiceImplementationRevision(packageRoot);
 const entries = [
+  { entry: "src/renderer-voice-profiles.ts", format: "esm", outfile: "dist/voice-profiles.js" },
+  { entry: "src/renderer-voice-discovery.ts", format: "esm", outfile: "dist/voice-discovery.js" },
+  { entry: "src/renderer-voice-evidence.ts", format: "esm", outfile: "dist/voice-evidence.js" },
   { entry: "src/index.ts", format: "esm", outfile: "dist/index.js" },
   { entry: "src/production-entry.ts", format: "iife", outfile: "dist/production.js" },
   { entry: "src/cpa-live-voice-entry.ts", format: "iife", outfile: "dist/cpa-live-voice-hook.js" },
@@ -37,3 +45,14 @@ for (const { entry, format, outfile } of entries) {
     outfile,
   });
 }
+
+const profilesUrl = pathToFileURL(path.join(packageRoot, "dist/voice-profiles.js")).href;
+const { voiceProfilePins, voiceQualificationArtifact } = await import(profilesUrl);
+await writeFile(
+  path.join(packageRoot, "dist/voice-profile-pins.json"),
+  `${JSON.stringify(voiceProfilePins, null, 2)}\n`,
+);
+await writeFile(
+  path.join(packageRoot, "dist/voice-qualification.json"),
+  `${JSON.stringify(voiceQualificationArtifact(), null, 2)}\n`,
+);

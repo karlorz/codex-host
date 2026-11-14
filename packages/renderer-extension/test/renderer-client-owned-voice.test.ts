@@ -21,6 +21,7 @@ import {
   CHAT_LIVE_VOICE_STORAGE_KEY,
   CPA_LIVE_VOICE_STORAGE_KEY,
 } from "../src/renderer-cpa-live-voice-preference.js";
+import { hashedVoiceTestIdentity, reviewedVoiceEvidenceRecord } from "./voice-evidence-fixture.js";
 
 function fixture(
   result = { status: 201, body: "answer", headers: { location: "/v1/realtime/calls/rtc_fixture" } },
@@ -579,6 +580,7 @@ describe("client-owned voice gateway", () => {
         [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
           enabled: true,
           desktopVersion,
+          desktopPlatform: "darwin",
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
         },
@@ -728,8 +730,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         document: {
           querySelectorAll: () => [
@@ -795,8 +805,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         document: {
           querySelectorAll: () => [
@@ -861,8 +879,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
         localStorage: { getItem: (key: string) => values.get(key) ?? null },
@@ -909,8 +935,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         localStorage: {
           getItem: (key: string) =>
@@ -969,8 +1003,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
         localStorage: {
@@ -1015,8 +1057,16 @@ describe("client-owned voice gateway", () => {
           enabled: true,
           desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
           desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
           auditedDesktopVersion: "26.1007.30912",
           auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
         },
         document: {
           querySelectorAll: () => [
@@ -1037,10 +1087,109 @@ describe("client-owned voice gateway", () => {
         assetSeen: true,
         importStarted: true,
         importResolved: false,
-        importFailed: "runtime chunk missing",
+        importFailed: "hashed-import-failed",
         factoryHooked: false,
         wrapperActive: false,
       });
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("does not wrap hashed Work without reviewed Work/Codex evidence", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.original).toHaveBeenCalledOnce();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("does not let Work/Codex evidence qualify a Grok model", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const hook = installClientOwnedVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          voiceEvidence: [
+            reviewedVoiceEvidenceRecord({
+              path: "work-codex",
+              desktopPlatform: "darwin",
+              desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            }),
+          ],
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await f.client.fetch(
+        url,
+        options(speechBody(), {
+          "x-codex-turn-metadata": JSON.stringify({ backend_model_name: "codexhost/grok/grok-4" }),
+        }),
+      );
+      expect(f.original).toHaveBeenCalledOnce();
+      expect(f.dispatch).not.toHaveBeenCalled();
     } finally {
       hook.dispose();
     }
@@ -1106,7 +1255,10 @@ describe("client-owned voice gateway", () => {
       setTimeout,
       clearTimeout,
     };
-    Object.assign(target[CPA_LIVE_VOICE_HOOK_GLOBAL], { desktopVersion: "26.1016.62342" });
+    Object.assign(target[CPA_LIVE_VOICE_HOOK_GLOBAL], {
+      desktopVersion: "26.1016.62342",
+      desktopPlatform: "darwin",
+    });
     const module: Record<string, unknown> = {
       Oit: vi.fn(() => {
         module.Eit = { getInstance: () => f.client };
@@ -1164,6 +1316,28 @@ describe("client-owned voice gateway", () => {
 });
 
 describe("explicit Chat launch ownership", () => {
+  it("does not gateway a Grok model from the Work/Codex override alone", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "work" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => true,
+      () => true,
+      () => false,
+      () => false,
+    );
+    const request = options(speechBody(), {
+      "x-codex-turn-metadata": JSON.stringify({ backend_model_name: "codexhost/grok/grok-4" }),
+    });
+    await f.client.fetch(url, request);
+    expect(f.original).toHaveBeenCalledWith(url, request);
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+
   it("keeps Chat /wham passthrough despite stale Work surface, Harness model and lastAgent", async () => {
     const f = fixture();
     rememberVoiceProductExperience({ productExperience: "chat" });

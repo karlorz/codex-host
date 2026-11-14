@@ -3,7 +3,6 @@ import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bin
 import { VOICE_GATEWAY_STATUS_METHOD } from "@codexhost/shared-contracts";
 import {
   CLIENT_OWNED_VOICE_ASSETS,
-  isExternalHarnessComposer,
   rememberVoiceProductExperience,
   requestVoiceHost,
   type NativeVoiceBridge,
@@ -17,6 +16,7 @@ import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
 } from "./renderer-cpa-live-voice-preference.js";
+import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
 import { isAvatarOverlayHref } from "./renderer-overlay-thread-isolation.js";
 
 const GLOBAL = "__codexhostVoiceStartCapabilityV1";
@@ -51,9 +51,8 @@ export function gatewayVoiceStartRequest(
   const mode = request.activeCollaborationMode;
   const settings = record(mode) ? mode.settings : undefined;
   const model = record(settings) ? settings.model : undefined;
-  return (
-    workGateway || externalHarness || (typeof model === "string" && model.startsWith("codexhost/"))
-  );
+  if (typeof model === "string" && model.startsWith("codexhost/")) return externalHarness;
+  return workGateway || externalHarness;
 }
 
 export function wrapGatewayVoiceStarter(
@@ -192,9 +191,10 @@ export function installVoiceStartCapabilityHook(
                       !!readCpaLiveVoiceHookConfig(target) &&
                       gatewayVoiceStartRequest(
                         request,
-                        cpaLiveVoicePreferenceAllowsInstall(target),
+                        cpaLiveVoicePreferenceAllowsInstall(target) &&
+                          workVoiceLaneEnabled(target, "work-codex"),
                         chatLiveVoicePreferenceAllowsOverride(target),
-                        isExternalHarnessComposer(target),
+                        workVoiceLaneEnabled(target, "work-grok"),
                       ),
                     ready: async () => {
                       const hook = target.__codexhostClientOwnedVoiceV1;

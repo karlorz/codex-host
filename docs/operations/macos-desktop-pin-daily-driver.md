@@ -27,13 +27,17 @@ replace `/Applications/ChatGPT.app` or share that user profile. Agents still
 must not quit production.
 
 Work and Chat pins are the source constants
-`CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION`. Shipping a
-codexhost tag does not re-pin or qualify a newer Desktop.
+`CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION` in
+`packages/renderer-extension/src/renderer-voice-profiles.ts`. Shipping a
+codexhost tag does not re-pin or qualify a newer Desktop. A matching pin is a
+release alert recovery, not live voice acceptance.
 
 ## Daily driver
 
-The qualified Work/Chat voice daily driver is `/Applications/ChatGPT.app` at
-**26.1027.61615**. The Controller permits Renderer installation on macOS
+The retained named Work/Chat daily-driver pin is `/Applications/ChatGPT.app` at
+**26.1027.61615**. macOS **26.1106.51428** hashed Chat has prior attended evidence
+scoped to commit `2ddfb791`; that is not a pass for a later voice runtime refactor
+and does not qualify Work or Windows. The Controller permits Renderer installation on macOS
 **26.1106.51428** build **26605**: its isolated signed-out startup supports
 `Runtime.enable`, `Debugger.enable`, the loaded-module catalog and production
 Renderer bundle evaluation without the Windows Store splash hang. This does not
@@ -88,10 +92,17 @@ than this Mac's Check for Updates offer
 `npm start` quits running Codex Desktop before launch. Do not use it against
 the production daily driver. The disposable scratch Desktop is
 `npm run scratch:candidate -- --print` or `--launch`
-(`tools/dev-desktop/scratch-candidate.mjs`). It direct-executes a bundle under
-`.codexhost/update-impact/<version>/bundle/ChatGPT.app` with
-`CODEXHOST_INSTALL_ROOT` and an isolated `CODEX_ELECTRON_USER_DATA_PATH`. It
-refuses discovery-path apps and aborts if production Desktop PIDs disappear.
+(`tools/dev-desktop/scratch-candidate.mjs`). It opens a bundle under
+`.codexhost/update-impact/<version>/bundle/ChatGPT.app` with LaunchServices
+(`/usr/bin/open -n -F`, plus `--env` / `--args`), matching Gate A
+`launch-services` rather than spawning `Contents/MacOS/ChatGPT` under the
+codexhost GUI. Direct spawn keeps macOS TCC `responsibleProc` on
+`com.codexhost.app`, which has no `NSMicrophoneUsageDescription` and aborts
+on microphone access. LaunchServices makes the official ChatGPT bundle
+responsible. Isolated `CODEX_ELECTRON_USER_DATA_PATH` / `--user-data-dir`
+still apply. It refuses discovery-path apps, aborts if production Desktop
+PIDs disappear, and aborts if the new process is still attributed to the
+host launcher or production Desktop.
 
 ## Compat Daily
 

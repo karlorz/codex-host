@@ -6,10 +6,13 @@ import {
   type NativeVoiceFetch,
 } from "./renderer-voice-gateway-wrap.js";
 import { isWorkComposerSurface } from "./renderer-work-composer-surface.js";
+import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
 import {
+  HASHED_OVERLAY_VOICE_ROLES,
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
-} from "./renderer-hashed-webpack-voice.js";
+  hashedVoiceProfileSupported,
+} from "./renderer-voice-profiles.js";
 
 export { HASHED_WEBPACK_VOICE_RUNTIME_ASSET, HASHED_WEBPACK_VOICE_VERSION };
 
@@ -93,10 +96,7 @@ function hashedWebpackVoiceSupported(config: {
   desktopVersion?: string;
   desktopPlatform?: string;
 }): boolean {
-  return (
-    config.desktopVersion === HASHED_WEBPACK_VOICE_VERSION &&
-    (config.desktopPlatform === undefined || config.desktopPlatform === "darwin")
-  );
+  return hashedVoiceProfileSupported(config);
 }
 
 function cachedConnection(owner: object, field: "workConnection" | "chatConnection"): unknown {
@@ -133,6 +133,7 @@ function storageFlag(owner: object, key: string, enabledWhenUnset: boolean): boo
 }
 
 function workGatewayEnabled(owner: object): boolean {
+  if (!workVoiceLaneEnabled(owner, "work-codex")) return false;
   const connection = cachedConnection(owner, "workConnection");
   return connection !== undefined
     ? connection === "gateway"
@@ -210,7 +211,7 @@ function unpoisonIncompleteWebpackModule(
   const cached = cache?.[id];
   if (!cache || !cached || usable(cached.exports)) return;
   try {
-    delete cache[id];
+    Reflect.deleteProperty(cache, id);
   } catch {
     /* Native Voice Chat cannot start from an empty GDNt cache entry. */
   }
@@ -232,13 +233,15 @@ function safeWebpackRequire(req: WebpackRequire, id: string): unknown {
 }
 
 function readGdntExports(req: WebpackRequire): unknown {
-  const peeked = peekWebpackExport(req, "GDNt");
-  if (nativeVoiceFetch(object(peeked) ? peeked._n : undefined)) return peeked;
-  unpoisonIncompleteWebpackModule(req, "GDNt", (value) =>
-    Boolean(nativeVoiceFetch(object(value) ? value._n : undefined)),
+  const factoryId = HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId;
+  const fetchExport = HASHED_OVERLAY_VOICE_ROLES.fetchExport;
+  const peeked = peekWebpackExport(req, factoryId);
+  if (nativeVoiceFetch(object(peeked) ? peeked[fetchExport] : undefined)) return peeked;
+  unpoisonIncompleteWebpackModule(req, factoryId, (value) =>
+    Boolean(nativeVoiceFetch(object(value) ? value[fetchExport] : undefined)),
   );
-  if (typeof req.m?.GDNt === "function") return undefined;
-  return safeWebpackRequire(req, "GDNt");
+  if (typeof req.m?.[factoryId] !== "function") return safeWebpackRequire(req, factoryId);
+  return undefined;
 }
 
 function hookWebpackVoiceFactory(
@@ -246,7 +249,8 @@ function hookWebpackVoiceFactory(
   onExports: (exports: unknown) => void,
 ): boolean {
   const modules = req.m;
-  const original = modules?.GDNt;
+  const factoryId = HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId;
+  const original = modules?.[factoryId];
   if (!modules || typeof original !== "function") return false;
   if (original.__codexhostVoiceFactory) return true;
   const wrapped: WebpackFactory = function (this: unknown, module, exports, webpackRequire) {
@@ -257,7 +261,7 @@ function hookWebpackVoiceFactory(
     }
   };
   wrapped.__codexhostVoiceFactory = true;
-  modules.GDNt = wrapped;
+  modules[factoryId] = wrapped;
   return true;
 }
 
@@ -272,12 +276,15 @@ async function resolveHashedWebpackVoice(
   const runtime = await importModule(`app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}`);
   const req = runtime?.__webpack_require__;
   if (!isWebpackRequire(req)) return null;
+  const roles = HASHED_OVERLAY_VOICE_ROLES;
   const gdnt = readGdntExports(req);
-  const client = nativeVoiceFetch(object(gdnt) ? gdnt._n : undefined);
-  const hostBridge = safeWebpackRequire(req, "TL6G");
-  const bridged = nativeVoiceBridge(object(hostBridge) ? hostBridge.O1 : undefined);
-  const errorModule = safeWebpackRequire(req, "eShZ");
-  const responseError = object(errorModule) ? errorModule.s1 : undefined;
+  const client = nativeVoiceFetch(object(gdnt) ? gdnt[roles.fetchExport] : undefined);
+  const hostBridge = safeWebpackRequire(req, roles.bridgeModuleId);
+  const bridged = nativeVoiceBridge(
+    object(hostBridge) ? hostBridge[roles.bridgeExport] : undefined,
+  );
+  const errorModule = safeWebpackRequire(req, roles.responseErrorModuleId);
+  const responseError = object(errorModule) ? errorModule[roles.responseErrorExport] : undefined;
   if (!bridged || typeof responseError !== "function") return null;
   if (client)
     return {
@@ -285,7 +292,7 @@ async function resolveHashedWebpackVoice(
       bridge: bridged,
       responseError: responseError as (response: Response, url: string) => Promise<unknown>,
     };
-  if (typeof req.m?.GDNt !== "function") return null;
+  if (typeof req.m?.[HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId] !== "function") return null;
   return {
     bridge: bridged,
     responseError: responseError as (response: Response, url: string) => Promise<unknown>,
@@ -359,6 +366,7 @@ export function installHashedOverlayVoiceHook(
       () => !overlayCompactVoiceDocument(target) && isWorkComposerSurface(target),
       () => false,
       () => overlayCompactVoiceDocument(target),
+      () => workVoiceLaneEnabled(target, "work-grok"),
     );
     activation.wrapperActive = true;
     handle.status = "active";
@@ -385,10 +393,19 @@ export function installHashedOverlayVoiceHook(
           webpackRequire &&
           hookWebpackVoiceFactory(webpackRequire, (exports) => {
             if (disposed || activation.wrapperActive) return;
-            const client = nativeVoiceFetch(object(exports) ? exports._n : undefined);
+            const client = nativeVoiceFetch(
+              object(exports) ? exports[HASHED_OVERLAY_VOICE_ROLES.fetchExport] : undefined,
+            );
             if (!client) {
-              unpoisonIncompleteWebpackModule(webpackRequire, "GDNt", (value) =>
-                Boolean(nativeVoiceFetch(object(value) ? value._n : undefined)),
+              unpoisonIncompleteWebpackModule(
+                webpackRequire,
+                HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId,
+                (value) =>
+                  Boolean(
+                    nativeVoiceFetch(
+                      object(value) ? value[HASHED_OVERLAY_VOICE_ROLES.fetchExport] : undefined,
+                    ),
+                  ),
               );
               return;
             }
@@ -400,9 +417,9 @@ export function installHashedOverlayVoiceHook(
           delete activation.importFailed;
           return;
         }
-        activation.importFailed = "hashed webpack voice exports were missing";
-      } catch (error) {
-        activation.importFailed = error instanceof Error ? error.message : "hashed import failed";
+        activation.importFailed = "hashed-exports-missing";
+      } catch {
+        activation.importFailed = "hashed-import-failed";
       }
     }
     timer = target.setTimeout(() => void attempt(), Date.now() - started >= 5_000 ? 1_000 : 250);

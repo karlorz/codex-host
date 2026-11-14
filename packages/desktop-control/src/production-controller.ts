@@ -234,8 +234,12 @@ export async function runDesktopController(
   let session: RendererCdpControlSession | undefined;
   let nextRecoveryAt = 0;
   let recoveryDelayMs = RECOVERY_RETRY_INITIAL_MS;
-  const skipReason = rendererInjectionSkipReason(process.env.CODEXHOST_DESKTOP_VERSION);
-  const bootstrap = cpaLiveVoiceHookBootstrap();
+  const skipReason = rendererInjectionSkipReason(
+    process.env.CODEXHOST_DESKTOP_VERSION,
+    process.platform,
+  );
+  const overlayDir = path.dirname(options.rendererPath);
+  const bootstrap = cpaLiveVoiceHookBootstrap(process.env, undefined, overlayDir);
   const status = createRendererStatusReporter(
     (document) =>
       dependencies.publishStatus?.({
@@ -263,13 +267,12 @@ export async function runDesktopController(
     status.installing();
     startupTrace("reading Renderer bundle");
     const rendererRead = dependencies.readRenderer(options.rendererPath);
-    const overlayDir = path.dirname(options.rendererPath);
     const overlayPath =
-      bootstrap && cpaLiveVoiceOverlayHookAllowed()
+      bootstrap && cpaLiveVoiceOverlayHookAllowed(process.env, overlayDir)
         ? path.join(overlayDir, "cpa-live-voice-hook.js")
         : undefined;
     const overlayBootstrapPath =
-      overlayPath && overlayVoiceBootstrapPreferred()
+      overlayPath && overlayVoiceBootstrapPreferred(process.env, overlayDir)
         ? path.join(overlayDir, "overlay-voice-bootstrap.js")
         : undefined;
     const [rendererSource, overlayBundle, overlayBootstrapBundle] = overlayPath

@@ -22,8 +22,13 @@ export {
  * AND Statsig gate 206132468). The capability is a version comparison, so the
  * hook forces that gate to false; the gate has no other reader in this build.
  */
-export const AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION = "26.1007.30912";
-export const AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET = "app-initial-6350d04672d0.js";
+import {
+  HISTORICAL_CPA_LIVE_VOICE_APP_INITIAL_ASSET,
+  HISTORICAL_CPA_LIVE_VOICE_DESKTOP_VERSION,
+} from "./renderer-voice-profiles.js";
+
+export const AUDITED_CPA_LIVE_VOICE_DESKTOP_VERSION = HISTORICAL_CPA_LIVE_VOICE_DESKTOP_VERSION;
+export const AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET = HISTORICAL_CPA_LIVE_VOICE_APP_INITIAL_ASSET;
 export const THREAD_REALTIME_EXISTING_CALL_GATE = "206132468";
 
 type RecordValue = Record<string, unknown>;

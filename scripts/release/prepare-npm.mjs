@@ -20,6 +20,10 @@ import {
   buildPreinstalledHarnessPlugins,
   preinstalledHarnessPluginPaths,
 } from "./harness-plugins.mjs";
+import {
+  VOICE_RELEASE_ARTIFACT_PATHS,
+  stageAndValidateVoiceReleaseArtifacts,
+} from "./voice-release-artifacts.mjs";
 import { linuxGlibcCargoArguments, stripLinuxDebugInfo } from "./linux-glibc.mjs";
 import { hostReleaseTarget, npmReleaseUsage, releaseTargetForHost } from "./targets.mjs";
 
@@ -282,6 +286,7 @@ export function expectedNpmPackagePaths(target) {
     "app/renderer-extension.js",
     "app/cpa-live-voice-hook.js",
     "app/overlay-voice-bootstrap.js",
+    ...VOICE_RELEASE_ARTIFACT_PATHS,
     ...preinstalledHarnessPluginPaths(),
     "licenses/Anthropic-SDK-LICENSE.txt",
     "licenses/Agent-Client-Protocol-SDK-LICENSE.txt",
@@ -1277,6 +1282,11 @@ export async function prepareNpmPackage({
     path.join(packageRoot, "app", "console-web.js"),
     "console page Bundle",
   );
+  await stageAndValidateVoiceReleaseArtifacts({
+    repositoryRoot: root,
+    appDir: path.join(packageRoot, "app"),
+    copyFile: copyReleaseFile,
+  });
   await writeDistributionMetadata(path.join(packageRoot, "app", "codexhost-distribution.json"), {
     version: packageVersion,
     distribution: "npm",

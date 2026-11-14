@@ -70,6 +70,14 @@ describe("gateway start ownership", () => {
         { ...request, activeCollaborationMode: { settings: { model: "codexhost/owned" } } },
         false,
       ),
+    ).toBe(false);
+    expect(
+      gatewayVoiceStartRequest(
+        { ...request, activeCollaborationMode: { settings: { model: "codexhost/owned" } } },
+        false,
+        false,
+        true,
+      ),
     ).toBe(true);
     expect(gatewayVoiceStartRequest(request, false, false, true)).toBe(true);
     expect(

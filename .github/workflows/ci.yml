@@ -83,6 +83,13 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run typecheck
 
+      # Structural/fixture discovery after the Renderer build. Not attended call qualification.
+      - name: Test voice discovery command
+        if: runner.os == 'Linux'
+        run: |
+          npm run build:renderer
+          npm run voice:discovery:test
+
       - name: Test TypeScript (full suite)
         if: runner.os == 'Linux'
         run: npm run test:typescript
@@ -116,6 +123,10 @@ jobs:
         run: >
           npx vitest run --config tests/vitest.config.js
           packages/renderer-extension/test/renderer-voice-assets.test.ts
+          packages/renderer-extension/test/renderer-voice-profiles.test.ts
+          packages/renderer-extension/test/renderer-voice-discovery.test.ts
+          packages/renderer-extension/test/renderer-voice-evidence.test.ts
+          packages/renderer-extension/test/renderer-native-chat-voice-runtime.test.ts
           packages/renderer-extension/test/renderer-client-owned-voice.test.ts
           packages/renderer-extension/test/renderer-native-chat-voice.test.ts
           packages/renderer-extension/test/renderer-voice-settings.test.ts

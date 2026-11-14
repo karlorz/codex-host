@@ -126,6 +126,9 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# Microphone/camera usage strings belong on ChatGPT.app. This host must not
+# become the TCC responsible process for Desktop capture. Isolated Desktop
+# launch uses LaunchServices (`open -n`) so the official bundle owns privacy.
 
 /usr/bin/plutil -lint "$CONTENTS/Info.plist" >/dev/null
 /usr/bin/codesign --force --sign - "$RESOURCES/runtime/node"

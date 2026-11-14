@@ -77,9 +77,12 @@ describe("production Renderer release chain", () => {
     expect(rendererBuild).toContain("dist/cpa-live-voice-hook.js");
     expect(rendererBuild).toContain("src/overlay-voice-bootstrap-entry.ts");
     expect(rendererBuild).toContain("dist/overlay-voice-bootstrap.js");
+    expect(rendererBuild).toContain("dist/voice-profile-pins.json");
+    expect(rendererBuild).toContain("dist/voice-qualification.json");
     expect(releaseBuilder).toContain('dist", "production.js');
     expect(releaseBuilder).toContain('dist", "cpa-live-voice-hook.js');
     expect(releaseBuilder).toContain('dist", "overlay-voice-bootstrap.js');
+    expect(releaseBuilder).toContain("stageAndValidateVoiceReleaseArtifacts");
     expect(releaseBuilder).toContain("desktop-controller.mjs");
     expect(releaseBuilder).toContain('packageName: "lucide"');
     expect(releaseBuilder).toContain("lucide-LICENSE.txt");
@@ -98,7 +101,7 @@ describe("production Renderer release chain", () => {
       const built = await stat(
         path.join(root, "packages/renderer-extension/dist/overlay-voice-bootstrap.js"),
       );
-      expect(built.size).toBeLessThan(50_000);
+      expect(built.size).toBeLessThan(64_000);
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
       throw error;

@@ -488,12 +488,12 @@ describe("version and runtime qualification", () => {
       __codexhostHostRoutingV1: { forComposer: () => route, forHost: () => route },
     });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(hook.status).toBe("active");
+    expect(hook.status).toBe("pending");
     hook.dispose();
   });
 
   it.each(["grok", "cursor-cli"])(
-    "projects Work Desktop default when lastAgent is %s even without a selected carrier",
+    "keeps Work Desktop default native when lastAgent is %s even without a selected carrier",
     async (lastAgent) => {
       rememberVoiceProductExperience({});
       vi.useFakeTimers();
@@ -513,7 +513,8 @@ describe("version and runtime qualification", () => {
       );
       const hook = installVoiceCapabilityProjection(f);
       await vi.advanceTimersByTimeAsync(1);
-      expect(hook.status).toBe("active");
+      expect(f.importModule).not.toHaveBeenCalled();
+      expect(hook.status).toBe("pending");
       hook.dispose();
     },
   );

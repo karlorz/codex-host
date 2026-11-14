@@ -12,6 +12,7 @@ import {
   cpaLiveVoicePreferenceAllowsInstall,
   voiceGatewayIsReady,
 } from "./renderer-cpa-live-voice-preference.js";
+import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
 
 const GLOBAL = "__codexhostVoiceCapabilityV1";
 export const INFERENCE_GATE = "3683713372";
@@ -426,7 +427,10 @@ export function installVoiceCapabilityProjection(
         (isWorkComposerSurface(target) ||
           (external() &&
             target.document?.querySelectorAll("[data-chatgpt-composer]").length === 0)) &&
-        (cpaLiveVoicePreferenceAllowsInstall(target) || external())));
+        (cpaLiveVoicePreferenceAllowsInstall(target) || external()) &&
+        (external()
+          ? workVoiceLaneEnabled(target, "work-grok")
+          : workVoiceLaneEnabled(target, "work-codex"))));
   const refresh = async () => {
     if (disposed) return;
     try {

@@ -10,6 +10,18 @@
     ".": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./voice-profiles": {
+      "types": "./dist/types/renderer-voice-profiles.d.ts",
+      "import": "./dist/voice-profiles.js"
+    },
+    "./voice-discovery": {
+      "types": "./dist/types/renderer-voice-discovery.d.ts",
+      "import": "./dist/voice-discovery.js"
+    },
+    "./voice-evidence": {
+      "types": "./dist/types/renderer-voice-evidence.d.ts",
+      "import": "./dist/voice-evidence.js"
     }
   },
   "scripts": {

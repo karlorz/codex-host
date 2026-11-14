@@ -227,4 +227,26 @@ describe("Codex Desktop contract audit report", () => {
       "unknown or missing fields",
     );
   });
+
+  it("projects voice identity without treating discovery as startup qualification", () => {
+    const inactive = buildSurfaceResults(contracts).find(({ id }) => id === "voice");
+    expect(inactive).toMatchObject({
+      verdict: "unverified",
+      reason: "voice-evidence-not-run",
+    });
+    const reviewed = buildSurfaceResults({
+      ...contracts,
+      voice: {
+        reviewedChat: true,
+        reviewedWork: false,
+        hashedChat: true,
+        discoveryRun: 0,
+      },
+    }).find(({ id }) => id === "voice");
+    expect(reviewed).toMatchObject({
+      verdict: "no-impact",
+      reason: "reviewed-voice-identity",
+    });
+    expect(reviewed?.observed.discoveryRun).toBe(0);
+  });
 });

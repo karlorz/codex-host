@@ -2,12 +2,30 @@ export const CPA_LIVE_VOICE_HOOK_GLOBAL = "__codexhostCpaLiveVoiceHookV1";
 
 type RecordValue = Record<string, unknown>;
 
+export interface IsolatedVoiceQualification {
+  path: "chat" | "work-codex" | "work-grok";
+  run: string;
+  expiresAt: string;
+  desktopVersion: string;
+  desktopBuild: string;
+  asarDigest: string;
+  appPath: string;
+  implementationRevision: string;
+  label: "unqualified-isolated";
+}
+
 export interface CpaLiveVoiceHookConfig {
   enabled: boolean;
   auditedDesktopVersion: string;
   auditedAppInitialAsset: string;
   desktopVersion?: string;
   desktopPlatform?: string;
+  desktopBuild?: string;
+  asarDigest?: string;
+  desktopAppPath?: string;
+  implementationRevision?: string;
+  voiceEvidence?: unknown[];
+  isolatedQualification?: IsolatedVoiceQualification;
 }
 
 function isRecord(value: unknown): value is RecordValue {
@@ -31,7 +49,33 @@ export function readCpaLiveVoiceHookConfig(globalObject: object): CpaLiveVoiceHo
       ? { desktopPlatform: value.desktopPlatform }
       : {}),
     ...(typeof value.desktopVersion === "string" ? { desktopVersion: value.desktopVersion } : {}),
+    ...(typeof value.desktopBuild === "string" ? { desktopBuild: value.desktopBuild } : {}),
+    ...(typeof value.asarDigest === "string" ? { asarDigest: value.asarDigest } : {}),
+    ...(typeof value.implementationRevision === "string"
+      ? { implementationRevision: value.implementationRevision }
+      : {}),
+    ...(typeof value.desktopAppPath === "string" ? { desktopAppPath: value.desktopAppPath } : {}),
+    ...(Array.isArray(value.voiceEvidence) ? { voiceEvidence: value.voiceEvidence } : {}),
+    ...(isIsolatedVoiceQualification(value.isolatedQualification)
+      ? { isolatedQualification: value.isolatedQualification }
+      : {}),
   };
+}
+
+export function isIsolatedVoiceQualification(value: unknown): value is IsolatedVoiceQualification {
+  if (!isRecord(value)) return false;
+  return (
+    (value.path === "chat" || value.path === "work-codex" || value.path === "work-grok") &&
+    typeof value.run === "string" &&
+    value.run.length > 0 &&
+    typeof value.expiresAt === "string" &&
+    typeof value.desktopVersion === "string" &&
+    typeof value.desktopBuild === "string" &&
+    typeof value.asarDigest === "string" &&
+    typeof value.appPath === "string" &&
+    typeof value.implementationRevision === "string" &&
+    value.label === "unqualified-isolated"
+  );
 }
 
 export function auditedAppInitialAssetPresent(

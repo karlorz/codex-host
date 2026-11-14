@@ -156,6 +156,7 @@ export function wrapClientOwnedVoiceFetch(
   workSurface: () => boolean = () => false,
   externalHarness: () => boolean = () => false,
   overlayExistingCall: () => boolean = () => false,
+  externalLane: () => boolean = () => true,
 ): () => void {
   const original = client.fetch;
   const wrapped: NativeVoiceFetch["fetch"] = async function (this: NativeVoiceFetch, url, options) {
@@ -184,7 +185,7 @@ export function wrapClientOwnedVoiceFetch(
           isWorkBackendModel(model) ||
           workSurface()));
     const external = !chat && (model.startsWith("codexhost/") || externalHarness());
-    const gateway = external || (work ? workOverride() : chatOverride());
+    const gateway = external ? externalLane() : work ? workOverride() : chatOverride();
     chatVoiceDebug("wham-create", {
       work,
       external,

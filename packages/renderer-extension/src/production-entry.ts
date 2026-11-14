@@ -1,4 +1,4 @@
-import { installNativeChatVoiceHook } from "./renderer-native-chat-voice.js";
+import { replaceNativeChatVoiceHookIfInactive } from "./renderer-native-chat-voice.js";
 import { installCpaLiveVoiceHook } from "./renderer-cpa-live-voice-hook.js";
 import { installClientOwnedVoiceHook } from "./renderer-client-owned-voice.js";
 import { installRendererBinding } from "./install-renderer-binding.js";
@@ -49,7 +49,7 @@ Object.defineProperty(window, "__codexhostInstallRpcSteeringV1", {
 installCpaLiveVoiceHook();
 installClientOwnedVoiceHook();
 installExternalVoiceLaunchHook();
-installNativeChatVoiceHook();
+replaceNativeChatVoiceHookIfInactive();
 installVoiceCapabilityProjection();
 installVoiceSettingsExplanation();
 

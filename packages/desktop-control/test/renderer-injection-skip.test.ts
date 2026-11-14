@@ -29,4 +29,25 @@ describe("rendererInjectionSkipReason", () => {
     expect(rendererInjectionSkipReason(undefined)).toBeNull();
     expect(rendererInjectionSkipReason("")).toBeNull();
   });
+
+  it("does not remove the Windows skip from environment path strings", () => {
+    const previous = process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC;
+    const previousApp = process.env.CODEXHOST_DESKTOP_APP_PATH;
+    const previousData = process.env.CODEX_ELECTRON_USER_DATA_PATH;
+    process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC = "1";
+    process.env.CODEXHOST_DESKTOP_APP_PATH =
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe";
+    process.env.CODEX_ELECTRON_USER_DATA_PATH =
+      "C:\\Users\\karl\\AppData\\Local\\Temp\\codexhost-isolated-voice-20261114";
+    try {
+      expect(rendererInjectionSkipReason("26.1106.51428", "win32")).toContain("skipped");
+    } finally {
+      if (previous === undefined) delete process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC;
+      else process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC = previous;
+      if (previousApp === undefined) delete process.env.CODEXHOST_DESKTOP_APP_PATH;
+      else process.env.CODEXHOST_DESKTOP_APP_PATH = previousApp;
+      if (previousData === undefined) delete process.env.CODEX_ELECTRON_USER_DATA_PATH;
+      else process.env.CODEX_ELECTRON_USER_DATA_PATH = previousData;
+    }
+  });
 });

@@ -1,21 +1,19 @@
 import {
+  HASHED_NATIVE_CHAT_PREWARM_ASSET,
+  HASHED_NATIVE_CHAT_ROLES,
+  HASHED_NATIVE_CHAT_START_ASSET,
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
-} from "./renderer-hashed-webpack-voice.js";
+  NATIVE_CHAT_VOICE_CHUNKS,
+  hashedVoiceProfileSupported,
+} from "./renderer-voice-profiles.js";
 
-export { HASHED_WEBPACK_VOICE_RUNTIME_ASSET, HASHED_WEBPACK_VOICE_VERSION };
-
-/** Hashed Instant Connect START / VoiceRoom. */
-export const HASHED_NATIVE_CHAT_START_ASSET = "530142.1e51e7f4b2.js";
-/** Hashed VoiceInstantConnectCacheController. */
-export const HASHED_NATIVE_CHAT_PREWARM_ASSET = "586788.c871bb9b7d.js";
-
-/** Dependency graph used by Desktop 26.1106's native Chat voice initializer. */
-const NATIVE_CHAT_VOICE_CHUNKS = [
-  157963, 74692, 198336, 543449, 904485, 459859, 822019, 431137, 108823, 208490, 384218, 843292,
-  652289, 907652, 796195, 144338, 140959, 587936, 904817, 426774, 452048, 490954, 445991, 612928,
-  42903, 363341, 997826, 223736, 21878, 89655, 333490, 422391, 792483, 530142,
-];
+export {
+  HASHED_NATIVE_CHAT_PREWARM_ASSET,
+  HASHED_NATIVE_CHAT_START_ASSET,
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+};
 
 type RecordValue = Record<string, unknown>;
 
@@ -96,10 +94,7 @@ export function hashedNativeChatVoiceSupported(config: {
   desktopVersion?: string;
   desktopPlatform?: string;
 }): boolean {
-  return (
-    config.desktopVersion === HASHED_WEBPACK_VOICE_VERSION &&
-    (config.desktopPlatform === undefined || config.desktopPlatform === "darwin")
-  );
+  return hashedVoiceProfileSupported(config);
 }
 
 export async function resolveHashedWebpackRequire(
@@ -133,7 +128,11 @@ export async function loadHashedNativeChatVoiceModules(
   await Promise.all(NATIVE_CHAT_VOICE_CHUNKS.map((chunk) => loadChunk.call(req, chunk)));
   // Rspack stores failures even after exports have been published. Requiring a
   // failed START/prewarm module rethrows that cached failure until it is removed.
-  for (const id of new Set([...missingFactories, "j9r7", "oWM3"])) {
+  for (const id of new Set([
+    ...missingFactories,
+    HASHED_NATIVE_CHAT_ROLES.startModuleId,
+    HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+  ])) {
     const cached = req.c?.[id];
     if (
       typeof req.m?.[id] === "function" &&
@@ -148,49 +147,53 @@ export async function loadHashedNativeChatVoiceModules(
   ]);
   installHashedWebpackModules(req, startChunk.__webpack_modules__);
   installHashedWebpackModules(req, prewarmChunk.__webpack_modules__);
+  const roles = HASHED_NATIVE_CHAT_ROLES;
   const startExports = requireHashedExport(
     req,
-    "j9r7",
-    (value) => object(value) && typeof value.initializeVoiceSession === "function",
+    roles.startModuleId,
+    (value) => object(value) && typeof value[roles.startInitializeExport] === "function",
   );
   const prewarmExports = requireHashedExport(
     req,
-    "oWM3",
-    (value) => object(value) && typeof value.VoiceInstantConnectCacheController === "function",
+    roles.prewarmModuleId,
+    (value) => object(value) && typeof value[roles.prewarmControllerExport] === "function",
   );
   const appScope = requireHashedExport(
     req,
-    "OWtl",
-    (value) => object(value) && scopeBrand(value.u, "AppScope"),
+    roles.appScopeModuleId,
+    (value) => object(value) && scopeBrand(value[roles.appScopeExport], "AppScope"),
   );
   const routeScope = requireHashedExport(
     req,
-    "Oj9r",
-    (value) => object(value) && scopeBrand(value.GD, "RouteScope"),
+    roles.routeScopeModuleId,
+    (value) => object(value) && scopeBrand(value[roles.routeScopeExport], "RouteScope"),
   );
   const composerScope = requireHashedExport(
     req,
-    "Sd8U",
-    (value) => object(value) && scopeBrand(value.PR, "ComposerScope"),
+    roles.composerScopeModuleId,
+    (value) => object(value) && scopeBrand(value[roles.composerScopeExport], "ComposerScope"),
   );
   const store = requireHashedExport(
     req,
-    "bgok",
-    (value) => object(value) && typeof value.MH === "function",
+    roles.storeModuleId,
+    (value) => object(value) && typeof value[roles.storeExport] === "function",
   );
   const runtime = requireHashedExport(
     req,
-    "cY1t",
-    (value) => object(value) && value.Iy != null && typeof value.Re === "function",
+    roles.runtimeModuleId,
+    (value) =>
+      object(value) &&
+      value[roles.runtimeEnableExport] != null &&
+      typeof value[roles.runtimeLoaderExport] === "function",
   );
   const react = requireHashedExport(
     req,
-    "zd8w",
+    roles.reactModuleId,
     (value) => object(value) && typeof value.createElement === "function",
   );
   const reactDom = requireHashedExport(
     req,
-    "CE87",
+    roles.reactDomModuleId,
     (value) => object(value) && typeof value.createRoot === "function",
   );
   if (
@@ -205,7 +208,9 @@ export async function loadHashedNativeChatVoiceModules(
     !object(reactDom)
   )
     throw new Error("hashed Instant Connect exports missing");
-  const initializeVoiceSession = startExports.initializeVoiceSession as () => Promise<unknown>;
+  const initializeVoiceSession = startExports[
+    roles.startInitializeExport
+  ] as () => Promise<unknown>;
   let skipIntroduction = false;
   const startVoice = async (
     scope: unknown,
@@ -218,12 +223,9 @@ export async function loadHashedNativeChatVoiceModules(
     if (!conversationId) throw new Error();
     // The native loader mounts VoiceRoom through the app root before commands
     // are queued, and preserves authentication, availability and navigation gates.
-    const session = await (runtime.Re as (...args: unknown[]) => Promise<unknown>)(
-      scope,
-      conversationId,
-      { event_source: "composer" },
-      signal,
-    );
+    const session = await (
+      runtime[roles.runtimeLoaderExport] as (...args: unknown[]) => Promise<unknown>
+    )(scope, conversationId, { event_source: "composer" }, signal);
     if (!object(session)) throw new Error();
     const nux =
       typeof session.getVoiceNuxMode === "function"
@@ -232,9 +234,9 @@ export async function loadHashedNativeChatVoiceModules(
     const cancel = () => !(signal instanceof AbortSignal) || !signal.aborted;
     try {
       const state =
-        typeof store.MH === "function"
+        typeof store[roles.storeExport] === "function"
           ? (
-              store.MH(scope) as {
+              (store[roles.storeExport] as (scope: unknown) => unknown)(scope) as {
                 getState(): {
                   isVoiceModeActive?: boolean;
                   server?: { connectionState?: unknown };
@@ -288,14 +290,14 @@ export async function loadHashedNativeChatVoiceModules(
   };
   return {
     initial: {
-      MOr: routeScope.GD,
-      CDr: composerScope.PR,
+      MOr: routeScope[roles.routeScopeExport],
+      CDr: composerScope[roles.composerScopeExport],
       B1n: {},
-      SPn: store.MH,
-      aT: runtime.Iy,
+      SPn: store[roles.storeExport],
+      aT: runtime[roles.runtimeEnableExport],
     },
     shared: {
-      Qst: appScope.u,
+      Qst: appScope[roles.appScopeExport],
       FBt: () => react,
       PNt: () => reactDom,
     },
@@ -304,7 +306,7 @@ export async function loadHashedNativeChatVoiceModules(
       n: startVoice,
     },
     prewarm: {
-      VoiceInstantConnectCacheController: prewarmExports.VoiceInstantConnectCacheController,
+      VoiceInstantConnectCacheController: prewarmExports[roles.prewarmControllerExport],
       props: { loadVoiceSession: initializeVoiceSession },
     },
   };

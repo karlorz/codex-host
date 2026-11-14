@@ -6,13 +6,31 @@ Windows Store ChatGPT/Codex is a separate product from macOS Sparkle
 
 ## Daily driver
 
-The Windows daily driver is Store package **OpenAI.ChatGPT** MSIX
-**26.1106.6628.0**, product **26.1106.51428**. Installer:
+Verified 2026-11-14 over the `msi-1` SSH developer route (session 0):
+
+- Appx identity is **OpenAI.Codex**
+  `OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0`.
+- `Get-AppxPackage OpenAI.ChatGPT` and `Get-AppxPackage *ChatGPT*` returned no
+  package for that user or `-AllUsers`.
+- `winget list --id OpenAI.ChatGPT` and `winget list --id OpenAI.Codex` both
+  printed catalog row **ChatGPT / OpenAI.ChatGPT / 26.1106.6628.0**. That is the
+  winget catalog id, not the Appx family name.
+
+Product **26.1106.51428** (MSIX **26.1106.6628.0**) remains the retained Windows
+pin. It is not a voice qualification. Do not treat **OpenAI.ChatGPT** as the
+current Appx identity.
+
+Installer:
 
 `https://persistent.oaistatic.com/codex-app-prod/releases/26.1106.6628.0/ChatGPT-x64.msix`
 
-`winget pin add --id OpenAI.ChatGPT --version 26.1106.6628.0` gates later
-winget upgrades only. It does not stop Microsoft Store.
+Historical, unverified as a pin of the Appx family name:
+
+`winget pin add --id OpenAI.ChatGPT --version 26.1106.6628.0`
+
+That command gates later winget upgrades only if the catalog id still matches.
+It does not stop Microsoft Store, and it is not proof that the installed
+package family is `OpenAI.ChatGPT`.
 
 Store **does auto-apply** after the payload finishes. ChatGPT has no in-window
 download banner for this path; Windows Update Client pulls the MSIX from the

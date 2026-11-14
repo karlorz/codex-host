@@ -7,7 +7,7 @@ npm run compat:daily:test
 npm run compat:daily
 ```
 
-GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). macOS pin drift keeps one open `compat-broken` issue per surface (work-voice, chat-voice). The same pin with a newer Sparkle version opens a new issue and closes the previous tracker as superseded. The same Sparkle version comments on the existing issue.
+GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). Path filters include the audited voice profile owner, evidence/discovery modules, hashed adapters and `tools/voice-discovery/**`. macOS pin drift keeps one open `compat-broken` issue per surface (work-voice, chat-voice). The same pin with a newer Sparkle version opens a new issue and closes the previous tracker as superseded. The same Sparkle version comments on the existing issue. The Windows job adds runtime/profile/discovery/evidence contract tests; it still does not claim an attended call.
 
 The macOS feed is the static public release feed at
 `https://persistent.oaistatic.com/codex-app-prod/appcast.xml`. Desktop's production
@@ -54,14 +54,14 @@ Keep this tool, its npm scripts and the workflow when resolving upstream changes
    [Live Voice contract](../../docs/operations/cpa-live-voice-desktop-hook.md).
    An upstream merge, an appcast version match or a transport-only probe does
    not establish microphone/conversation acceptance.
-3. Update only the qualified surface's version and exact asset/export mappings,
-   along with its guards, focused regression coverage and qualification notes.
-   Work pins live in `packages/renderer-extension/src/renderer-client-owned-voice.ts`;
-   the optional overlay pin is read from `renderer-voice-start-capability.ts` in
-   the same directory. Chat profiles/start assets live in `renderer-native-chat-voice-assets.ts`;
-   the parser uses Work version/initial pins if separate Chat constants are absent.
-   Preserve independent Chat pins when Work advances. The 26.1016.61520 Chat
-   binding maps RouteScope ownership and the inner ComposerScope; see the [native Instant Connect evidence](../../docs/operations/cpa-live-voice-desktop-hook.md#existing-and-new-chatgpt-conversations-native-instant-connect).
+3. Update only the qualified surface's version and exact asset/export mappings
+   in `packages/renderer-extension/src/renderer-voice-profiles.ts`, along with
+   its guards, focused regression coverage and qualification notes. Compat Daily
+   reads `VOICE_PROFILE_PINS` / Chat and Work constants from that owner. Preserve
+   independent Chat pins when Work advances. Candidate analysis for an unfamiliar
+   build is `npm run voice:discovery`; it does not activate a profile. Historical
+   native Instant Connect notes live in
+   [cpa-live-voice-desktop-hook-history.md](../../docs/operations/cpa-live-voice-desktop-hook-history.md#existing-and-new-chatgpt-conversations-native-instant-connect).
    Keep live microphone/audio acceptance separate from a matching pin.
 4. Run `npm run compat:daily:test`, the behavior checks selected by the runbook,
    and `npm run compat:daily` again after any pin changes. Record remaining drift

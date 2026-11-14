@@ -110,10 +110,10 @@ describe("release Payload", () => {
       const paths = await validatePayload({ payloadRoot: root, target, root: "/repo/source" });
       expect(paths).toEqual(expectedPayloadPaths(target));
       expect(paths).toHaveLength(
-        35 + preinstalledHarnessPluginPaths().length + expectedWebPaths(target).length,
+        37 + preinstalledHarnessPluginPaths().length + expectedWebPaths(target).length,
       );
       expect(expectedPayloadPaths(releaseTarget("windows-x64"))).toHaveLength(
-        37 +
+        39 +
           preinstalledHarnessPluginPaths().length +
           expectedWebPaths(releaseTarget("windows-x64")).length,
       );
@@ -122,6 +122,8 @@ describe("release Payload", () => {
       expect(paths).toContain("app/console-server.mjs");
       expect(paths).toContain("app/cpa-live-voice-hook.js");
       expect(paths).toContain("app/overlay-voice-bootstrap.js");
+      expect(paths).toContain("app/voice-profile-pins.json");
+      expect(paths).toContain("app/voice-qualification.json");
       expect(paths).toContain("app/console-web.js");
       expect(paths).toContain("app/plugins/claude-code/plugin.mjs");
       expect(paths).toContain("app/plugins/codex-usage/plugin.mjs");

@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -441,6 +443,14 @@ describe("production Desktop Controller", () => {
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "darwin" });
     const previous = process.env.CODEXHOST_DESKTOP_VERSION;
     process.env.CODEXHOST_DESKTOP_VERSION = "26.1106.51428";
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-overlay-"));
+    await writeFile(
+      path.join(overlayDir, "voice-profile-pins.json"),
+      JSON.stringify({
+        hashedVersion: "26.1106.51428",
+        overlayHookDesktopVersions: ["26.1106.51428"],
+      }),
+    );
     const abort = new AbortController();
     const snapshot = controllerSnapshot();
     const session: RendererCdpControlSession = {
@@ -457,27 +467,32 @@ describe("production Desktop Controller", () => {
     const publishStatus = vi.fn();
     let monitorCycles = 0;
     try {
-      await runDesktopController(controllerOptions(), abort.signal, {
-        readRenderer: vi.fn(async (filePath: string) =>
-          filePath.endsWith("overlay-voice-bootstrap.js")
-            ? "overlay voice bootstrap"
-            : filePath.endsWith("cpa-live-voice-hook.js")
-              ? "overlay hook"
-              : "production renderer",
-        ),
-        install,
-        startAttachmentServer: vi.fn(async () => attachmentServer()),
-        ready: vi.fn(),
-        publishStatus,
-        sleep: vi.fn(async () => {
-          if (++monitorCycles >= 2) abort.abort();
-        }),
-        monitorIntervalMs: 1,
-      });
+      await runDesktopController(
+        { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async (filePath: string) =>
+            filePath.endsWith("overlay-voice-bootstrap.js")
+              ? "overlay voice bootstrap"
+              : filePath.endsWith("cpa-live-voice-hook.js")
+                ? "overlay hook"
+                : "production renderer",
+          ),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          publishStatus,
+          sleep: vi.fn(async () => {
+            if (++monitorCycles >= 2) abort.abort();
+          }),
+          monitorIntervalMs: 1,
+        },
+      );
     } finally {
       Object.defineProperty(process, "platform", platformDescriptor);
       if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
       else process.env.CODEXHOST_DESKTOP_VERSION = previous;
+      await rm(overlayDir, { recursive: true, force: true });
     }
 
     expect(install).toHaveBeenCalledOnce();
@@ -491,6 +506,45 @@ describe("production Desktop Controller", () => {
       "installed",
     ]);
     expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it("skips overlay injection when packaged voice pins are missing", async () => {
+    const previous = process.env.CODEXHOST_DESKTOP_VERSION;
+    process.env.CODEXHOST_DESKTOP_VERSION = "26.1027.61615";
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-overlay-missing-"));
+    const abort = new AbortController();
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+    try {
+      await runDesktopController(
+        { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async () => "production renderer"),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep: vi.fn(async () => {}),
+          monitorIntervalMs: 1,
+        },
+      );
+      expect(install.mock.calls[0]?.[0].overlayHookSource).toBeUndefined();
+      expect(install.mock.calls[0]?.[0].overlayVoiceBootstrapSource).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
+      else process.env.CODEXHOST_DESKTOP_VERSION = previous;
+      await rm(overlayDir, { recursive: true, force: true });
+    }
   });
 
   it("publishes Renderer integration failure and recovery for the console", async () => {

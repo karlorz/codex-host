@@ -9,6 +9,10 @@ import {
   buildPreinstalledHarnessPlugins,
   preinstalledHarnessPluginPaths,
 } from "./harness-plugins.mjs";
+import {
+  VOICE_RELEASE_ARTIFACT_PATHS,
+  stageAndValidateVoiceReleaseArtifacts,
+} from "./voice-release-artifacts.mjs";
 import { ensureNodeArchive, extractNodeRuntime } from "./node-runtime.mjs";
 import { parseReleaseArguments, releaseUsage } from "./targets.mjs";
 
@@ -296,6 +300,7 @@ export function expectedPayloadPaths(target) {
     "app/renderer-extension.js",
     "app/cpa-live-voice-hook.js",
     "app/overlay-voice-bootstrap.js",
+    ...VOICE_RELEASE_ARTIFACT_PATHS,
     ...preinstalledHarnessPluginPaths(),
     "licenses/Node.js-LICENSE.txt",
     "licenses/Copilot-SDK-LICENSE.txt",
@@ -491,6 +496,11 @@ export async function prepareReleasePayload({ target, root = repositoryRoot }) {
     path.join(payloadRoot, "app", "console-web.js"),
     "console page Bundle",
   );
+  await stageAndValidateVoiceReleaseArtifacts({
+    repositoryRoot: root,
+    appDir: path.join(payloadRoot, "app"),
+    copyFile: copyReleaseFile,
+  });
   await writeDistributionMetadata(path.join(payloadRoot, "app", "codexhost-distribution.json"), {
     version,
     distribution: "installer",

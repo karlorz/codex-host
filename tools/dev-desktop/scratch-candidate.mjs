@@ -3,7 +3,7 @@
  * Launch a disposable Sparkle-candidate ChatGPT.app without stopping production.
  * Never targets /Applications/ChatGPT.app or ~/Applications/ChatGPT.app.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
@@ -14,6 +14,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const IMPACT = path.join(ROOT, ".codexhost", "update-impact");
 const PRODUCTION_APP = "/Applications/ChatGPT.app";
 const PRODUCTION_EXECUTABLE = `${PRODUCTION_APP}/Contents/MacOS/ChatGPT`;
+const HOST_APP = "/Applications/codexhost.app";
+const OPEN = "/usr/bin/open";
+const RESPONSIBLE_PID_SCRIPT = `import ctypes, sys
+lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+fn = lib.responsibility_get_pid_responsible_for_pid
+fn.argtypes = [ctypes.c_int]
+fn.restype = ctypes.c_int
+print(fn(int(sys.argv[1])))
+`;
 
 export const DISCOVERY_APPS = [
   PRODUCTION_APP,
@@ -152,6 +161,7 @@ function freePort() {
 export function launchPlan(bundle, port) {
   const layout = layoutForBundle(bundle.app);
   return {
+    launchMethod: "launch-services",
     installRoot: layout.app,
     executable: layout.executable,
     userData: layout.userData,
@@ -166,6 +176,79 @@ export function launchPlan(bundle, port) {
       CODEX_ELECTRON_USER_DATA_PATH: layout.userData,
     },
   };
+}
+
+export function launchServicesInvocation(plan) {
+  const envArgs = Object.entries(plan.environment).flatMap(([key, value]) => [
+    "--env",
+    `${key}=${value}`,
+  ]);
+  return {
+    command: OPEN,
+    arguments: ["-n", "-F", ...envArgs, plan.installRoot, "--args", ...plan.arguments],
+  };
+}
+
+export function isScratchMainCommand(command, executable, userData) {
+  const trimmed = command.trim();
+  if (!(trimmed === executable || trimmed.startsWith(`${executable} `))) return false;
+  return trimmed.includes(`--user-data-dir=${userData}`);
+}
+
+export function classifyPrivacyResponsible(command, scratchApp) {
+  const trimmed = command.trim();
+  if (trimmed.includes(`${HOST_APP}/Contents/MacOS/`)) return "host-launcher";
+  if (trimmed.includes(`${PRODUCTION_APP}/Contents/MacOS/`)) return "production-desktop";
+  if (trimmed.includes(`${scratchApp}/Contents/MacOS/`)) return "scratch-desktop";
+  return "unknown";
+}
+
+export function parseResponsiblePid(stdout) {
+  const pid = Number.parseInt(String(stdout).trim(), 10);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+export function responsiblePidFor(pid, run = spawnSync) {
+  const result = run("python3", ["-c", RESPONSIBLE_PID_SCRIPT, String(pid)], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (result.status !== 0) {
+    throw new Error("responsibility_get_pid_responsible_for_pid probe failed");
+  }
+  const responsible = parseResponsiblePid(result.stdout);
+  if (!responsible) throw new Error("responsibility_get_pid_responsible_for_pid returned no pid");
+  return responsible;
+}
+
+function commandForPid(pid, listProcesses = defaultProcessList) {
+  const prefix = `${pid} `;
+  const line = listProcesses().find((entry) => entry.trimStart().startsWith(prefix));
+  if (!line) return undefined;
+  return line.trim().replace(/^\d+\s+/u, "");
+}
+
+function scratchMainPid(executable, userData, listProcesses = defaultProcessList) {
+  const matches = listProcesses()
+    .map((line) => {
+      const trimmed = line.trim();
+      const pid = Number.parseInt(trimmed.split(/\s+/u)[0], 10);
+      const command = trimmed.replace(/^\d+\s+/u, "");
+      return { pid, command };
+    })
+    .filter(
+      (entry) =>
+        Number.isInteger(entry.pid) &&
+        entry.pid > 0 &&
+        isScratchMainCommand(entry.command, executable, userData),
+    );
+  if (matches.length === 1) return matches[0].pid;
+  if (matches.length > 1) {
+    throw new Error(
+      `multiple scratch Desktop mains matched (${matches.map((entry) => entry.pid).join(",")})`,
+    );
+  }
+  return undefined;
 }
 
 function clearQuarantine(app) {
@@ -216,19 +299,33 @@ export async function launchScratch(options, listProcesses = defaultProcessList)
   }
   mkdirSync(description.scratch.userData, { recursive: true });
   clearQuarantine(description.scratch.installRoot);
-  const child = spawn(description.scratch.executable, description.scratch.arguments, {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env, ...description.scratch.environment },
+  const invocation = launchServicesInvocation(description.scratch);
+  const opened = spawnSync(invocation.command, invocation.arguments, {
+    encoding: "utf8",
+    timeout: 15_000,
   });
-  child.unref();
-  writeFileSync(description.scratch.pidFile, `${child.pid}\n`);
-  await wait(3000);
+  if (opened.status !== 0) {
+    throw new Error(
+      `LaunchServices open failed (${opened.status ?? "null"}): ${(opened.stderr || opened.stdout || "").trim()}`,
+    );
+  }
+  let scratchPid;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    scratchPid = scratchMainPid(
+      description.scratch.executable,
+      description.scratch.userData,
+      listProcesses,
+    );
+    if (scratchPid) break;
+    await wait(250);
+  }
+  if (!scratchPid) throw new Error("scratch Desktop did not appear after LaunchServices open");
+  writeFileSync(description.scratch.pidFile, `${scratchPid}\n`);
   const after = productionDesktopPids(listProcesses);
   const productionLost = before.filter((pid) => !after.includes(pid));
   if (productionLost.length > 0) {
     try {
-      process.kill(child.pid, "SIGKILL");
+      process.kill(scratchPid, "SIGTERM");
     } catch {
       // Scratch process may have already exited.
     }
@@ -236,14 +333,33 @@ export async function launchScratch(options, listProcesses = defaultProcessList)
       `aborting scratch launch: production Desktop PIDs disappeared (${productionLost.join(",")})`,
     );
   }
-  if (!processAlive(child.pid)) {
+  if (!processAlive(scratchPid)) {
     throw new Error("scratch Desktop exited immediately");
+  }
+  const responsiblePid = responsiblePidFor(scratchPid);
+  const responsibleCommand = commandForPid(responsiblePid, listProcesses) ?? "";
+  const privacyResponsible =
+    responsiblePid === scratchPid
+      ? "scratch-desktop"
+      : classifyPrivacyResponsible(responsibleCommand, description.scratch.installRoot);
+  if (privacyResponsible !== "scratch-desktop") {
+    try {
+      process.kill(scratchPid, "SIGTERM");
+    } catch {
+      // Scratch process may have already exited.
+    }
+    throw new Error(
+      `aborting scratch launch: TCC responsible process is ${privacyResponsible} (pid ${responsiblePid}), not the scratch bundle`,
+    );
   }
   return {
     ...description,
     productionPidsBefore: before,
     productionPidsAfter: after,
-    scratchPid: child.pid,
+    scratchPid,
+    responsiblePid,
+    privacyResponsible,
+    launchInvocation: invocation,
   };
 }
 

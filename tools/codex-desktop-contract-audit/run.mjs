@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   aggregateVerdict,
@@ -244,7 +245,33 @@ async function main() {
         rendererAuditSource,
       })
     : observation;
-  const surfaces = buildSurfaceResults(finalObservation.contracts, baseline, controlled);
+  const voiceProfilesPath = path.join(
+    repositoryRoot,
+    "packages",
+    "renderer-extension",
+    "dist",
+    "voice-evidence.js",
+  );
+  let voice = {
+    reviewedChat: false,
+    reviewedWork: false,
+    hashedChat: false,
+    discoveryRun: 0,
+  };
+  if (fs.existsSync(voiceProfilesPath)) {
+    const evidence = await import(pathToFileURL(voiceProfilesPath).href);
+    voice = evidence.projectVoiceAuditObservation({
+      desktopVersion: identity.version,
+      desktopPlatform: process.platform,
+      desktopBuild: identity.build,
+      asarDigest: identity.asarIntegrity,
+    });
+  }
+  const surfaces = buildSurfaceResults(
+    { ...finalObservation.contracts, voice },
+    baseline,
+    controlled,
+  );
   const report = validateAuditReport({
     schemaVersion: 1,
     recordedAt: new Date().toISOString(),

@@ -21,10 +21,33 @@ function optionalCapture(source, pattern) {
   return source.match(pattern)?.[1];
 }
 
+function pinsFromOwnerObject(source) {
+  const block = source.match(/export const VOICE_PROFILE_PINS = \{([\s\S]*?)\n\} as const;/u)?.[1];
+  if (!block) return undefined;
+  const field = (name) => optionalCapture(block, new RegExp(`${name}: "([^"]+)"`, "u"));
+  const workVersion = field("workVersion");
+  const workInitial = field("workInitial");
+  const chatStart = field("chatStart");
+  if (!workVersion || !workInitial || !chatStart) return undefined;
+  return {
+    workVersion,
+    workInitial,
+    workShared:
+      field("workShared") ??
+      capture(source, /CLIENT_OWNED_VOICE_SHARED_ASSET = "([^"]+)"/u, "work shared"),
+    overlayAsset: field("overlayAsset"),
+    chatVersion: field("chatVersion") ?? workVersion,
+    chatInitial: field("chatInitial") ?? workInitial,
+    chatStart,
+  };
+}
+
 export function readPins(files) {
   const work = files.clientOwned;
   const chat = files.nativeChat;
   const start = files.voiceStart ?? "";
+  const owned = pinsFromOwnerObject(work) ?? pinsFromOwnerObject(chat);
+  if (owned) return owned;
   const workVersion = capture(work, /CLIENT_OWNED_VOICE_VERSION = "([^"]+)"/u, "work version");
   const workInitial = capture(
     work,
@@ -149,22 +172,11 @@ export function recoveredPinIssues(report, issues) {
 }
 
 export async function loadPinsFromRepo(root = ROOT) {
-  const overlay = path.join(
-    root,
-    "packages/renderer-extension/src/renderer-voice-start-capability.ts",
+  const profiles = await readFile(
+    path.join(root, "packages/renderer-extension/src/renderer-voice-profiles.ts"),
+    "utf8",
   );
-  const [clientOwned, nativeChat, voiceStart] = await Promise.all([
-    readFile(
-      path.join(root, "packages/renderer-extension/src/renderer-client-owned-voice.ts"),
-      "utf8",
-    ),
-    readFile(
-      path.join(root, "packages/renderer-extension/src/renderer-native-chat-voice-assets.ts"),
-      "utf8",
-    ),
-    readFile(overlay, "utf8").catch(() => ""),
-  ]);
-  return readPins({ clientOwned, nativeChat, voiceStart });
+  return readPins({ clientOwned: profiles, nativeChat: profiles });
 }
 
 export async function fetchAppcast(fetchImpl = fetch, url = APPCAST_URL) {

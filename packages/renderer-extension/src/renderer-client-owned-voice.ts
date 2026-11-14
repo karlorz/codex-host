@@ -1,5 +1,17 @@
+import {
+  CLIENT_OWNED_VOICE_ASSETS,
+  hashedVoiceProfileSupported,
+} from "./renderer-voice-profiles.js";
+export {
+  CLIENT_OWNED_VOICE_VERSION,
+  CLIENT_OWNED_VOICE_INITIAL_ASSET,
+  CLIENT_OWNED_VOICE_SHARED_ASSET,
+  CLIENT_OWNED_VOICE_OVERLAY_ASSET,
+  CLIENT_OWNED_VOICE_ASSETS,
+} from "./renderer-voice-profiles.js";
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
+import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
 import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
@@ -38,119 +50,6 @@ export {
   type ClientOwnedVoiceActivation,
 };
 
-export const CLIENT_OWNED_VOICE_VERSION = "26.1027.61615";
-export const CLIENT_OWNED_VOICE_INITIAL_ASSET = "app-initial-18b189e867e7.js";
-export const CLIENT_OWNED_VOICE_SHARED_ASSET = "app-shared-601019a330d7.js";
-export const CLIENT_OWNED_VOICE_OVERLAY_ASSET = "avatar-overlay-native-page-920d05377bbe.js";
-export const CLIENT_OWNED_VOICE_ASSETS = [
-  {
-    platform: "darwin",
-    version: CLIENT_OWNED_VOICE_VERSION,
-    initial: CLIENT_OWNED_VOICE_INITIAL_ASSET,
-    shared: CLIENT_OWNED_VOICE_SHARED_ASSET,
-    overlay: CLIENT_OWNED_VOICE_OVERLAY_ASSET,
-    init: "Adr",
-    fetch: "Odr",
-    fetchFrom: "initial",
-    bridge: "LRt",
-    services: "Vct",
-    responseError: "Pdr",
-    responseErrorFrom: "initial",
-    capabilityInit: "Ler",
-    capabilityFamily: "Ier",
-    inferenceGateFamily: "Vfr",
-  },
-  {
-    platform: "darwin",
-    version: "26.1027.30824",
-    initial: "app-initial-60f141238751.js",
-    shared: "app-shared-7815d5a1a42a.js",
-    overlay: "avatar-overlay-native-page-d9d400e751cd.js",
-    init: "Edr",
-    fetch: "wdr",
-    fetchFrom: "initial",
-    bridge: "LRt",
-    services: "Vct",
-    responseError: "Adr",
-    responseErrorFrom: "initial",
-    capabilityInit: "Ner",
-    capabilityFamily: "Mer",
-    inferenceGateFamily: "Lfr",
-  },
-  {
-    platform: "darwin",
-    version: "26.1023.51421",
-    initial: "app-initial-bc8256c3cccb.js",
-    shared: "app-shared-e9f258fd3588.js",
-    overlay: "avatar-overlay-native-page-af6c3662f64f.js",
-    init: "xir",
-    fetch: "yir",
-    fetchFrom: "initial",
-    bridge: "QIt",
-    services: "Sst",
-    capabilityInit: "N4n",
-    capabilityFamily: "M4n",
-    inferenceGateFamily: "Par",
-  },
-  {
-    platform: "darwin",
-    version: "26.1021.31345",
-    initial: "app-initial-feb30b196d11.js",
-    shared: "app-shared-2cae01273bae.js",
-    overlay: "avatar-overlay-native-page-d549db3706f1.js",
-    fetch: "Htr",
-    fetchFrom: "initial",
-    bridge: "bIt",
-    services: "Qot",
-    capabilityInit: "l0n",
-    capabilityFamily: "c0n",
-    inferenceGateFamily: "Cnr",
-  },
-  {
-    platform: "win32",
-    version: "26.1021.31345",
-    initial: "app-initial-438d1df57f70.js",
-    shared: "app-shared-955d52676f9c.js",
-    overlay: "avatar-overlay-native-page-1549fe5955e1.js",
-    fetch: "Htr",
-    fetchFrom: "initial",
-    bridge: "bIt",
-    services: "Qot",
-    capabilityInit: "l0n",
-    capabilityFamily: "c0n",
-    inferenceGateFamily: "Cnr",
-  },
-  {
-    platform: "darwin",
-    version: "26.1016.62342",
-    initial: "app-initial-dddef47d6ef6.js",
-    shared: "app-shared-fc3316d48427.js",
-    overlay: "avatar-overlay-native-page-ef8332c6a2fb.js",
-    init: "Oit",
-    fetch: "Eit",
-    bridge: "AFt",
-    responseError: "Mit",
-    services: "ist",
-    capabilityInit: "njr",
-    capabilityFamily: "tjr",
-    inferenceGateFamily: "uBr",
-  },
-  {
-    platform: "darwin",
-    version: "26.1016.61520",
-    initial: "app-initial-c95ddb62696e.js",
-    shared: "app-shared-2eda13eb7044.js",
-    overlay: "avatar-overlay-native-page-fcc17283519a.js",
-    init: "Oit",
-    fetch: "Eit",
-    bridge: "AFt",
-    responseError: "Mit",
-    services: "ist",
-    capabilityInit: "njr",
-    capabilityFamily: "tjr",
-    inferenceGateFamily: "uBr",
-  },
-];
 const SHARED_INIT = "Oit";
 const SHARED_RESPONSE_ERROR = "Mit";
 const HOOK_GLOBAL = "__codexhostClientOwnedVoiceV1";
@@ -210,10 +109,7 @@ export function installClientOwnedVoiceHook(
   if (existing) return existing;
   const config = readCpaLiveVoiceHookConfig(target);
   if (!config) return { status: "disabled", dispose() {} };
-  if (
-    config.desktopVersion === HASHED_WEBPACK_VOICE_VERSION &&
-    (config.desktopPlatform === undefined || config.desktopPlatform === "darwin")
-  ) {
+  if (hashedVoiceProfileSupported(config)) {
     return installHashedOverlayVoiceHook({
       target,
       ...(options.importModule ? { importModule: options.importModule } : {}),
@@ -251,11 +147,14 @@ export function installClientOwnedVoiceHook(
     restore = wrapClientOwnedVoiceFetch(
       client,
       bridge,
-      () => cpaLiveVoicePreferenceAllowsInstall(target),
+      () =>
+        cpaLiveVoicePreferenceAllowsInstall(target) && workVoiceLaneEnabled(target, "work-codex"),
       responseError,
       () => chatLiveVoicePreferenceAllowsOverride(target),
       () => isWorkComposerSurface(target),
       () => isExternalHarnessComposer(target),
+      () => false,
+      () => workVoiceLaneEnabled(target, "work-grok"),
     );
     activation.wrapperActive = true;
     handle.status = "active";

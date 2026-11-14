@@ -69,6 +69,9 @@ use runtime_instance::{
 };
 use startup_record::StartupOutcome;
 
+const DESKTOP_BUILD_ENV: &str = "CODEXHOST_DESKTOP_BUILD";
+const DESKTOP_ASAR_DIGEST_ENV: &str = "CODEXHOST_DESKTOP_ASAR_DIGEST";
+const DESKTOP_APP_PATH_ENV: &str = "CODEXHOST_DESKTOP_APP_PATH";
 const HOST_NODE_PATH_ENV: &str = "CODEXHOST_HOST_NODE_PATH";
 const HOST_RUNTIME_PATH_ENV: &str = "CODEXHOST_HOST_RUNTIME_PATH";
 const DATA_DIRECTORY_ENV: &str = "CODEXHOST_DATA_DIR";
@@ -559,16 +562,39 @@ impl LaunchOptions {
     }
 }
 
+fn apply_managed_desktop_identity(
+    command: &mut Command,
+    desktop_version: &str,
+    desktop_build: &str,
+    asar_integrity: &str,
+    install_root: &Path,
+) {
+    // Managed launch identity is the discovered DesktopInstallation. Inherited
+    // CODEXHOST_DESKTOP_* values cannot impersonate a different install. Scratch
+    // and other non-production launches get identity from their own install_root.
+    command.env("CODEXHOST_DESKTOP_VERSION", desktop_version);
+    command.env(DESKTOP_BUILD_ENV, desktop_build);
+    command.env(DESKTOP_ASAR_DIGEST_ENV, asar_integrity);
+    command.env(DESKTOP_APP_PATH_ENV, install_root);
+}
+
 fn desktop_controller_command(
     desktop_version: &str,
+    desktop_build: &str,
+    asar_integrity: &str,
+    install_root: &Path,
     options: &ResolvedLaunchOptions,
     control: &RuntimeControl,
     environment: &[(OsString, OsString)],
 ) -> Command {
     let mut command = Command::new(&options.node);
-    if std::env::var("CODEXHOST_DESKTOP_VERSION").map_or(true, |value| value.trim().is_empty()) {
-        command.env("CODEXHOST_DESKTOP_VERSION", desktop_version);
-    }
+    apply_managed_desktop_identity(
+        &mut command,
+        desktop_version,
+        desktop_build,
+        asar_integrity,
+        install_root,
+    );
     command
         // Keep proxy support without surfacing its experimental API notice.
         .arg("--disable-warning=UNDICI-EHPA")
@@ -656,8 +682,15 @@ fn start_desktop_controller(
     environment: &[(OsString, OsString)],
 ) -> Result<SupervisedChild, Box<dyn Error>> {
     startup_trace("spawning Desktop Controller");
-    let mut command =
-        desktop_controller_command(&installation.version, options, control, environment);
+    let mut command = desktop_controller_command(
+        &installation.version,
+        &installation.build,
+        &installation.asar_integrity,
+        &installation.install_root,
+        options,
+        control,
+        environment,
+    );
     let mut controller = spawn_supervised(&mut command)?;
     startup_trace("waiting for Desktop Controller readiness");
     match wait_for_controller_ready(&mut controller, Duration::from_secs(120)) {
@@ -1598,9 +1631,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "windows")]
-    use std::ffi::OsStr;
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
@@ -1629,11 +1660,12 @@ mod tests {
     #[cfg(target_os = "windows")]
     use super::wait_for_desktop_exit;
     use super::{
-        CONTROL_NONCE_ENV, CONTROL_PORT_ENV, HOST_NODE_PATH_ENV, LAUNCHER_EXECUTABLE_ENV,
-        LAUNCHER_PID_ENV, NPM_CLI_PATH_ENV, NPM_LAUNCHER_PATH_ENV, NPM_NODE_PATH_ENV,
-        NPM_PACKAGE_ROOT_ENV, RUNTIME_DESCRIPTOR_PATH_ENV, ResolvedLaunchOptions, RuntimeControl,
-        STARTUP_TRACE_ENV, absolute_directory, allocate_runtime_control, delegation_node,
-        desktop_controller_command, desktop_environment, emit_ready_line,
+        CONTROL_NONCE_ENV, CONTROL_PORT_ENV, DESKTOP_APP_PATH_ENV, DESKTOP_ASAR_DIGEST_ENV,
+        DESKTOP_BUILD_ENV, HOST_NODE_PATH_ENV, LAUNCHER_EXECUTABLE_ENV, LAUNCHER_PID_ENV,
+        NPM_CLI_PATH_ENV, NPM_LAUNCHER_PATH_ENV, NPM_NODE_PATH_ENV, NPM_PACKAGE_ROOT_ENV,
+        RUNTIME_DESCRIPTOR_PATH_ENV, ResolvedLaunchOptions, RuntimeControl, STARTUP_TRACE_ENV,
+        absolute_directory, allocate_runtime_control, apply_managed_desktop_identity,
+        delegation_node, desktop_controller_command, desktop_environment, emit_ready_line,
         managed_desktop_data_directory, npm_update_runtime_environment, parse_inspect_options,
         parse_launch_options, read_bounded_controller_line, read_bounded_loopback_url,
         validate_loopback_root_url,
@@ -1940,20 +1972,86 @@ mod tests {
         }
     }
 
+    fn test_asar_digest() -> &'static str {
+        const DIGEST: &str =
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+        DIGEST
+    }
+
+    fn controller_command(
+        options: &ResolvedLaunchOptions,
+        environment: &[(OsString, OsString)],
+    ) -> Command {
+        desktop_controller_command(
+            "26.1021.31345",
+            "26605",
+            test_asar_digest(),
+            Path::new("/Applications/ChatGPT.app"),
+            options,
+            &runtime_control(),
+            environment,
+        )
+    }
+
+    fn command_env<'a>(command: &'a Command, name: &str) -> Option<&'a OsStr> {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, value)| value)
+    }
+
+    #[test]
+    fn managed_launch_identity_overrides_inherited_candidate_fields() {
+        let mut command = Command::new("/opt/node");
+        command.env("CODEXHOST_DESKTOP_VERSION", "26.1106.51428");
+        command.env(DESKTOP_BUILD_ENV, "99999");
+        command.env(DESKTOP_ASAR_DIGEST_ENV, "sha256:candidate");
+        command.env(DESKTOP_APP_PATH_ENV, "/tmp/scratch-candidate/ChatGPT.app");
+        apply_managed_desktop_identity(
+            &mut command,
+            "26.1021.31345",
+            "26605",
+            test_asar_digest(),
+            Path::new("/Applications/ChatGPT.app"),
+        );
+        assert_eq!(
+            command_env(&command, "CODEXHOST_DESKTOP_VERSION"),
+            Some(OsStr::new("26.1021.31345"))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_BUILD_ENV),
+            Some(OsStr::new("26605"))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_ASAR_DIGEST_ENV),
+            Some(OsStr::new(test_asar_digest()))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_APP_PATH_ENV),
+            Some(OsStr::new("/Applications/ChatGPT.app"))
+        );
+    }
+
     #[test]
     fn production_controller_uses_private_node_and_loopback_renderer_cdp() {
         let options = resolved_options();
-        let command =
-            desktop_controller_command("26.1021.31345", &options, &runtime_control(), &[]);
-        if std::env::var("CODEXHOST_DESKTOP_VERSION").map_or(true, |value| value.trim().is_empty())
-        {
-            assert!(
-                command
-                    .get_envs()
-                    .any(|(key, value)| key == "CODEXHOST_DESKTOP_VERSION"
-                        && value == Some(std::ffi::OsStr::new("26.1021.31345")))
-            );
-        }
+        let command = controller_command(&options, &[]);
+        assert_eq!(
+            command_env(&command, "CODEXHOST_DESKTOP_VERSION"),
+            Some(OsStr::new("26.1021.31345"))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_BUILD_ENV),
+            Some(OsStr::new("26605"))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_ASAR_DIGEST_ENV),
+            Some(OsStr::new(test_asar_digest()))
+        );
+        assert_eq!(
+            command_env(&command, DESKTOP_APP_PATH_ENV),
+            Some(OsStr::new("/Applications/ChatGPT.app"))
+        );
         assert_eq!(command.get_program(), "/opt/node");
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
@@ -2246,10 +2344,8 @@ mod tests {
     #[test]
     fn controller_receives_only_the_managed_network_environment() {
         let options = resolved_options();
-        let command = desktop_controller_command(
-            "26.1021.31345",
+        let command = controller_command(
             &options,
-            &runtime_control(),
             &[
                 (
                     OsString::from("HTTPS_PROXY"),
@@ -2346,8 +2442,7 @@ mod tests {
             desktop_controller: PathBuf::from(r"\\?\C:\Program Files\codexhost\controller.mjs"),
             ..resolved_options()
         };
-        let command =
-            desktop_controller_command("26.1021.31345", &options, &runtime_control(), &[]);
+        let command = controller_command(&options, &[]);
 
         assert_eq!(
             command.get_args().nth(1),

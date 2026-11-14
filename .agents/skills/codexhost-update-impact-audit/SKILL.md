@@ -17,6 +17,7 @@ Audit before changing codexhost. Produce a verdict backed by bundle and live-Ren
 - Start with a read-only inspection of an existing codexhost-controlled Desktop. Use a controlled launch or mutate Renderer state only when the required boundary cannot otherwise be verified.
 - Store only sanitized evidence under ignored `.codexhost/update-impact/`. Never persist Thread IDs, request IDs, prompts, transcripts, tokens, credentials, URL query/hash values, or full DOM snapshots.
 - Do not change production code during an audit. Do not claim a live or routing result unless that exact check ran.
+- Voice: maintainer discovery produces candidates; reviewed activation is separate. START acknowledgment is not a connected call. Qualify Chat and Work independently by exact build and platform; do not copy one cell onto another product or OS.
 
 ## 1. Establish the comparison chain
 

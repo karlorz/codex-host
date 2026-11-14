@@ -93,6 +93,8 @@ The report contains bounded version/build, app.asar integrity, Chromium/protocol
 - `possible-impact`
 - `unverified`
 
+The `voice` surface projects reviewed Chat/Work identity for the inspected Desktop version. `discoveryRun: 0` means production/startup did not scan candidate bundles. A reviewed identity is not attended speech, a connected call or Windows attachment. Maintainer candidate analysis is `npm run voice:discovery`.
+
 The tool does not retain prompts, transcripts, input or rendered text, Model values, Thread/Request IDs, credentials, tokens, RPC payloads, complete URLs, user paths, function source, full DOM snapshots, screenshots, complete bundles, or complete `app.asar` files.
 
 ## Supplying Desktop identity

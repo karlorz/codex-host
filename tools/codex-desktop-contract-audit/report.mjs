@@ -18,6 +18,7 @@ export const AUDIT_SURFACE_IDS = Object.freeze([
   "usage-credits",
   "codex-usage-gate",
   "fork",
+  "voice",
 ]);
 
 const verdictRank = Object.freeze({
@@ -444,6 +445,21 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
     reason: forkActive ? "fork-owner-cardinality" : "fork-surface-state-inactive",
     baseline,
   });
+  const voiceObserved = {
+    reviewedChat: contracts.voice?.reviewedChat === true,
+    reviewedWork: contracts.voice?.reviewedWork === true,
+    hashedChat: contracts.voice?.hashedChat === true,
+    discoveryRun: contracts.voice?.discoveryRun === 1 ? 1 : 0,
+  };
+  const voiceReviewed = voiceObserved.reviewedChat || voiceObserved.reviewedWork;
+  const voice = classifySurface({
+    id: "voice",
+    observed: voiceObserved,
+    live: voiceReviewed ? "pass" : "inactive",
+    active: voiceReviewed,
+    reason: voiceReviewed ? "reviewed-voice-identity" : "voice-evidence-not-run",
+    baseline,
+  });
   return [
     composer,
     model,
@@ -456,6 +472,7 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
     usageCredits,
     codexUsageGate,
     fork,
+    voice,
   ];
 }
 

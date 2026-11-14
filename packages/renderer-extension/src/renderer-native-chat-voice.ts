@@ -1,24 +1,27 @@
-import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
-import {
-  NATIVE_CHAT_VOICE_ASSETS,
-  loadNativeChatVoiceModules,
-} from "./renderer-native-chat-voice-assets.js";
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-react-ownership";
 import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
-import {
-  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
-  hashedNativeChatVoiceSupported,
-  loadHashedNativeChatVoiceModules,
-} from "./renderer-hashed-native-chat-voice.js";
 import { rememberVoiceProductExperience } from "./renderer-voice-gateway-wrap.js";
 import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
-import { observeNativeChatVoiceState } from "./renderer-native-chat-voice-state.js";
 import { nativeChatVoiceDraftSelection } from "./renderer-native-chat-voice-selection.js";
 import {
   alignNativeChatVoiceButton,
   hideNativeChatVoiceHomeHeadline,
 } from "./renderer-native-chat-voice-presentation.js";
+import { chatVoiceQualified } from "./renderer-voice-evidence.js";
+import {
+  createNativeChatPrepareBudget,
+  hashedNativeChatGraphReady,
+  loadNativeChatVoiceGraph,
+  mountNativeChatVoiceRuntime,
+  nativeChatVoiceSessionLive,
+  observeNativeChatVoiceConnection,
+  readNativeChatVoiceObservedState,
+  selectNativeChatVoiceAdapter,
+  startNativeChatVoiceSession,
+  type NativeChatVoiceModules as NativeChatVoiceGraph,
+  type NativeChatVoiceStartObservation,
+} from "./renderer-native-chat-voice-runtime.js";
 
 const HOOK_GLOBAL = "__codexhostNativeChatVoiceV1";
 const BUTTON = "data-codexhost-chat-voice-start";
@@ -194,7 +197,7 @@ export function detectNativeChatVoiceBinding(
 interface ChatVoiceHook {
   readonly activeCall?: boolean;
   status: "disabled" | "pending" | "active" | "unsupported";
-  start(): Promise<void>;
+  start(): Promise<NativeChatVoiceStartObservation | undefined>;
   dispose(): void;
 }
 interface ChatVoiceTarget {
@@ -209,7 +212,7 @@ interface ChatVoiceTarget {
 export function startNativeChatVoiceForRequest(
   request: unknown,
   target: object = globalThis,
-): Promise<void> | undefined {
+): Promise<NativeChatVoiceStartObservation | undefined> | undefined {
   if (
     !record(request) ||
     request.productExperience !== "chat" ||
@@ -219,6 +222,20 @@ export function startNativeChatVoiceForRequest(
   const hook = (target as RecordValue)[HOOK_GLOBAL] as ChatVoiceHook | undefined;
   if (hook?.status !== "active") return;
   return hook.start();
+}
+
+/** Overlay re-injection disposes the native hook only when no call is active. */
+export function replaceNativeChatVoiceHookIfInactive(
+  options: {
+    target?: ChatVoiceTarget;
+    importModule?: (url: string) => Promise<RecordValue>;
+  } = {},
+): ChatVoiceHook {
+  const target = options.target ?? (globalThis as unknown as ChatVoiceTarget);
+  const existing = target[HOOK_GLOBAL] as ChatVoiceHook | undefined;
+  if (existing?.activeCall === true) return existing;
+  existing?.dispose?.();
+  return installNativeChatVoiceHook(options);
 }
 
 /** Desktop browser voice owns serialization, authentication, WM, events and cleanup.
@@ -243,17 +260,20 @@ export function installNativeChatVoiceHook(
     },
   });
   if (!config) return unavailable("disabled");
-  const hashed = hashedNativeChatVoiceSupported(config);
-  if (!hashed && !supportsVoiceVersion(NATIVE_CHAT_VOICE_ASSETS, config.desktopVersion))
+  if (!chatVoiceQualified(config)) return unavailable("unsupported");
+  const adapter = selectNativeChatVoiceAdapter(config);
+  const hashed = adapter === "hashed";
+  if (!adapter) {
     return unavailable("unsupported");
+  }
   const doc = target.document;
   if (!doc) return unavailable("unsupported");
   const importModule = options.importModule ?? ((url: string) => import(url));
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let modules:
-    | { initial: RecordValue; shared: RecordValue; start: RecordValue; prewarm: RecordValue }
-    | undefined;
+  let modules: NativeChatVoiceGraph | undefined;
+  const prepareBudget = createNativeChatPrepareBudget();
+  let lastStartObservation: NativeChatVoiceStartObservation | undefined;
   let boundScope: ChatVoiceScope | undefined;
   let mounted:
     { node: unknown; render(binding: NativeChatVoiceBinding): void; dispose(): void } | undefined;
@@ -322,17 +342,28 @@ export function installNativeChatVoiceHook(
     },
     status: "pending",
     async start() {
-      if (disposed || starting) return;
+      if (disposed) return;
       rememberVoiceProductExperience({ productExperience: "chat" }, target);
       const current = findBinding();
-      if (!current || !modules || current.appNode !== mounted?.node)
+      const graph = modules;
+      if (!current || !graph || current.appNode !== mounted?.node)
         throw new Error("Select a ChatGPT conversation to start Chat voice");
+      if (starting) {
+        lastStartObservation = {
+          acknowledged: false,
+          connected: false,
+          conversationMatched: false,
+          productMatched: false,
+          category: "duplicate",
+        };
+        return lastStartObservation;
+      }
       starting = true;
       controller = new AbortController();
       const signal = controller.signal;
       let origin: unknown;
       try {
-        if (modules.initial.Ycr != null) origin = current.scope.get(modules.initial.Ycr);
+        if (graph.initial.Ycr != null) origin = current.scope.get(graph.initial.Ycr);
       } catch {
         chatVoiceDebug("native-chat-selection-failed");
       }
@@ -340,21 +371,68 @@ export function installNativeChatVoiceHook(
       chatVoiceDebug("native-chat-start", {
         hasConversationId: current.backendConversationId !== undefined,
       });
+      let nativeStartTimedOut = false;
       try {
-        // Native start validates availability, navigation, active sessions and START/RESTART
-        // commands, then reads conversation_id via B1n before dispatching START.
-        await Reflect.apply(modules.start.n as (...args: unknown[]) => unknown, undefined, [
-          current.scope,
-          current.props,
-          { event_source: "composer" },
+        lastStartObservation = await startNativeChatVoiceSession({
+          binding: current,
+          modules: graph,
           signal,
-        ]);
-        chatVoiceDebug("native-chat-start-returned");
+          starting: false,
+        });
+        nativeStartTimedOut = lastStartObservation.category === "timeout";
+        if (disposed || signal.aborted) {
+          lastStartObservation = {
+            acknowledged: lastStartObservation.acknowledged,
+            connected: false,
+            conversationMatched: lastStartObservation.conversationMatched,
+            productMatched: lastStartObservation.productMatched,
+            category: "cancelled",
+          };
+          throw new Error("Native Chat voice could not start");
+        }
+        if (
+          lastStartObservation.category === "native-error" ||
+          lastStartObservation.category === "cancelled" ||
+          lastStartObservation.category === "timeout"
+        ) {
+          throw new Error("Native Chat voice could not start");
+        }
+        if (lastStartObservation.category === "start-acknowledged") {
+          const category = await observeNativeChatVoiceConnection({
+            read: () => readNativeChatVoiceObservedState(current.scope, graph.initial, current),
+            signal,
+          });
+          if (disposed) {
+            lastStartObservation = {
+              acknowledged: true,
+              connected: false,
+              conversationMatched: false,
+              productMatched: false,
+              category: "cancelled",
+            };
+            throw new Error("Native Chat voice could not start");
+          }
+          const state = readNativeChatVoiceObservedState(current.scope, graph.initial, current);
+          lastStartObservation = {
+            acknowledged: true,
+            connected: category === "connected",
+            conversationMatched: state?.conversationMatched === true,
+            productMatched: state?.isWorkMode === false,
+            category,
+          };
+          chatVoiceDebug("native-chat-start-observation", {
+            acknowledged: true,
+            connected: lastStartObservation.connected,
+            conversationMatched: lastStartObservation.conversationMatched,
+            productMatched: lastStartObservation.productMatched,
+            category,
+          });
+        }
         try {
           selectDraft = nativeChatVoiceDraftSelection(
             current,
-            modules.initial,
-            modules.shared,
+            graph.initial,
+            graph.shared,
             origin,
             signal,
           );
@@ -362,15 +440,18 @@ export function installNativeChatVoiceHook(
         } catch {
           chatVoiceDebug("native-chat-selection-failed");
         }
-      } catch {
-        chatVoiceDebug("native-chat-start-failed");
-        throw new Error("Native Chat voice could not start");
+        if (lastStartObservation.category !== "connected") {
+          throw new Error("Native Chat voice could not start");
+        }
+        return lastStartObservation;
       } finally {
-        starting = false;
+        if (!nativeStartTimedOut) starting = false;
       }
     },
     dispose() {
       disposed = true;
+      starting = false;
+      controller?.abort();
       if (timer !== undefined) target.clearTimeout(timer);
       release();
       if (target[HOOK_GLOBAL] === handle) Reflect.deleteProperty(target, HOOK_GLOBAL);
@@ -380,12 +461,13 @@ export function installNativeChatVoiceHook(
   const onWaveClick = (): void => {
     rememberVoiceProductExperience({ productExperience: "chat" }, target);
     const run = handle.start();
-    void Promise.resolve(run).catch((error: unknown) => {
+    void Promise.resolve(run).catch(() => {
       chatVoiceDebug("native-chat-start-failed", {
         hashed,
         pending: handle.status !== "active",
-        message:
-          error instanceof Error && error.message ? error.message.slice(0, 80) : "unspecified",
+        acknowledged: lastStartObservation?.acknowledged === true,
+        connected: lastStartObservation?.connected === true,
+        category: lastStartObservation?.category ?? "native-error",
       });
       if (button) button.title = "Chat voice could not start. Try again.";
     });
@@ -484,33 +566,49 @@ export function installNativeChatVoiceHook(
       if (renderFailed) throw new Error();
       if (!modules) {
         const names = loadedAssetNames(doc, target.performance);
-        if (hashed) {
-          if (!names.some((name) => name.includes(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))) {
-            if (showHashedComposerWave()) return;
-            if (Date.now() - started >= 60_000) handle.status = "unsupported";
-            return;
-          }
-          modules = await loadHashedNativeChatVoiceModules(importModule);
-        } else {
-          const assets = selectVoiceAssets(
-            NATIVE_CHAT_VOICE_ASSETS,
-            names,
-            config.desktopVersion,
-            config.desktopPlatform,
-          );
-          if (!assets) {
-            if (Date.now() - started >= 60_000) {
-              handle.status = "unsupported";
-              return;
-            }
-            return;
-          }
-          modules = await loadNativeChatVoiceModules(assets, importModule);
+        const graphKey = `${adapter}:${config.desktopVersion ?? ""}:${config.desktopPlatform ?? ""}`;
+        if (hashed && !hashedNativeChatGraphReady(names)) {
+          if (showHashedComposerWave()) return;
+          if (Date.now() - started >= 60_000) handle.status = "unsupported";
+          return;
         }
-        if (disposed) return;
+        if (!prepareBudget.allow(graphKey)) {
+          if (showHashedComposerWave()) return;
+          if (Date.now() - started >= 60_000) handle.status = "unsupported";
+          return;
+        }
+        try {
+          modules = await loadNativeChatVoiceGraph({
+            adapter,
+            names,
+            config,
+            importModule,
+          });
+        } catch {
+          prepareBudget.fail(graphKey);
+          throw new Error();
+        }
+        if (!modules) {
+          if (Date.now() - started >= 60_000) {
+            handle.status = "unsupported";
+            return;
+          }
+          return;
+        }
+        prepareBudget.reset(graphKey);
+        if (disposed) {
+          modules = undefined;
+          return;
+        }
       }
       const current = findBinding();
       selectDraft?.();
+      if (mounted && current && current.appNode !== mounted.node) {
+        controller?.abort();
+        starting = false;
+        prepareBudget.reset();
+        release();
+      }
       if (starting) {
         if (current) boundScope = current.scope;
         return;
@@ -523,122 +621,40 @@ export function installNativeChatVoiceHook(
         handle.status = "pending";
         return;
       }
-      if (mounted && current.appNode !== mounted.node) release();
+      if (mounted && current.appNode !== mounted.node) {
+        prepareBudget.reset();
+        release();
+      }
       boundScope = current.scope;
       if (!mounted) {
-        const { scope } = current;
-        const initial = modules.initial;
-        const stopObserving = observeNativeChatVoiceState(scope, initial);
-        // Enable the browser runtime, whose native app root owns VoiceRoom and
-        // prewarm. The voice-active flag hOYb.H3 is a different selector.
-        if (hashed) {
-          const previous = scope.get(initial.aT);
-          mounted = {
-            node: current.appNode,
-            render() {},
-            dispose() {
-              stopObserving();
-              if (scope.get(initial.aT) === true) scope.set(initial.aT, previous);
-              chatVoiceDebug("native-chat-unbound");
-            },
-          };
-          scope.set(initial.aT, true);
-          chatVoiceDebug("native-chat-bound", {
-            hashed: true,
-            hasConversationId: current.backendConversationId !== undefined,
-          });
-        } else {
-          const previous = scope.get(initial.aT);
-          const container = doc.createElement("div");
-          container.setAttribute("data-codexhost-chat-voice-prewarm", "");
-          doc.body.append(container);
-          const react = Reflect.apply(modules.shared.FBt as () => unknown, undefined, []) as {
-            createElement(type: unknown, props: unknown, ...children: unknown[]): unknown;
-          };
-          const reactDom = Reflect.apply(modules.shared.PNt as () => unknown, undefined, []) as {
-            createRoot(
-              container: Element,
-              options: { onUncaughtError(): void },
-            ): { render(element: unknown): void; unmount(): void };
-          };
-          const root = reactDom.createRoot(container, {
-            onUncaughtError() {
-              renderFailed = true;
-            },
-          });
-          let appChain: Map<unknown, unknown> | undefined;
-          let composerChain: Map<unknown, unknown> | undefined;
-          mounted = {
-            node: current.appNode,
-            render(next) {
-              if (appChain === next.scope.chain && composerChain === next.composerContext.chain)
-                return;
-              appChain = next.scope.chain;
-              composerChain = next.composerContext.chain;
-              root.render(
-                react.createElement(
-                  next.context,
-                  { value: appChain },
-                  react.createElement(
-                    next.composerContext.context,
-                    { value: composerChain },
-                    react.createElement(
-                      modules?.prewarm.VoiceInstantConnectCacheController,
-                      record(modules?.prewarm.props) ? modules.prewarm.props : null,
-                    ),
-                  ),
-                ),
-              );
-            },
-            dispose() {
-              stopObserving();
-              root.unmount();
-              container.remove();
-              if (scope.get(initial.aT) === true) scope.set(initial.aT, previous);
-              chatVoiceDebug("native-chat-unbound");
-            },
-          };
-          scope.set(initial.aT, true);
-          chatVoiceDebug("native-chat-bound", {
-            hasConversationId: current.backendConversationId !== undefined,
-          });
-        }
+        mounted = mountNativeChatVoiceRuntime({
+          adapter,
+          binding: current,
+          modules,
+          document: doc,
+          onRenderFailed() {
+            renderFailed = true;
+          },
+        });
       }
       mounted.render(current);
-      const voiceState = (
-        Reflect.apply(modules.initial.SPn as (...args: unknown[]) => unknown, undefined, [
-          current.scope,
-        ]) as {
-          getState(): {
-            isVoiceModeActive: boolean;
-            isWorkMode: boolean;
-            conversationId: unknown;
-            hasVoiceSessionStarted?: boolean;
-            server?: { connectionState?: unknown };
-          };
-        }
-      ).getState();
+      const observed = readNativeChatVoiceObservedState(current.scope, modules.initial, current);
       if (
         current.props.conversationId.startsWith("local-chatgpt:") &&
-        voiceState.isVoiceModeActive &&
-        voiceState.isWorkMode === false &&
-        voiceState.conversationId === current.props.conversationId
+        observed?.voiceModeActive &&
+        observed.isWorkMode === false &&
+        observed.conversationMatched
       )
         restoreHeadline ??= hideNativeChatVoiceHomeHeadline(doc);
       else showHeadline();
-      const voiceLive =
-        voiceState.isVoiceModeActive === true &&
-        (voiceState.hasVoiceSessionStarted === true ||
-          voiceState.server?.connectionState === "connected");
       placeComposerWave(
         current.composer,
-        starting || current.props.isStreaming === true || voiceLive,
+        starting || current.props.isStreaming === true || nativeChatVoiceSessionLive(observed),
       );
       handle.status = "active";
-    } catch (error) {
+    } catch {
       chatVoiceDebug("native-chat-binding-failed", {
-        message:
-          error instanceof Error && error.message ? error.message.slice(0, 120) : "unspecified",
+        category: "binding-failed",
       });
       if (showHashedComposerWave()) return;
       release();

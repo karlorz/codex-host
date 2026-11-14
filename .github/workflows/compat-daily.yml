@@ -19,9 +19,18 @@ on:
       - crates/platform/src/asar_metadata.rs
       - crates/platform/src/installation.rs
       - packages/renderer-extension/src/renderer-voice-assets.ts
+      - packages/renderer-extension/src/renderer-voice-profiles.ts
+      - packages/renderer-extension/src/renderer-voice-evidence.ts
+      - packages/renderer-extension/src/renderer-voice-discovery.ts
       - packages/renderer-extension/src/renderer-native-chat-voice-assets.ts
       - packages/renderer-extension/src/renderer-native-chat-voice.ts
+      - packages/renderer-extension/src/renderer-native-chat-voice-runtime.ts
+      - packages/renderer-extension/src/renderer-hashed-native-chat-voice.ts
+      - packages/renderer-extension/src/renderer-hashed-overlay-voice.ts
+      - packages/renderer-extension/src/renderer-hashed-webpack-voice.ts
       - packages/renderer-extension/src/renderer-voice-start-capability.ts
+      - packages/renderer-extension/scripts/build.mjs
+      - tools/voice-discovery/**
   pull_request:
     paths:
       - tools/compat-daily/**
@@ -30,9 +39,18 @@ on:
       - crates/platform/src/asar_metadata.rs
       - crates/platform/src/installation.rs
       - packages/renderer-extension/src/renderer-voice-assets.ts
+      - packages/renderer-extension/src/renderer-voice-profiles.ts
+      - packages/renderer-extension/src/renderer-voice-evidence.ts
+      - packages/renderer-extension/src/renderer-voice-discovery.ts
       - packages/renderer-extension/src/renderer-native-chat-voice-assets.ts
       - packages/renderer-extension/src/renderer-native-chat-voice.ts
+      - packages/renderer-extension/src/renderer-native-chat-voice-runtime.ts
+      - packages/renderer-extension/src/renderer-hashed-native-chat-voice.ts
+      - packages/renderer-extension/src/renderer-hashed-overlay-voice.ts
+      - packages/renderer-extension/src/renderer-hashed-webpack-voice.ts
       - packages/renderer-extension/src/renderer-voice-start-capability.ts
+      - packages/renderer-extension/scripts/build.mjs
+      - tools/voice-discovery/**
 
 permissions:
   contents: read
@@ -222,4 +240,8 @@ jobs:
         run: >
           npx vitest run --config tests/vitest.config.js
           packages/renderer-extension/test/renderer-voice-assets.test.ts
+          packages/renderer-extension/test/renderer-voice-profiles.test.ts
+          packages/renderer-extension/test/renderer-voice-discovery.test.ts
+          packages/renderer-extension/test/renderer-voice-evidence.test.ts
+          packages/renderer-extension/test/renderer-native-chat-voice-runtime.test.ts
           packages/desktop-control/test/cpa-live-voice-hook.test.ts
