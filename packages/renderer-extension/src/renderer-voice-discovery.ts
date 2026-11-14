@@ -196,16 +196,37 @@ function issue(
   return { code, details };
 }
 
-function sourceOwnsAnchor(source: VoiceSourceRecord, anchor: string): boolean {
-  return (
-    (source.callees ?? []).includes(anchor) ||
-    (source.exports ?? []).includes(anchor) ||
-    (source.brands ?? []).includes(anchor)
-  );
+function roleOwnerKey(source: VoiceSourceRecord, opaqueIndex: number): string {
+  const id = source.id ?? "";
+  const digest = source.digest ?? "";
+  if (id && digest) return ["module", id, digest].join("\0");
+  return ["opaque", String(opaqueIndex)].join("\0");
+}
+
+function uniqueMatchingSources(
+  sources: readonly VoiceSourceRecord[],
+  predicate: (source: VoiceSourceRecord) => boolean,
+): VoiceSourceRecord[] {
+  const seen = new Set<string>();
+  const hits: VoiceSourceRecord[] = [];
+  let opaqueIndex = 0;
+  for (const source of sources) {
+    if (!predicate(source)) continue;
+    const key = roleOwnerKey(source, opaqueIndex);
+    if (!(source.id && source.digest)) opaqueIndex += 1;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push(source);
+  }
+  return hits;
+}
+
+function sourceOwnsHashedAnchor(source: VoiceSourceRecord, anchor: string): boolean {
+  return (source.exports ?? []).includes(anchor) || (source.brands ?? []).includes(anchor);
 }
 
 function uniqueAnchorHits(sources: readonly VoiceSourceRecord[], anchor: string): number {
-  return sources.filter((source) => sourceOwnsAnchor(source, anchor)).length;
+  return uniqueMatchingSources(sources, (source) => sourceOwnsHashedAnchor(source, anchor)).length;
 }
 
 function sourceOwnsMatcher(source: VoiceSourceRecord, matcher: VoiceSemanticRoleMatcher): boolean {
@@ -234,7 +255,9 @@ function mapSemanticRoles(
   const roles: Record<string, string> = {};
   const issues: VoiceDiscoveryIssue[] = [];
   for (const matcher of matchers) {
-    const hits = (inventory.sources ?? []).filter((source) => sourceOwnsMatcher(source, matcher));
+    const hits = uniqueMatchingSources(inventory.sources ?? [], (source) =>
+      sourceOwnsMatcher(source, matcher),
+    );
     if (hits.length === 0) issues.push(issue("wrong-role", [matcher.role]));
     else if (hits.length > 1) issues.push(issue("ambiguous-roles", [matcher.role]));
     else {

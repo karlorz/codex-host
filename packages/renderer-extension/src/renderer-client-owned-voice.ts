@@ -1,7 +1,4 @@
-import {
-  CLIENT_OWNED_VOICE_ASSETS,
-  hashedVoiceProfileSupported,
-} from "./renderer-voice-profiles.js";
+import { CLIENT_OWNED_VOICE_ASSETS } from "./renderer-voice-profiles.js";
 export {
   CLIENT_OWNED_VOICE_VERSION,
   CLIENT_OWNED_VOICE_INITIAL_ASSET,
@@ -11,10 +8,16 @@ export {
 } from "./renderer-voice-profiles.js";
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
-import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
+import {
+  chatVoiceQualifiedOnOwner,
+  chatVoiceUserFacingUnavailable,
+  workVoiceLaneEnabled,
+  workVoiceUserFacingUnavailable,
+} from "./renderer-voice-evidence.js";
 import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
+  nativeChatVoicePreferenceAllowsStart,
 } from "./renderer-cpa-live-voice-preference.js";
 import {
   lastVoiceLaunchProductExperience,
@@ -28,6 +31,7 @@ import {
 import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
+  hashedOverlayVoiceSupported,
   installHashedOverlayVoiceHook,
   type ClientOwnedVoiceActivation,
 } from "./renderer-hashed-overlay-voice.js";
@@ -109,7 +113,7 @@ export function installClientOwnedVoiceHook(
   if (existing) return existing;
   const config = readCpaLiveVoiceHookConfig(target);
   if (!config) return { status: "disabled", dispose() {} };
-  if (hashedVoiceProfileSupported(config)) {
+  if (hashedOverlayVoiceSupported(config)) {
     return installHashedOverlayVoiceHook({
       target,
       ...(options.importModule ? { importModule: options.importModule } : {}),
@@ -147,14 +151,24 @@ export function installClientOwnedVoiceHook(
     restore = wrapClientOwnedVoiceFetch(
       client,
       bridge,
-      () =>
-        cpaLiveVoicePreferenceAllowsInstall(target) && workVoiceLaneEnabled(target, "work-codex"),
+      () => cpaLiveVoicePreferenceAllowsInstall(target),
       responseError,
       () => chatLiveVoicePreferenceAllowsOverride(target),
       () => isWorkComposerSurface(target),
       () => isExternalHarnessComposer(target),
       () => false,
       () => workVoiceLaneEnabled(target, "work-grok"),
+      () => workVoiceLaneEnabled(target, "work-codex"),
+      (kind) =>
+        kind === "chat"
+          ? chatVoiceUserFacingUnavailable(target)
+          : workVoiceUserFacingUnavailable(
+              target,
+              kind === "external" ? "work-grok" : "work-codex",
+            ),
+      () => chatVoiceQualifiedOnOwner(target),
+      () => !hashedOverlayVoiceSupported(config),
+      () => nativeChatVoicePreferenceAllowsStart(target),
     );
     activation.wrapperActive = true;
     handle.status = "active";

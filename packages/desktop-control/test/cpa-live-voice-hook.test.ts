@@ -27,11 +27,18 @@ import {
   cpaLiveVoiceOverlayHookAllowed,
   detectInstalledDesktopVersion,
   isolatedQualificationMatchesRuntime,
+  isolatedQualificationPathSet,
+  isIsolatedDesktopPlatform,
+  isIsolatedVoiceQualification,
   overlayVoiceBootstrapPreferred,
   readVoiceIsolatedQualification,
   readVoiceProfilePins,
   readVoiceQualification,
 } from "../src/cpa-live-voice-hook.js";
+
+function isolatedPlatform(): "darwin" | "win32" | "linux" {
+  return isIsolatedDesktopPlatform(process.platform) ? process.platform : "darwin";
+}
 
 let directory: string;
 let environment: NodeJS.ProcessEnv;
@@ -298,6 +305,7 @@ describe("CPA live-voice controller bootstrap", () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       desktopVersion: "26.1106.51428",
       desktopBuild: "26605",
+      desktopPlatform: isolatedPlatform(),
       asarDigest: `sha256:${"ab".repeat(32)}`,
       appPath: "/tmp/candidate/ChatGPT.app",
       implementationRevision: "packaged-revision",
@@ -340,6 +348,85 @@ describe("CPA live-voice controller bootstrap", () => {
     expect(readVoiceIsolatedQualification(directory)?.run).toBe("2026-11-14-isolated");
   });
 
+  it("injects an explicit isolated path set and rejects unknown tokens or production app paths", async () => {
+    const identity = {
+      path: "chat",
+      paths: ["chat", "work-codex"],
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: isolatedPlatform(),
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: "/tmp/candidate/ChatGPT.app",
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated",
+    };
+    await writeFile(
+      path.join(directory, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify(identity),
+    );
+    const matched = cpaLiveVoiceHookBootstrap(
+      {
+        ...environment,
+        [DESKTOP_VERSION_ENV]: "26.1106.51428",
+        [DESKTOP_BUILD_ENV]: "26605",
+        [DESKTOP_ASAR_DIGEST_ENV]: identity.asarDigest,
+        [DESKTOP_APP_PATH_ENV]: identity.appPath,
+      },
+      "26.1106.51428",
+      directory,
+    );
+    expect(matched).toContain('"paths":["chat","work-codex"]');
+    expect(matched).toContain('"voiceEvidence":[]');
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify({ ...identity, paths: ["chat", "*"] }),
+    );
+    expect(readVoiceIsolatedQualification(directory)).toBeUndefined();
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify({ ...identity, appPath: "/Applications/ChatGPT.app" }),
+    );
+    expect(readVoiceIsolatedQualification(directory)).toBeUndefined();
+  });
+
+  it("omits isolated qualification when launcher native identity is incomplete", async () => {
+    const identity = {
+      path: "work-codex",
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: isolatedPlatform(),
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: "/tmp/candidate/ChatGPT.app",
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated",
+    };
+    await writeFile(
+      path.join(directory, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify(identity),
+    );
+    const source = cpaLiveVoiceHookBootstrap(
+      { ...environment, [DESKTOP_VERSION_ENV]: "26.1106.51428" },
+      "26.1106.51428",
+      directory,
+    );
+    expect(source).toContain('"voiceEvidence":[]');
+    expect(source).toContain('"desktopVersion":"26.1106.51428"');
+    expect(source).not.toContain("isolatedQualification");
+    expect(source).not.toContain("/tmp/candidate/ChatGPT.app");
+  });
+
   it("does not grant isolated permission when discovered production identity overrides inherited candidate fields", async () => {
     const isolated = {
       path: "chat" as const,
@@ -347,6 +434,7 @@ describe("CPA live-voice controller bootstrap", () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       desktopVersion: "26.1106.51428",
       desktopBuild: "26605",
+      desktopPlatform: isolatedPlatform(),
       asarDigest: `sha256:${"ab".repeat(32)}`,
       appPath: "/tmp/scratch-candidate/ChatGPT.app",
       implementationRevision: "packaged-revision",
@@ -385,6 +473,7 @@ describe("CPA live-voice controller bootstrap", () => {
       isolatedQualificationMatchesRuntime(isolated, {
         desktopVersion: discoveredProduction[DESKTOP_VERSION_ENV],
         desktopBuild: discoveredProduction[DESKTOP_BUILD_ENV],
+        desktopPlatform: isolatedPlatform(),
         asarDigest: discoveredProduction[DESKTOP_ASAR_DIGEST_ENV],
         appPath: discoveredProduction[DESKTOP_APP_PATH_ENV],
         implementationRevision: "packaged-revision",
@@ -401,6 +490,7 @@ describe("CPA live-voice controller bootstrap", () => {
         expiresAt: new Date(Date.now() - 1).toISOString(),
         desktopVersion: "26.1106.51428",
         desktopBuild: "26605",
+        desktopPlatform: isolatedPlatform(),
         asarDigest: `sha256:${"ab".repeat(32)}`,
         appPath: "/tmp/candidate/ChatGPT.app",
         implementationRevision: "packaged-revision",
@@ -411,5 +501,143 @@ describe("CPA live-voice controller bootstrap", () => {
     await expect(
       readFile(path.join(directory, "voice-isolated-qualification.json"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects unparseable, empty, or expired isolated expiry on the controller boundary", async () => {
+    const valid = {
+      path: "chat",
+      run: "2026-11-14-isolated",
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: isolatedPlatform(),
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: "/tmp/candidate/ChatGPT.app",
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated",
+    };
+    expect(
+      isIsolatedVoiceQualification({
+        ...valid,
+        expiresAt: "not-a-date",
+      }),
+    ).toBe(false);
+    expect(isIsolatedVoiceQualification({ ...valid, expiresAt: "" })).toBe(false);
+    expect(
+      isIsolatedVoiceQualification({
+        ...valid,
+        expiresAt: new Date(Date.now() - 1).toISOString(),
+      }),
+    ).toBe(false);
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify({ ...valid, expiresAt: "tomorrow" }),
+    );
+    expect(readVoiceIsolatedQualification(directory)).toBeUndefined();
+    expect(
+      JSON.parse(await readFile(path.join(directory, "voice-isolated-qualification.json"), "utf8"))
+        .expiresAt,
+    ).toBe("tomorrow");
+    const future = new Date(Date.now() + 60_000).toISOString();
+    expect(isIsolatedVoiceQualification({ ...valid, expiresAt: future })).toBe(true);
+  });
+
+  it("rejects malformed explicit path sets instead of falling back to legacy path", async () => {
+    const valid = {
+      path: "chat" as const,
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: "darwin" as const,
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: "/tmp/candidate/ChatGPT.app",
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated" as const,
+    };
+    expect(isolatedQualificationPathSet({ path: "chat", paths: "bad" })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "chat", paths: { chat: true } })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "chat", paths: ["chat", "chat"] })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "chat", paths: ["chat", "*"] })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "chat", paths: [] })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "work-codex", paths: ["chat"] })).toBeUndefined();
+    expect(isolatedQualificationPathSet({ path: "chat" })).toEqual(["chat"]);
+    expect(isolatedQualificationPathSet({ paths: ["work-codex", "chat"] })).toEqual([
+      "chat",
+      "work-codex",
+    ]);
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify({ ...valid, paths: "bad" }),
+    );
+    expect(readVoiceIsolatedQualification(directory)).toBeUndefined();
+  });
+
+  it("requires an exact desktopPlatform and does not infer a missing platform", async () => {
+    const identity = {
+      path: "chat" as const,
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: "/tmp/candidate/ChatGPT.app",
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated" as const,
+    };
+    const platform = process.platform === "win32" ? "win32" : "darwin";
+    const otherPlatform = platform === "darwin" ? "win32" : "darwin";
+    expect(isIsolatedVoiceQualification(identity)).toBe(false);
+    expect(isIsolatedVoiceQualification({ ...identity, desktopPlatform: platform })).toBe(true);
+    expect(
+      isolatedQualificationMatchesRuntime(
+        { ...identity, desktopPlatform: platform },
+        {
+          desktopVersion: identity.desktopVersion,
+          desktopBuild: identity.desktopBuild,
+          asarDigest: identity.asarDigest,
+          appPath: identity.appPath,
+          implementationRevision: identity.implementationRevision,
+        },
+      ),
+    ).toBe(false);
+    expect(
+      isolatedQualificationMatchesRuntime(
+        { ...identity, desktopPlatform: platform },
+        {
+          desktopVersion: identity.desktopVersion,
+          desktopBuild: identity.desktopBuild,
+          desktopPlatform: otherPlatform,
+          asarDigest: identity.asarDigest,
+          appPath: identity.appPath,
+          implementationRevision: identity.implementationRevision,
+        },
+      ),
+    ).toBe(false);
+    await writeFile(
+      path.join(directory, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify(identity),
+    );
+    expect(readVoiceIsolatedQualification(directory)).toBeUndefined();
+    await writeFile(
+      path.join(directory, "voice-isolated-qualification.json"),
+      JSON.stringify({ ...identity, desktopPlatform: isolatedPlatform() }),
+    );
+    const matched = cpaLiveVoiceHookBootstrap(
+      {
+        ...environment,
+        [DESKTOP_VERSION_ENV]: "26.1106.51428",
+        [DESKTOP_BUILD_ENV]: "26605",
+        [DESKTOP_ASAR_DIGEST_ENV]: identity.asarDigest,
+        [DESKTOP_APP_PATH_ENV]: identity.appPath,
+      },
+      "26.1106.51428",
+      directory,
+    );
+    expect(matched).toContain(`"desktopPlatform":"${process.platform}"`);
+    expect(matched).toContain('"isolatedQualification"');
   });
 });

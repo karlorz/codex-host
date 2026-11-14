@@ -3,7 +3,12 @@ import {
   bindComposerVoiceCapability,
   bindVoiceCapabilitySubscriptions,
   installVoiceCapabilityProjection,
+  isDerivedAccessFactory,
+  isReadableCapabilityFamily,
+  isSignalGateFamily,
+  replayHashedWorkAccessCapability,
   replayVoiceCapability,
+  resolveDerivedAccessAtom,
 } from "../src/renderer-voice-capability.js";
 import {
   applyVoiceGatewayReadiness,
@@ -13,6 +18,14 @@ import {
   CLIENT_OWNED_VOICE_ASSETS,
   rememberVoiceProductExperience,
 } from "../src/renderer-client-owned-voice.js";
+import {
+  HASHED_26_1106_VOICE_EVALUATOR,
+  HASHED_26_1106_VOICE_NATIVE_BYTES,
+  HASHED_OVERLAY_VOICE_ROLES,
+  HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+  HASHED_WEBPACK_VOICE_VERSION,
+  VOICE_CAPABILITY_REASONS,
+} from "../src/renderer-voice-profiles.js";
 
 type Atom = { read(get: (atom: Atom) => unknown): unknown; write?: unknown };
 function fixture(name = "voice.realtime", hostId?: string, autoCommit = true) {
@@ -99,7 +112,62 @@ function fixture(name = "voice.realtime", hostId?: string, autoCommit = true) {
     },
   };
 }
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  Reflect.deleteProperty(globalThis as object, "__codexhostChatVoiceDebug");
+});
+
+/** Minified fragments from hashed 26.1106 `ChYf` / `ZnQ7` / `eFn4` / `zTeN`. */
+const HASHED_26_1106_NATIVE_BYTES = {
+  voiceMetadata:
+    'voice:{accessPolicy:"realtime-voice",statsig:["2380644311"],supportedClients:["electron"]',
+  realtimeConfig:
+    'voice.realtime:{configFeatures:[{key:"in_app_voice",host:"default",clients:["electron","extension"]}]',
+  firstPartyDefault: "requiresFirstPartyInference:!1",
+  accessPolicy:
+    'isCapable:!r&&"allowed"===t.status&&"allowed"===n.status&&!e(p.JW,"1697652030")&&!e(O.pv)',
+  voiceAccess: "Y3:()=>P",
+  unsupportedAuth:
+    '"chatgpt"!==n.authMethod&&"allowed"===s.status?{status:"denied",reason:"unsupported-auth"}:s',
+} as const;
+
+type HashedWorkInputs = {
+  access: { status: string; reason?: string };
+  rollout?: boolean;
+  inAppVoiceEnabled?: boolean;
+  client?: string;
+  workspace?: { status: string };
+};
+
+function hashedWorkGraph(inputs: HashedWorkInputs) {
+  const accessAtom: Atom = { read: () => inputs.access };
+  const atom: Atom = {
+    read: (get) => {
+      const access = get(accessAtom) as { status: string };
+      return {
+        isLoading: false,
+        isError: false,
+        isCapable:
+          (inputs.client ?? "electron") === "electron" &&
+          (inputs.rollout ?? true) &&
+          inputs.inAppVoiceEnabled !== false &&
+          (inputs.workspace ?? { status: "allowed" }).status === "allowed" &&
+          access.status === "allowed",
+      };
+    },
+  };
+  const store = {
+    get: (dependency: Atom): unknown => dependency.read(store.get),
+    sub: () => () => {},
+  };
+  const factory = {
+    scope: { id: Symbol("voice-access") },
+    cache: "derived-access",
+    createSubscriberAtom: () => ({}),
+    resolve: () => accessAtom,
+  };
+  return { store, atom, accessAtom, factory };
+}
 
 describe("voice capability evaluation", () => {
   it("omits only the inference constraint while leaving native gates and other eligibility unchanged", () => {
@@ -139,6 +207,178 @@ describe("voice capability evaluation", () => {
         f.gate,
       ),
     ).toBeNull();
+  });
+  it("does not treat hashed 26.1106 voice.realtime as first-party-inference gated", () => {
+    const gate: Atom = { read: () => true, write: true };
+    const atom: Atom = {
+      read: () => ({ isLoading: false, isError: false, isCapable: false }),
+    };
+    const store = {
+      get: (dependency: Atom): unknown => dependency.read(store.get),
+      sub: () => () => {},
+    };
+    expect(replayVoiceCapability(store, atom, gate)).toBeNull();
+    expect(store.get(atom)).toMatchObject({ isCapable: false });
+    expect(HASHED_26_1106_NATIVE_BYTES.voiceMetadata).toContain(
+      HASHED_26_1106_VOICE_EVALUATOR.accessPolicy,
+    );
+    expect(HASHED_26_1106_NATIVE_BYTES.voiceMetadata).toContain(
+      HASHED_26_1106_VOICE_EVALUATOR.enableStatsig,
+    );
+    expect(HASHED_26_1106_NATIVE_BYTES.realtimeConfig).toContain(
+      HASHED_26_1106_VOICE_EVALUATOR.inAppVoiceFeature,
+    );
+    expect(HASHED_26_1106_NATIVE_BYTES.firstPartyDefault).toContain("!1");
+    expect(HASHED_26_1106_NATIVE_BYTES.unsupportedAuth).toContain(
+      HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+    );
+    expect(HASHED_OVERLAY_VOICE_ROLES.voiceAccessModuleId).toBe("eFn4");
+    expect(HASHED_OVERLAY_VOICE_ROLES.voiceAccessExport).toBe("Y3");
+    expect(HASHED_26_1106_NATIVE_BYTES.voiceAccess).toBe(
+      HASHED_26_1106_VOICE_NATIVE_BYTES.accessExport,
+    );
+    expect(HASHED_26_1106_VOICE_NATIVE_BYTES.accessCtor).toContain("(0,r.un)");
+    expect(HASHED_26_1106_VOICE_NATIVE_BYTES.capabilityCtor).toContain("(0,r.i1)");
+    expect(HASHED_26_1106_VOICE_NATIVE_BYTES.atomLibrary).toContain("un:()=>U.u");
+    expect(HASHED_26_1106_VOICE_NATIVE_BYTES.atomLibrary).toContain("i1:()=>a.i1");
+  });
+  it("treats eFn4.Y3 as a zTeN.un derived atom, not a ChYf.G family", () => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+    });
+    expect(isDerivedAccessFactory(graph.factory)).toBe(true);
+    expect(typeof graph.factory.cache).toBe(HASHED_26_1106_VOICE_EVALUATOR.accessFactoryCache);
+    expect(isDerivedAccessFactory({ ...graph.factory, cache: undefined })).toBe(false);
+    expect(isReadableCapabilityFamily(graph.factory)).toBe(false);
+    expect(isSignalGateFamily(graph.factory)).toBe(false);
+    const familyShaped = {
+      scope: graph.factory.scope,
+      resolve: () => ({ atom: graph.accessAtom }),
+    };
+    expect(isDerivedAccessFactory(familyShaped)).toBe(false);
+    expect(
+      isReadableCapabilityFamily({
+        scope: { id: Symbol() },
+        kind: HASHED_26_1106_VOICE_EVALUATOR.capabilityFamilyKind,
+        read: () => undefined,
+        resolve: () => ({ atom: graph.atom }),
+      }),
+    ).toBe(true);
+    expect(
+      isSignalGateFamily({
+        scope: { id: Symbol() },
+        kind: HASHED_26_1106_VOICE_EVALUATOR.inferenceGateFamilyKind,
+        resolve: () => ({ atom: graph.atom }),
+      }),
+    ).toBe(true);
+    const node = { store: graph.store, familyBindings: new Map() };
+    const chain = new Map();
+    expect(resolveDerivedAccessAtom(graph.factory, node, chain)).toBe(graph.accessAtom);
+    expect(
+      resolveDerivedAccessAtom(
+        {
+          ...graph.factory,
+          resolve: () => ({ atom: graph.accessAtom, read: graph.accessAtom.read }),
+        },
+        node,
+        chain,
+      ),
+    ).toBeUndefined();
+  });
+  it("replays hashed Work Instant Connect only by substituting unsupported-auth access", () => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+    });
+    expect(graph.store.get(graph.atom)).toMatchObject({ isCapable: false });
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toEqual({
+      isLoading: false,
+      isError: false,
+      isCapable: true,
+    });
+    expect(graph.store.get(graph.atom)).toMatchObject({ isCapable: false });
+    expect(graph.store.get(graph.accessAtom)).toMatchObject({
+      status: "denied",
+      reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+    });
+    expect(JSON.stringify(graph.store)).not.toMatch(/model_provider/u);
+  });
+  it.each([
+    ["rollout", { rollout: false }],
+    ["in_app_voice", { inAppVoiceEnabled: false }],
+    ["client", { client: "web" }],
+    ["workspace", { workspace: { status: "denied" } }],
+    ["workspace permission", { access: { status: "denied", reason: "permission_denied" } }],
+  ] as const)("fails closed when unsupported-auth coexists with %s denial", (_label, extra) => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+      ...extra,
+    });
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toBeNull();
+    expect(graph.store.get(graph.atom)).toMatchObject({ isCapable: false });
+  });
+  it("returns native hashed capability when Instant Connect is already capable", () => {
+    const graph = hashedWorkGraph({ access: { status: "allowed" } });
+    const native = graph.store.get(graph.atom);
+    expect(native).toMatchObject({ isCapable: true });
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toEqual(
+      native,
+    );
+  });
+  it.each([
+    ["loading", { isLoading: true, isError: false, isCapable: false }],
+    ["error", { isLoading: false, isError: true, isCapable: false }],
+  ] as const)("fails closed hashed replay on native %s", (_label, native) => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+    });
+    graph.atom.read = (get) => {
+      get(graph.accessAtom);
+      return native;
+    };
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toBeNull();
+  });
+  it("fails closed when hashed access read throws", () => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+    });
+    graph.accessAtom.read = () => {
+      throw new Error("access unavailable");
+    };
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toBeNull();
+  });
+  it("fails closed when native-before does not match the unsubstituting walk", () => {
+    const graph = hashedWorkGraph({
+      access: {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+    });
+    let calls = 0;
+    graph.atom.read = (get) => {
+      get(graph.accessAtom);
+      calls += 1;
+      return { isLoading: false, isError: false, isCapable: calls > 1 };
+    };
+    expect(replayHashedWorkAccessCapability(graph.store, graph.atom, graph.accessAtom)).toBeNull();
+    expect(graph.store.get(graph.accessAtom)).toMatchObject({
+      status: "denied",
+      reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+    });
   });
 });
 
@@ -238,6 +478,65 @@ describe("owned composer subscription", () => {
       bindComposerVoiceCapability(f.composer, f.family, f.family, () => true, true),
     ).toThrow();
     expect(f.subscriber.getSnapshot).toBe(f.original);
+  });
+
+  it("projects hashed Work unsupported-auth without writing native capability atoms", () => {
+    const f = fixture();
+    const accessAtom: Atom = {
+      read: () => ({
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      }),
+    };
+    f.atom.read = (get) => ({
+      isLoading: false,
+      isError: false,
+      isCapable: (get(accessAtom) as { status: string }).status === "allowed",
+    });
+    const binding = bindComposerVoiceCapability(
+      f.composer,
+      f.family,
+      f.family,
+      () => true,
+      false,
+      ({ store, atom }) => replayHashedWorkAccessCapability(store, atom, accessAtom),
+    );
+    expect(f.instance.getSnapshot()).toMatchObject({ isCapable: true });
+    expect(f.store.get(f.atom)).toMatchObject({ isCapable: false });
+    expect(f.store.get(accessAtom)).toMatchObject({
+      status: "denied",
+      reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+    });
+    expect(JSON.stringify(f.store)).not.toMatch(/model_provider/u);
+    binding.dispose();
+    expect(f.instance.getSnapshot).toBe(f.original);
+  });
+
+  it("keeps hashed Work native when unsupported-auth coexists with a rollout denial", () => {
+    const f = fixture();
+    const accessAtom: Atom = {
+      read: () => ({
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      }),
+    };
+    const rollout = false;
+    f.atom.read = (get) => ({
+      isLoading: false,
+      isError: false,
+      isCapable: rollout && (get(accessAtom) as { status: string }).status === "allowed",
+    });
+    const binding = bindComposerVoiceCapability(
+      f.composer,
+      f.family,
+      f.family,
+      () => true,
+      false,
+      ({ store, atom }) => replayHashedWorkAccessCapability(store, atom, accessAtom),
+    );
+    expect(f.instance.getSnapshot()).toMatchObject({ isCapable: false });
+    expect(f.store.get(f.atom)).toMatchObject({ isCapable: false });
+    binding.dispose();
   });
 
   it("does not project a capability on an ancestor outside the Composer", () => {
@@ -642,10 +941,234 @@ describe("version and runtime qualification", () => {
     },
   );
 
+  it("replaces a capability hook that lacks the current implementation revision", async () => {
+    vi.useFakeTimers();
+    const f = target();
+    const first = installVoiceCapabilityProjection(f);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.status).toBe("active");
+    delete (first as { revision?: string }).revision;
+    const second = installVoiceCapabilityProjection(f);
+    expect(second).not.toBe(first);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(second.status).toBe("active");
+    expect(f.f.instance.getSnapshot()).toMatchObject({ isCapable: true });
+    second.dispose();
+  });
+
   it("fails closed on an unaudited Desktop version", () => {
     const f = target();
     f.target.__codexhostCpaLiveVoiceHookV1.desktopVersion = "unknown";
     expect(installVoiceCapabilityProjection(f).status).toBe("unsupported");
+  });
+
+  function hashedWebpack(
+    access: { status: string; reason?: string },
+    options: {
+      rollout?: boolean;
+      inAppVoiceEnabled?: boolean;
+      client?: string;
+      workspace?: { status: string };
+      accessShape?: "derived" | "family" | "missing";
+    } = {},
+  ) {
+    const f = target();
+    f.target.__codexhostCpaLiveVoiceHookV1.desktopVersion = HASHED_WEBPACK_VOICE_VERSION;
+    f.target.__codexhostCpaLiveVoiceHookV1.desktopPlatform = "darwin";
+    f.target.performance.getEntriesByType = () =>
+      [{ name: `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` }] as PerformanceEntry[];
+    const accessAtom: Atom = { read: () => access };
+    Object.assign(f.f.family, {
+      kind: HASHED_26_1106_VOICE_EVALUATOR.capabilityFamilyKind,
+      read: () => undefined,
+    });
+    const gatesFamily = {
+      scope: { id: Symbol("inference-gate") },
+      kind: HASHED_26_1106_VOICE_EVALUATOR.inferenceGateFamilyKind,
+      resolve: () => ({ atom: f.f.gate }),
+    };
+    f.f.atom.read = (get) => ({
+      isLoading: false,
+      isError: false,
+      isCapable:
+        (options.client ?? "electron") === "electron" &&
+        (options.rollout ?? true) &&
+        options.inAppVoiceEnabled !== false &&
+        (options.workspace ?? { status: "allowed" }).status === "allowed" &&
+        (get(accessAtom) as { status: string }).status === "allowed",
+    });
+    const accessExport =
+      options.accessShape === "family"
+        ? { scope: { id: Symbol("voice-access") }, resolve: () => ({ atom: accessAtom }) }
+        : {
+            scope: { id: Symbol("voice-access") },
+            cache: "derived-access",
+            createSubscriberAtom: () => ({}),
+            resolve: () => accessAtom,
+          };
+    const webpackRequire = Object.assign(
+      (id: string) => {
+        if (id === HASHED_OVERLAY_VOICE_ROLES.capabilityModuleId)
+          return { [HASHED_OVERLAY_VOICE_ROLES.capabilityExport]: f.f.family };
+        if (id === HASHED_OVERLAY_VOICE_ROLES.inferenceGateModuleId)
+          return { [HASHED_OVERLAY_VOICE_ROLES.inferenceGateExport]: gatesFamily };
+        if (
+          id === HASHED_OVERLAY_VOICE_ROLES.voiceAccessModuleId &&
+          options.accessShape !== "missing"
+        )
+          return { [HASHED_OVERLAY_VOICE_ROLES.voiceAccessExport]: accessExport };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    const importModule = vi.fn(async (url: string) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+        return { __webpack_require__: webpackRequire };
+      throw new Error(url);
+    });
+    return { f, importModule };
+  }
+
+  it("projects hashed 26.1106 Work from webpack families without a named initial import", async () => {
+    vi.useFakeTimers();
+    const { f, importModule } = hashedWebpack({
+      status: "denied",
+      reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+    });
+    const hook = installVoiceCapabilityProjection({ ...f, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("active");
+      expect(hook).toMatchObject({ reason: "access-replay" });
+      expect(VOICE_CAPABILITY_REASONS).toContain("access-replay");
+      expect(f.f.instance.getSnapshot()).toMatchObject({ isCapable: true });
+      expect(f.f.store.get(f.f.atom)).toMatchObject({ isCapable: false });
+      expect(JSON.stringify(f.f.store)).not.toMatch(/model_provider/u);
+      expect(importModule).toHaveBeenCalledWith(
+        `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}`,
+      );
+      expect(importModule.mock.calls.some((call) => String(call[0]).includes("app-initial"))).toBe(
+        false,
+      );
+      const ring = (
+        globalThis as { __codexhostChatVoiceDebug?: { event: string; reason: string }[] }
+      ).__codexhostChatVoiceDebug;
+      expect(
+        ring?.some(
+          (entry) => entry.event === "voice-capability" && entry.reason === "access-replay",
+        ),
+      ).toBe(true);
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("keeps hashed 26.1106 Work native-ineligible when voice access is not unsupported-auth", async () => {
+    vi.useFakeTimers();
+    const { f, importModule } = hashedWebpack({
+      status: "denied",
+      reason: "permission_denied",
+    });
+    const hook = installVoiceCapabilityProjection({ ...f, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("native-ineligible");
+      expect(hook).toMatchObject({ reason: "other-denial" });
+      expect(f.f.instance.getSnapshot()).toMatchObject({ isCapable: false });
+      expect(f.f.store.get(f.f.atom)).toMatchObject({ isCapable: false });
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it.each([
+    ["rollout", { rollout: false }],
+    ["in_app_voice", { inAppVoiceEnabled: false }],
+    ["client", { client: "web" }],
+    ["workspace", { workspace: { status: "denied" } }],
+  ] as const)(
+    "keeps hashed 26.1106 Work native-ineligible when unsupported-auth coexists with %s denial",
+    async (_label, extra) => {
+      vi.useFakeTimers();
+      const { f, importModule } = hashedWebpack(
+        {
+          status: "denied",
+          reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+        },
+        extra,
+      );
+      const hook = installVoiceCapabilityProjection({ ...f, importModule });
+      try {
+        await vi.advanceTimersByTimeAsync(1);
+        expect(hook.status).toBe("native-ineligible");
+        expect(hook).toMatchObject({ reason: "other-denial" });
+        expect(f.f.instance.getSnapshot()).toMatchObject({ isCapable: false });
+        expect(f.f.store.get(f.f.atom)).toMatchObject({ isCapable: false });
+      } finally {
+        hook.dispose();
+      }
+    },
+  );
+
+  it("rejects a synthetic family fixture for eFn4.Y3", async () => {
+    vi.useFakeTimers();
+    const { f, importModule } = hashedWebpack(
+      {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+      { accessShape: "family" },
+    );
+    const hook = installVoiceCapabilityProjection({ ...f, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("unsupported");
+      expect(hook).toMatchObject({ reason: "access-shape" });
+      expect(f.f.instance.getSnapshot).toBe(f.f.original);
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("does not project hashed 26.1106 Work from first-party inference omit", async () => {
+    vi.useFakeTimers();
+    const { f, importModule } = hashedWebpack(
+      {
+        status: "denied",
+        reason: HASHED_26_1106_VOICE_EVALUATOR.unsupportedAuthReason,
+      },
+      { accessShape: "missing" },
+    );
+    const hook = installVoiceCapabilityProjection({ ...f, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("unsupported");
+      expect(hook).toMatchObject({ reason: "access-shape" });
+      expect(f.f.instance.getSnapshot).toBe(f.f.original);
+      expect(f.f.store.get(f.f.atom)).toMatchObject({ isCapable: false });
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("keeps hashed 26.1106 Work pending until the webpack runtime asset is present", async () => {
+    vi.useFakeTimers();
+    const f = target();
+    f.target.__codexhostCpaLiveVoiceHookV1.desktopVersion = HASHED_WEBPACK_VOICE_VERSION;
+    f.target.__codexhostCpaLiveVoiceHookV1.desktopPlatform = "darwin";
+    f.target.performance.getEntriesByType = () => [];
+    const importModule = vi.fn(async (url: string) => {
+      throw new Error(url);
+    });
+    const hook = installVoiceCapabilityProjection({ ...f, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hook.status).toBe("pending");
+      expect(importModule).not.toHaveBeenCalled();
+      expect(f.f.instance.getSnapshot).toBe(f.f.original);
+    } finally {
+      hook.dispose();
+    }
   });
 
   it("uses the version pin when resource timing is empty", async () => {

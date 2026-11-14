@@ -44,12 +44,27 @@ export type VoiceQualificationFile = {
   reviewedEvidence: unknown[];
 };
 
+export const ISOLATED_VOICE_PATHS = ["chat", "work-codex", "work-grok"] as const;
+export const ISOLATED_DESKTOP_PLATFORMS = ["darwin", "win32", "linux"] as const;
+export const PRODUCTION_DESKTOP_APP_PATH = "/Applications/ChatGPT.app";
+const PRODUCTION_WINDOWS_APPX_PATH = /(?:^|[\\/])WindowsApps[\\/]OpenAI\.(?:Codex|ChatGPT)_/i;
+
+export function isProductionDesktopAppPath(appPath: string | undefined): boolean {
+  if (typeof appPath !== "string" || appPath.length === 0) return false;
+  if (appPath === PRODUCTION_DESKTOP_APP_PATH) return true;
+  return PRODUCTION_WINDOWS_APPX_PATH.test(appPath);
+}
+export type IsolatedVoicePath = (typeof ISOLATED_VOICE_PATHS)[number];
+export type IsolatedDesktopPlatform = (typeof ISOLATED_DESKTOP_PLATFORMS)[number];
+
 export type IsolatedVoiceQualificationFile = {
-  path: "chat" | "work-codex" | "work-grok";
+  path?: IsolatedVoicePath;
+  paths?: IsolatedVoicePath[];
   run: string;
   expiresAt: string;
   desktopVersion: string;
   desktopBuild: string;
+  desktopPlatform: IsolatedDesktopPlatform;
   asarDigest: string;
   appPath: string;
   implementationRevision: string;
@@ -65,13 +80,71 @@ function envNonEmpty(environment: NodeJS.ProcessEnv, key: string): string | unde
   return value ? value : undefined;
 }
 
-function isIsolatedVoiceQualificationFile(value: unknown): value is IsolatedVoiceQualificationFile {
+function isIsolatedVoicePath(value: unknown): value is IsolatedVoicePath {
+  return value === "chat" || value === "work-codex" || value === "work-grok";
+}
+
+export function isIsolatedDesktopPlatform(value: unknown): value is IsolatedDesktopPlatform {
+  return value === "darwin" || value === "win32" || value === "linux";
+}
+
+/** Finite parseable expiry. Unparseable strings are not treated as future dates. */
+export function isolatedQualificationExpiresAtMs(expiresAt: unknown): number | undefined {
+  if (typeof expiresAt !== "string" || expiresAt.length === 0) return undefined;
+  const parsed = Date.parse(expiresAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Explicit `paths` must be a nonempty array of distinct known paths.
+ * Malformed `paths` does not fall back to legacy `path`.
+ * Keep in sync with `packages/renderer-extension/src/renderer-cpa-live-voice-config.ts`.
+ */
+export function isolatedQualificationPathSet(value: unknown): IsolatedVoicePath[] | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const pathsPresent = record.paths !== undefined;
+  const pathPresent = record.path !== undefined;
+  let listed: IsolatedVoicePath[] | undefined;
+  if (pathsPresent) {
+    const rawPaths = record.paths;
+    if (!Array.isArray(rawPaths) || rawPaths.length === 0) return undefined;
+    if (rawPaths.some((path) => !isIsolatedVoicePath(path))) return undefined;
+    if (new Set(rawPaths).size !== rawPaths.length) return undefined;
+    listed = ISOLATED_VOICE_PATHS.filter((path) => rawPaths.includes(path));
+    if (listed.length !== rawPaths.length) return undefined;
+  } else if (pathPresent) {
+    if (!isIsolatedVoicePath(record.path)) return undefined;
+    listed = [record.path];
+  } else {
+    return undefined;
+  }
+  if (pathPresent) {
+    if (!isIsolatedVoicePath(record.path) || !listed.includes(record.path)) return undefined;
+  }
+  return listed;
+}
+
+export function isolatedQualificationPaths(
+  isolated: Pick<IsolatedVoiceQualificationFile, "path" | "paths">,
+): IsolatedVoicePath[] {
+  return isolatedQualificationPathSet(isolated) ?? [];
+}
+
+export function isIsolatedVoiceQualification(
+  value: unknown,
+  now: number = Date.now(),
+): value is IsolatedVoiceQualificationFile {
   if (value === null || typeof value !== "object") return false;
   const parsed = value as IsolatedVoiceQualificationFile;
+  const paths = isolatedQualificationPathSet(parsed);
+  if (!paths || paths.length === 0) return false;
+  if (isProductionDesktopAppPath(parsed.appPath)) return false;
+  const expiresAtMs = isolatedQualificationExpiresAtMs(parsed.expiresAt);
+  if (expiresAtMs === undefined || expiresAtMs <= now) return false;
   return (
-    (parsed.path === "chat" || parsed.path === "work-codex" || parsed.path === "work-grok") &&
     isNonEmptyString(parsed.run) &&
-    isNonEmptyString(parsed.expiresAt) &&
+    isIsolatedDesktopPlatform(parsed.desktopPlatform) &&
     isNonEmptyString(parsed.desktopVersion) &&
     isNonEmptyString(parsed.desktopBuild) &&
     isNonEmptyString(parsed.asarDigest) &&
@@ -121,15 +194,20 @@ export function readVoiceIsolatedQualification(
   const file = path.join(overlayDir, VOICE_ISOLATED_QUALIFICATION_FILE);
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (!isIsolatedVoiceQualificationFile(parsed)) return undefined;
-    if (Date.parse(parsed.expiresAt) <= now) {
-      try {
-        unlinkSync(file);
-      } catch {
-        // Expired isolated files are best-effort cleanup.
+    if (parsed !== null && typeof parsed === "object") {
+      const expiresAtMs = isolatedQualificationExpiresAtMs(
+        (parsed as { expiresAt?: unknown }).expiresAt,
+      );
+      if (expiresAtMs !== undefined && expiresAtMs <= now) {
+        try {
+          unlinkSync(file);
+        } catch {
+          // Expired isolated files are best-effort cleanup.
+        }
+        return undefined;
       }
-      return undefined;
     }
+    if (!isIsolatedVoiceQualification(parsed, now)) return undefined;
     return parsed;
   } catch {
     return undefined;
@@ -142,11 +220,19 @@ export function isolatedQualificationMatchesRuntime(
   identity: {
     desktopVersion?: string;
     desktopBuild?: string;
+    desktopPlatform?: string;
     asarDigest?: string;
     appPath?: string;
     implementationRevision?: string;
   },
 ): boolean {
+  if (isProductionDesktopAppPath(isolated.appPath) || isProductionDesktopAppPath(identity.appPath))
+    return false;
+  if (
+    !isIsolatedDesktopPlatform(isolated.desktopPlatform) ||
+    isolated.desktopPlatform !== identity.desktopPlatform
+  )
+    return false;
   return (
     isolated.desktopVersion === identity.desktopVersion &&
     isolated.desktopBuild === identity.desktopBuild &&
@@ -278,6 +364,7 @@ export function cpaLiveVoiceHookBootstrap(
   const isolatedQualification =
     isolated &&
     isolatedQualificationMatchesRuntime(isolated, {
+      desktopPlatform: process.platform,
       ...(version === undefined ? {} : { desktopVersion: version }),
       ...(desktopBuild === undefined ? {} : { desktopBuild }),
       ...(asarDigest === undefined ? {} : { asarDigest }),

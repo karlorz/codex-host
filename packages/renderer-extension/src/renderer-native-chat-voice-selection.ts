@@ -18,7 +18,6 @@ export function nativeChatVoiceDraftSelection(
   const navigate = initial.Nir;
   const conversationPath = shared.Vot;
   if (
-    binding.backendConversationId !== undefined ||
     !draft.startsWith("local-chatgpt:") ||
     !UUID.test(draft.slice("local-chatgpt:".length)) ||
     origin == null ||
@@ -84,13 +83,24 @@ export function nativeChatVoiceDraftSelection(
         chatVoiceDebug("native-chat-selection-startup-id-adopted");
       }
       sessionStartedSeen ||= state.hasVoiceSessionStarted;
-      if (state.isWorkMode !== false || state.conversationId !== draft) {
+      const backend = binding.scope.get(initial.B1n, draft);
+      const adopted = typeof backend === "string" && UUID.test(backend) ? backend : undefined;
+      if (state.isWorkMode !== false) {
         finished = true;
         return;
       }
+      if (state.conversationId !== draft && state.conversationId !== adopted) {
+        if (
+          adopted !== undefined ||
+          typeof state.conversationId !== "string" ||
+          !UUID.test(state.conversationId)
+        ) {
+          finished = true;
+          return;
+        }
+      }
       if (!state.hasVoiceSessionStarted || state.server.connectionState !== "connected") return;
-      const backend = binding.scope.get(initial.B1n, draft);
-      if (typeof backend !== "string" || !UUID.test(backend)) return;
+      if (!adopted) return;
       const mapping = binding.scope.get(initial.n0n, draft);
       const currentNode = binding.scope.get(initial.Y1n, draft);
       if (
@@ -100,10 +110,10 @@ export function nativeChatVoiceDraftSelection(
         !(mapping as Record<string, { message?: unknown }>)[currentNode]?.message
       )
         return;
-      // The voice navigation guard accepts its client draft. The page resolves the
-      // adopted alias from the same store; never route using earlyServerThreadId.
+      // Native text Chat opens `/c/{adopted}`; the draft locator is still Home.
+      // Wait for the transcript store mapping, never earlyServerThreadId.
       finished = true;
-      const path = Reflect.apply(conversationPath, undefined, [draft]);
+      const path = Reflect.apply(conversationPath, undefined, [adopted]);
       const accepted = Reflect.apply(navigate, undefined, [binding.scope, path]);
       void Promise.resolve(accepted).then(
         (result) =>

@@ -25,6 +25,81 @@ function readyBinding() {
   };
 }
 
+function overlayFreezeSource(input: {
+  revision: string;
+  path?: string;
+  paths?: string[];
+  run?: string;
+  expiresAt?: string;
+  desktopPlatform?: string;
+  appPath?: string;
+  wrapper?: string;
+}): string {
+  const expiresAt = input.expiresAt ?? "2026-11-15T07:40:00.000Z";
+  const run = input.run ?? "run-1";
+  const appPath = input.appPath ?? "/scratch/ChatGPT.app";
+  const path = input.path ?? input.paths?.[0] ?? "chat";
+  return `globalThis.__codexhostCpaLiveVoiceHookV1 = Object.freeze(${JSON.stringify({
+    enabled: true,
+    implementationRevision: input.revision,
+    desktopAppPath: appPath,
+    isolatedQualification: {
+      path,
+      ...(input.paths ? { paths: input.paths } : {}),
+      run,
+      expiresAt,
+      ...(input.desktopPlatform ? { desktopPlatform: input.desktopPlatform } : {}),
+    },
+  })});\n${input.wrapper ?? "wrapper"}`;
+}
+
+function overlayLiveSnapshot(input: {
+  revision: string;
+  path: string;
+  call: "idle" | "active" | "unknown";
+  run?: string;
+  expiresAt?: string;
+  desktopPlatform?: string;
+  appPath?: string;
+}) {
+  return {
+    enabled: true,
+    revision: input.revision,
+    isolatedPath: input.path,
+    isolatedRun: input.run ?? "run-1",
+    isolatedExpiresAt: input.expiresAt ?? "2026-11-15T07:40:00.000Z",
+    ...(input.desktopPlatform ? { isolatedPlatform: input.desktopPlatform } : {}),
+    appPath: input.appPath ?? "/scratch/ChatGPT.app",
+    call: input.call,
+  };
+}
+
+async function overlayControlSession(overlay: ReturnType<typeof rendererClient>, source: string) {
+  const primary = rendererClient();
+  const session = await createRendererCdpControlSession({
+    rendererCdpEndpoint: "http://127.0.0.1:43123",
+    rendererSource: "production renderer",
+    overlayHookSource: "full overlay hook IIFE",
+    overlayVoiceBootstrapSource: source,
+    pollIntervalMs: 1,
+    timeoutMs: 100,
+    operations: {
+      listTargets: vi.fn(async () => [
+        target("page-1"),
+        target("overlay", "app://-/index.html?initialRoute=%2Favatar-overlay"),
+      ]),
+      connect: vi.fn(async (webSocketDebuggerUrl: string) =>
+        webSocketDebuggerUrl.includes("overlay") ? overlay : primary,
+      ),
+      installDraftPrewarmPolicy: vi.fn(async () => ({
+        state: "ready" as const,
+        reason: "owned-request-bridge" as const,
+      })),
+    },
+  });
+  return { session, primary };
+}
+
 function rendererClient(binding = readyBinding()) {
   const commands: Array<{ method: string; params?: Record<string, unknown> }> = [];
   const evaluateSpy = vi.fn(async (expression: string) => {
@@ -204,7 +279,7 @@ describe("Renderer CDP Control Session", () => {
   it("injects the hook-only source into the avatar overlay page", async () => {
     const primary = rendererClient();
     const overlay = rendererClient();
-    overlay.evaluateSpy.mockResolvedValue(false);
+    overlay.evaluateSpy.mockResolvedValue({ enabled: false, call: "idle" });
     const session = await createRendererCdpControlSession({
       rendererCdpEndpoint: "http://127.0.0.1:43123",
       rendererSource: "production renderer",
@@ -249,7 +324,7 @@ describe("Renderer CDP Control Session", () => {
   it("evaluates the overlay voice bootstrap on the current document instead of the full hook IIFE", async () => {
     const primary = rendererClient();
     const overlay = rendererClient();
-    overlay.evaluateSpy.mockResolvedValue(false);
+    overlay.evaluateSpy.mockResolvedValue({ enabled: false, call: "idle" });
     const session = await createRendererCdpControlSession({
       rendererCdpEndpoint: "http://127.0.0.1:43123",
       rendererSource: "production renderer",
@@ -337,7 +412,7 @@ describe("Renderer CDP Control Session", () => {
   it("re-injects the hook-only overlay bundle when a reload drops the hook", async () => {
     const primary = rendererClient();
     const overlay = rendererClient();
-    overlay.evaluateSpy.mockResolvedValue(false);
+    overlay.evaluateSpy.mockResolvedValue({ enabled: false, call: "idle" });
     const session = await createRendererCdpControlSession({
       rendererCdpEndpoint: "http://127.0.0.1:43123",
       rendererSource: "production renderer",
@@ -377,13 +452,429 @@ describe("Renderer CDP Control Session", () => {
     session.close();
   });
 
+  it("evaluates an idle overlay once, then skips while identity and source digest match", async () => {
+    const overlay = rendererClient();
+    const source = overlayFreezeSource({ revision: "rev-a", path: "chat" });
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    const { session } = await overlayControlSession(overlay, source);
+    expect(
+      overlay.evaluateSpy.mock.calls.some(([expression]) =>
+        String(expression).includes("__codexhostOverlayHookSnapshot"),
+      ),
+    ).toBe(true);
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source } },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: source, awaitPromise: true },
+      },
+    ]);
+    overlay.commands.length = 0;
+    await session.ensureInstalled();
+    expect(overlay.commands).toEqual([]);
+    session.close();
+  });
+
+  it("binds the voice Host before each session's first Runtime.enable and does not disable Runtime", async () => {
+    const overlay = rendererClient();
+    const source = overlayFreezeSource({ revision: "rev-a", path: "work-codex" });
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "work-codex", call: "idle" }),
+    );
+    const primary = rendererClient();
+    const voiceHost = {
+      owner: "owner-1",
+      generation: 1,
+      request: vi.fn(async () => ({ ok: true })),
+    };
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: "production renderer",
+      overlayHookSource: "full overlay hook IIFE",
+      overlayVoiceBootstrapSource: source,
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      voiceHost,
+      operations: {
+        listTargets: vi.fn(async () => [
+          target("page-1"),
+          target("overlay", "app://-/index.html?initialRoute=/avatar-overlay"),
+        ]),
+        connect: vi.fn(async (webSocketDebuggerUrl: string) =>
+          webSocketDebuggerUrl.includes("overlay") ? overlay : primary,
+        ),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+    for (const client of [primary, overlay]) {
+      const enableAt = client.commands.findIndex((item) => item.method === "Runtime.enable");
+      const bindAt = client.commands.findIndex((item) => item.method === "Runtime.addBinding");
+      expect(bindAt).toBeGreaterThanOrEqual(0);
+      expect(enableAt).toBeGreaterThan(bindAt);
+      expect(client.commands.some((item) => item.method === "Runtime.disable")).toBe(false);
+    }
+    session.close();
+  });
+
+  it("re-evaluates an idle overlay when source digest changes with a stable identity", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "work-codex", call: "idle" }),
+    );
+    const firstSource = overlayFreezeSource({
+      revision: "rev-a",
+      path: "work-codex",
+      wrapper: "wrap-a",
+    });
+    const first = await overlayControlSession(overlay, firstSource);
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: firstSource, awaitPromise: true },
+    });
+    first.session.close();
+    overlay.commands.length = 0;
+    const secondSource = overlayFreezeSource({
+      revision: "rev-a",
+      path: "work-codex",
+      wrapper: "wrap-b",
+    });
+    const second = await overlayControlSession(overlay, secondSource);
+    expect(overlay.commands).toContainEqual({
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source: secondSource },
+    });
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: secondSource, awaitPromise: true },
+    });
+    second.session.close();
+  });
+
+  it.each(["active", "unknown"] as const)(
+    "retries a staged overlay refresh once an %s call becomes idle",
+    async (call) => {
+      const overlay = rendererClient();
+      overlay.evaluateSpy.mockResolvedValue(
+        overlayLiveSnapshot({ revision: "rev-a", path: "chat", call }),
+      );
+      const source = overlayFreezeSource({ revision: "rev-b", path: "work-codex" });
+      const { session } = await overlayControlSession(overlay, source);
+      expect(
+        overlay.commands.some(
+          ({ method, params }) => method === "Runtime.evaluate" && params?.expression === source,
+        ),
+      ).toBe(false);
+      overlay.commands.length = 0;
+      overlay.evaluateSpy.mockResolvedValue(
+        overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+      );
+      await session.ensureInstalled();
+      expect(overlay.commands).toContainEqual({
+        method: "Runtime.evaluate",
+        params: { expression: source, awaitPromise: true },
+      });
+      session.close();
+    },
+  );
+
+  it.each(["active", "unknown"] as const)(
+    "retries a digest-only overlay refresh once an %s call becomes idle",
+    async (call) => {
+      const overlay = rendererClient();
+      overlay.evaluateSpy.mockResolvedValue(
+        overlayLiveSnapshot({ revision: "rev-a", path: "work-codex", call }),
+      );
+      const source = overlayFreezeSource({
+        revision: "rev-a",
+        path: "work-codex",
+        wrapper: "wrap-b",
+      });
+      const { session } = await overlayControlSession(overlay, source);
+      expect(
+        overlay.commands.some(
+          ({ method, params }) => method === "Runtime.evaluate" && params?.expression === source,
+        ),
+      ).toBe(false);
+      overlay.commands.length = 0;
+      overlay.evaluateSpy.mockResolvedValue(
+        overlayLiveSnapshot({ revision: "rev-a", path: "work-codex", call: "idle" }),
+      );
+      await session.ensureInstalled();
+      expect(overlay.commands).toContainEqual({
+        method: "Runtime.evaluate",
+        params: { expression: source, awaitPromise: true },
+      });
+      session.close();
+    },
+  );
+
+  it("defers current overlay eval when snapshot inspection fails, then retries once idle", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockRejectedValue(new Error("snapshot inspection failed"));
+    const source = overlayFreezeSource({ revision: "rev-b", path: "work-codex" });
+    const { session } = await overlayControlSession(overlay, source);
+    expect(
+      overlay.commands.some(
+        ({ method, params }) => method === "Runtime.evaluate" && params?.expression === source,
+      ),
+    ).toBe(false);
+    expect(overlay.commands).toContainEqual({
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source },
+    });
+    overlay.commands.length = 0;
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    await session.ensureInstalled();
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: source, awaitPromise: true },
+    });
+    session.close();
+  });
+
+  it("does not treat a boolean overlay snapshot as idle", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(false);
+    const source = overlayFreezeSource({ revision: "rev-b", path: "work-codex" });
+    const { session } = await overlayControlSession(overlay, source);
+    expect(
+      overlay.commands.some(
+        ({ method, params }) => method === "Runtime.evaluate" && params?.expression === source,
+      ),
+    ).toBe(false);
+    overlay.commands.length = 0;
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    await session.ensureInstalled();
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: source, awaitPromise: true },
+    });
+    session.close();
+  });
+
+  it("re-evaluates an enabled overlay when isolated identity changes and the call is idle", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    const source = overlayFreezeSource({
+      revision: "rev-b",
+      path: "work-codex",
+      wrapper: "work-wrap",
+    });
+    const { session } = await overlayControlSession(overlay, source);
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source } },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: source, awaitPromise: true },
+      },
+    ]);
+    session.close();
+  });
+
+  it("stages later-document overlay identity and does not eval an active call", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "active" }),
+    );
+    const source = overlayFreezeSource({ revision: "rev-b", path: "work-codex" });
+    const { session } = await overlayControlSession(overlay, source);
+    expect(overlay.commands).toEqual([
+      { method: "Runtime.enable" },
+      { method: "Page.enable" },
+      { method: "Page.addScriptToEvaluateOnNewDocument", params: { source } },
+    ]);
+    expect(overlay.commands.some(({ params }) => params?.expression === source)).toBe(false);
+    session.close();
+  });
+
+  it("does not treat a missing native Chat handle as idle when overlay identity differs", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue({
+      enabled: true,
+      revision: "rev-a",
+      isolatedPath: "chat",
+      isolatedRun: "run-1",
+      isolatedExpiresAt: "2026-11-15T07:40:00.000Z",
+      appPath: "/scratch/ChatGPT.app",
+    });
+    const source = overlayFreezeSource({ revision: "rev-b", path: "work-codex" });
+    const { session } = await overlayControlSession(overlay, source);
+    expect(
+      overlay.commands.some(
+        ({ method, params }) => method === "Runtime.evaluate" && params?.expression === source,
+      ),
+    ).toBe(false);
+    expect(overlay.commands).toContainEqual({
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source },
+    });
+    session.close();
+  });
+
+  it("refreshes an idle overlay when isolated candidate paths change", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    const chat = overlayFreezeSource({ revision: "rev-a", path: "chat", wrapper: "chat-wrap" });
+    const first = await overlayControlSession(overlay, chat);
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: chat, awaitPromise: true },
+    });
+    first.session.close();
+    overlay.commands.length = 0;
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    const both = overlayFreezeSource({
+      revision: "rev-a",
+      path: "chat",
+      paths: ["chat", "work-codex"],
+      wrapper: "both-wrap",
+    });
+    const second = await overlayControlSession(overlay, both);
+    expect(overlay.commands).toContainEqual({
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source: both },
+    });
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: both, awaitPromise: true },
+    });
+    second.session.close();
+  });
+
+  it("defers an isolated path-set refresh while the overlay call is active", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "active" }),
+    );
+    const both = overlayFreezeSource({
+      revision: "rev-a",
+      path: "chat",
+      paths: ["chat", "work-codex"],
+      wrapper: "both-wrap",
+    });
+    const { session } = await overlayControlSession(overlay, both);
+    expect(
+      overlay.commands.some(
+        ({ method, params }) => method === "Runtime.evaluate" && params?.expression === both,
+      ),
+    ).toBe(false);
+    overlay.commands.length = 0;
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    await session.ensureInstalled();
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: both, awaitPromise: true },
+    });
+    session.close();
+  });
+
+  it("refreshes an idle overlay when isolated desktopPlatform changes", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({
+        revision: "rev-a",
+        path: "chat",
+        call: "idle",
+        desktopPlatform: "darwin",
+      }),
+    );
+    const next = overlayFreezeSource({
+      revision: "rev-a",
+      path: "chat",
+      desktopPlatform: "win32",
+      wrapper: "platform-wrap",
+    });
+    const { session } = await overlayControlSession(overlay, next);
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: next, awaitPromise: true },
+    });
+    session.close();
+  });
+
+  it("defers an isolated platform refresh while the overlay call is active", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({
+        revision: "rev-a",
+        path: "chat",
+        call: "active",
+        desktopPlatform: "darwin",
+      }),
+    );
+    const next = overlayFreezeSource({
+      revision: "rev-a",
+      path: "chat",
+      desktopPlatform: "win32",
+      wrapper: "platform-wrap",
+    });
+    const { session } = await overlayControlSession(overlay, next);
+    expect(
+      overlay.commands.some(
+        ({ method, params }) => method === "Runtime.evaluate" && params?.expression === next,
+      ),
+    ).toBe(false);
+    session.close();
+  });
+
+  it("refreshes an existing enabled overlay after a later controller source with a new marker", async () => {
+    const overlay = rendererClient();
+    overlay.evaluateSpy.mockResolvedValue(
+      overlayLiveSnapshot({ revision: "rev-a", path: "chat", call: "idle" }),
+    );
+    const chat = overlayFreezeSource({ revision: "rev-a", path: "chat", wrapper: "chat-wrap" });
+    const first = await overlayControlSession(overlay, chat);
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: chat, awaitPromise: true },
+    });
+    first.session.close();
+    overlay.commands.length = 0;
+    const work = overlayFreezeSource({
+      revision: "rev-b",
+      path: "work-codex",
+      wrapper: "work-wrap",
+    });
+    const second = await overlayControlSession(overlay, work);
+    expect(overlay.commands).toContainEqual({
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source: work },
+    });
+    expect(overlay.commands).toContainEqual({
+      method: "Runtime.evaluate",
+      params: { expression: work, awaitPromise: true },
+    });
+    second.session.close();
+  });
+
   it.each(["connect", "command", "evaluate"] as const)(
     "bounds stalled overlay %s operations without blocking other overlays",
     async (stage) => {
       const primary = rendererClient();
       const stalled = rendererClient();
       const healthy = rendererClient();
-      healthy.evaluateSpy.mockResolvedValue(false);
+      healthy.evaluateSpy.mockResolvedValue({ enabled: false, call: "idle" });
       let finishConnect: ((client: typeof stalled) => void) | undefined;
       const pendingConnect = new Promise<typeof stalled>((resolve) => {
         finishConnect = resolve;

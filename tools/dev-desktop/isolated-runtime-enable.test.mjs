@@ -254,4 +254,62 @@ describe("isolated Runtime.enable probe", () => {
     expect(result.ok).toBe(true);
     expect(opened).toEqual(["ws://127.0.0.1:9229/devtools/page/owned"]);
   });
+
+  it("polls json/list until a primary renderer page exists instead of treating boot as terminal", async () => {
+    let lists = 0;
+    const opened = [];
+    const result = await probeIsolatedRuntimeEnable({
+      arguments: [
+        "http://127.0.0.1:9229",
+        "--app-path",
+        isolatedApp,
+        "--user-data",
+        isolatedData,
+        "--timeout-ms",
+        "500",
+      ],
+      lookupListener: () => ({
+        pid: 9,
+        commandLine: `${isolatedApp}/Contents/MacOS/ChatGPT --user-data-dir=${isolatedData} --remote-debugging-port=9229`,
+      }),
+      sleep: async () => {},
+      fetchImpl: async () => {
+        lists += 1;
+        if (lists === 1) {
+          return { ok: true, json: async () => [] };
+        }
+        return {
+          ok: true,
+          json: async () => [
+            {
+              type: "page",
+              url: "app://-/index.html",
+              webSocketDebuggerUrl: "ws://127.0.0.1:9229/devtools/page/owned",
+            },
+          ],
+        };
+      },
+      socketFactory: (url) => {
+        opened.push(url);
+        const listeners = { open: [], message: [], error: [] };
+        queueMicrotask(() => {
+          for (const listener of listeners.open) listener();
+        });
+        return {
+          addEventListener(type, listener) {
+            listeners[type].push(listener);
+          },
+          send() {
+            for (const listener of listeners.message) {
+              listener({ data: JSON.stringify({ id: 1, result: {} }) });
+            }
+          },
+          close() {},
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(lists).toBe(2);
+    expect(opened).toEqual(["ws://127.0.0.1:9229/devtools/page/owned"]);
+  });
 });

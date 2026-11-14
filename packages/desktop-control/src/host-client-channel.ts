@@ -2,6 +2,9 @@ import { readdir, open } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import {
+  REALTIME_CALL_METHOD,
+  VOICE_GATEWAY_STATUS_METHOD,
+  VOICE_SETTINGS_METHOD,
   clientChannelDescriptorSchema,
   clientChannelEventSchema,
   clientThreadSnapshotSchema,
@@ -13,6 +16,19 @@ import {
   type ClientSnapshotOptions,
   type ClientThreadSnapshot,
 } from "@codexhost/shared-contracts";
+import {
+  RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED,
+  type VoiceHostExecution,
+} from "./renderer-voice-host-binding.js";
+
+const VOICE_SETTINGS_TIMEOUT_MS = 10_000;
+const VOICE_GATEWAY_STATUS_TIMEOUT_MS = 2_000;
+const REALTIME_CALL_TIMEOUT_MS = 30_000;
+const VOICE_GATEWAY_STAGES = new Set(["config", "request", "transport", "identity", "cancel"]);
+
+function voiceGatewayStage(value: unknown): string | undefined {
+  return typeof value === "string" && VOICE_GATEWAY_STAGES.has(value) ? value : undefined;
+}
 
 export type HostClientUpdate = ClientChannelEvent | { type: "connection"; online: boolean };
 export async function discoverHostClientChannel(
@@ -187,18 +203,44 @@ export class HostClientChannel {
       }
     }
   }
-  private async post<T>(route: string, body: unknown, timeoutMs = 120_000): Promise<T> {
-    if (this.stopped || !this.online)
+  bindVoiceExecution(): VoiceHostExecution {
+    const generation = this.generation;
+    const port = this.descriptor.port;
+    const token = this.descriptor.token;
+    return {
+      generation,
+      request: (method, params) =>
+        this.post(
+          "/v1/rpc",
+          { method, params },
+          method === VOICE_GATEWAY_STATUS_METHOD
+            ? VOICE_GATEWAY_STATUS_TIMEOUT_MS
+            : method === REALTIME_CALL_METHOD
+              ? REALTIME_CALL_TIMEOUT_MS
+              : VOICE_SETTINGS_TIMEOUT_MS,
+          { port, token },
+        ),
+    };
+  }
+  private async post<T>(
+    route: string,
+    body: unknown,
+    timeoutMs = 120_000,
+    bound?: { port: number; token: string },
+  ): Promise<T> {
+    if (!bound && (this.stopped || !this.online))
       throw new Error("CH is disconnected; reconnect before submitting an operation");
     const generation = this.generation;
+    const port = bound?.port ?? this.descriptor.port;
+    const token = bound?.token ?? this.descriptor.token;
     let response: Response;
     let value: { result?: T; error?: { code?: number; message?: string } };
     try {
-      response = await fetch(`http://127.0.0.1:${this.descriptor.port}${route}`, {
+      response = await fetch(`http://127.0.0.1:${port}${route}`, {
         redirect: "error",
         method: "POST",
         headers: {
-          authorization: `Bearer ${this.descriptor.token}`,
+          authorization: `Bearer ${token}`,
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
@@ -208,7 +250,13 @@ export class HostClientChannel {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
         throw new Error("Invalid Host reply");
       value = parsed as typeof value;
-    } catch {
+    } catch (error) {
+      if (bound)
+        throw Object.assign(new Error(RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED), {
+          code: -32093,
+          stage: "cancel",
+        });
+      if (error && typeof error === "object" && "stage" in error) throw error;
       throw Object.assign(
         new Error(
           "CH connection lost; operation outcome may be unknown. Do not retry automatically.",
@@ -216,14 +264,25 @@ export class HostClientChannel {
         { code: -32093 },
       );
     }
-    if (generation !== this.generation || !this.online || this.stopped)
+    if (!bound && (generation !== this.generation || !this.online || this.stopped))
       throw Object.assign(new Error("Obsolete Host reply; resynchronize after reconnecting"), {
         code: -32094,
       });
-    if (value.error || !response.ok)
-      throw Object.assign(new Error(value.error?.message ?? "Host request failed"), {
-        code: value.error?.code ?? -32603,
+    if (value.error || !response.ok) {
+      const error = value.error;
+      const data =
+        error && typeof error === "object" && "data" in error
+          ? (error as { data?: unknown }).data
+          : undefined;
+      const stage =
+        data && typeof data === "object" && data !== null && "stage" in data
+          ? voiceGatewayStage((data as { stage?: unknown }).stage)
+          : undefined;
+      throw Object.assign(new Error(error?.message ?? "Host request failed"), {
+        code: error?.code ?? -32603,
+        ...(stage ? { stage } : {}),
       });
+    }
     if (!Object.hasOwn(value, "result"))
       throw new Error("Invalid Host reply; operation outcome may be unknown");
     return value.result as T;
@@ -235,8 +294,28 @@ export class HostClientChannel {
       harnessInstallationRequestTimeoutMs(method, params) ?? 120_000,
     );
   }
+  requestVoiceSettings(params: Record<string, unknown>): Promise<unknown> {
+    return this.post(
+      "/v1/rpc",
+      { method: VOICE_SETTINGS_METHOD, params },
+      VOICE_SETTINGS_TIMEOUT_MS,
+    );
+  }
+  requestVoiceGatewayStatus(): Promise<unknown> {
+    return this.post(
+      "/v1/rpc",
+      { method: VOICE_GATEWAY_STATUS_METHOD, params: {} },
+      VOICE_GATEWAY_STATUS_TIMEOUT_MS,
+    );
+  }
+  requestRealtimeCall(params: Record<string, unknown>): Promise<unknown> {
+    return this.post("/v1/rpc", { method: REALTIME_CALL_METHOD, params }, REALTIME_CALL_TIMEOUT_MS);
+  }
   get epoch(): string {
     return this.descriptor.epoch;
+  }
+  get channelGeneration(): number {
+    return this.generation;
   }
   /** Options are opt-in; an older Host ignores them and returns full Turns. */
   async snapshot(

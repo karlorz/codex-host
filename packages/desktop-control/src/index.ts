@@ -10,6 +10,14 @@ export {
   discoverHostClientChannel,
   type HostClientUpdate,
 } from "./host-client-channel.js";
+export {
+  RENDERER_VOICE_HOST_BINDING_NAME,
+  RENDERER_VOICE_HOST_CAPABILITY_GLOBAL,
+  RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED,
+  RENDERER_VOICE_HOST_METHODS,
+  installRendererVoiceHostBinding,
+} from "./renderer-voice-host-binding.js";
+export type { RendererVoiceHostOwner, VoiceHostExecution } from "./renderer-voice-host-binding.js";
 
 export {
   CdpClient,

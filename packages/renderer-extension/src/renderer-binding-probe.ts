@@ -15,6 +15,8 @@ import {
   decodeHarnessPluginRoute,
   harnessIdSchema,
   permissionModeFixedAtCreate,
+  VOICE_GATEWAY_STATUS_METHOD,
+  VOICE_SETTINGS_METHOD,
   type HarnessCommandDescriptor,
   type HarnessPluginDescriptor,
   type HarnessModelCatalog,
@@ -30,6 +32,7 @@ import {
   type ThreadUsageSnapshot,
   type CodexhostError,
 } from "@codexhost/shared-contracts";
+import { resolveDirectVoiceHost } from "./renderer-voice-gateway-wrap.js";
 
 import {
   DEFAULT_RENDERER_AGENTS,
@@ -864,6 +867,15 @@ export function installRendererBindingProbe(
   const requestLocalSettings = async (method: string, params: unknown): Promise<unknown> => {
     const route = window.__codexhostHostRoutingV1?.forHost("local");
     if (disposed || !route) throw new Error("Local Host connection is unavailable");
+    if (method === VOICE_SETTINGS_METHOD || method === VOICE_GATEWAY_STATUS_METHOD) {
+      const host = resolveDirectVoiceHost(window);
+      if (!host) throw new Error("Local Host connection is unavailable");
+      const body =
+        params !== null && typeof params === "object" && !Array.isArray(params)
+          ? (params as Record<string, unknown>)
+          : {};
+      return host.request(method, body);
+    }
     return route.manager.sendRequest(method, params);
   };
   const stopVoiceSync = startVoiceSettingsSync(window, requestLocalSettings);

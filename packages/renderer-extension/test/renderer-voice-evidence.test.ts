@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluateVoiceEvidence, startupVoiceGate } from "../src/renderer-voice-evidence.js";
+import { CPA_LIVE_VOICE_HOOK_GLOBAL } from "../src/renderer-cpa-live-voice-config.js";
+import {
+  chatVoiceUserFacingUnavailable,
+  evaluateVoiceEvidence,
+  startupVoiceGate,
+  workVoicePathDecision,
+  workVoiceUserFacingUnavailable,
+} from "../src/renderer-voice-evidence.js";
 import {
   profileIdentityKey,
   voiceImplementationRevision,
@@ -254,6 +261,7 @@ describe("voice evidence evaluator", () => {
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         desktopVersion: "26.1106.51428",
         desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
         asarDigest: TEST_REVIEWED_ASAR_DIGEST,
         appPath: "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app",
         implementationRevision: voiceImplementationRevision(),
@@ -264,6 +272,241 @@ describe("voice evidence evaluator", () => {
     expect(gate.chat.policy).toBe("unreviewed");
     expect(gate.chat.reason).toBe("isolated-qualification");
     expect(gate["work-codex"].enabled).toBe(false);
+    expect(gate["work-grok"].enabled).toBe(false);
+  });
+
+  it("enables isolated Work/Codex without Chat, Grok, or reviewed evidence", () => {
+    expect(voiceProfileDigest("work", "darwin", "26.1106.51428")).toEqual(
+      expect.stringMatching(/^[0-9a-f]{16}$/),
+    );
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const gate = hashedGate([], {
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "work-codex",
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(gate["work-codex"].enabled).toBe(true);
+    expect(gate["work-codex"].policy).toBe("unreviewed");
+    expect(gate["work-codex"].reason).toBe("isolated-qualification");
+    expect(gate.chat.enabled).toBe(false);
+    expect(gate.chat.reason).toBe("missing-evidence");
+    expect(gate["work-grok"].enabled).toBe(false);
+  });
+
+  it("enables isolated Work/Grok independently of Work/Codex", () => {
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const gate = hashedGate([], {
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "work-grok",
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(gate["work-grok"].enabled).toBe(true);
+    expect(gate["work-grok"].policy).toBe("unreviewed");
+    expect(gate["work-grok"].reason).toBe("isolated-qualification");
+    expect(gate["work-codex"].enabled).toBe(false);
+    expect(gate.chat.enabled).toBe(false);
+  });
+
+  it("enables an explicit isolated path set without promoting reviewed evidence or other paths", () => {
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const gate = hashedGate([], {
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "chat",
+        paths: ["chat", "work-codex"],
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(gate.chat.enabled).toBe(true);
+    expect(gate["work-codex"].enabled).toBe(true);
+    expect(gate.chat.policy).toBe("unreviewed");
+    expect(gate["work-codex"].policy).toBe("unreviewed");
+    expect(gate["work-grok"].enabled).toBe(false);
+    expect(gate["work-grok"].reason).toBe("missing-evidence");
+  });
+
+  it("rejects an isolated marker that mixes an unknown path token or production app path", () => {
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const unknown = hashedGate([], {
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "chat",
+        paths: ["chat", "*"],
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(unknown.chat.enabled).toBe(false);
+    const production = hashedGate([], {
+      desktopAppPath: "/Applications/ChatGPT.app",
+      isolatedQualification: {
+        paths: ["chat", "work-codex", "work-grok"],
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath: "/Applications/ChatGPT.app",
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(production.chat.enabled).toBe(false);
+    expect(production["work-codex"].enabled).toBe(false);
+  });
+
+  it("rejects unparseable expiry, malformed path sets, and a missing or wrong platform", () => {
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const base = {
+      path: "chat" as const,
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+      desktopPlatform: "darwin",
+      asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+      appPath,
+      implementationRevision: voiceImplementationRevision(),
+      label: "unqualified-isolated" as const,
+    };
+    expect(
+      hashedGate([], { desktopAppPath: appPath, isolatedQualification: base }).chat.enabled,
+    ).toBe(true);
+    expect(
+      hashedGate([], {
+        desktopAppPath: appPath,
+        isolatedQualification: { ...base, expiresAt: "not-a-date" },
+      }).chat.enabled,
+    ).toBe(false);
+    expect(
+      hashedGate([], {
+        desktopAppPath: appPath,
+        isolatedQualification: { ...base, path: "chat", paths: "bad" },
+      }).chat.enabled,
+    ).toBe(false);
+    expect(
+      hashedGate([], {
+        desktopAppPath: appPath,
+        isolatedQualification: { ...base, paths: ["chat", "chat"] },
+      }).chat.enabled,
+    ).toBe(false);
+    expect(
+      hashedGate([], {
+        desktopAppPath: appPath,
+        isolatedQualification: { ...base, desktopPlatform: undefined },
+      }).chat.enabled,
+    ).toBe(false);
+    expect(
+      hashedGate([], {
+        desktopAppPath: appPath,
+        isolatedQualification: { ...base, desktopPlatform: "win32" },
+      }).chat.enabled,
+    ).toBe(false);
+  });
+
+  it("enables an isolated Windows hashed Chat candidate without promoting reviewed evidence", () => {
+    const appPath =
+      "C:\\Users\\karlchow\\AppData\\Local\\.codexhost\\update-impact\\26.1106.51428\\bundle\\app\\ChatGPT.exe";
+    const gate = hashedGate([], {
+      desktopPlatform: "win32",
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "chat",
+        run: "2026-11-15-isolated-win32",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "win32",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(voiceProfileDigest("chat", "win32", "26.1106.51428")).toEqual(
+      expect.stringMatching(/^[0-9a-f]{16}$/),
+    );
+    expect(gate.chat.enabled).toBe(true);
+    expect(gate.chat.policy).toBe("unreviewed");
+    expect(gate.chat.reason).toBe("isolated-qualification");
+    expect(gate["work-codex"].enabled).toBe(false);
+    expect(gate["work-grok"].enabled).toBe(false);
+  });
+
+  it("keeps Windows hashed Chat unreviewed without an isolated marker", () => {
+    const gate = hashedGate([], { desktopPlatform: "win32" });
+    expect(gate.chat.enabled).toBe(false);
+    expect(gate.chat.reason).toBe("missing-evidence");
+    const reviewed = hashedGate(
+      [
+        reviewedVoiceEvidenceRecord({
+          path: "chat",
+          desktopPlatform: "win32",
+          desktopVersion: "26.1106.51428",
+        }),
+      ],
+      { desktopPlatform: "win32" },
+    );
+    expect(reviewed.chat.enabled).toBe(false);
+    expect(reviewed.chat.reason).toBe("missing-evidence");
+  });
+
+  it("rejects a Windows Store production app path as an isolated Chat marker", () => {
+    const appPath =
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe";
+    const gate = hashedGate([], {
+      desktopPlatform: "win32",
+      desktopAppPath: appPath,
+      isolatedQualification: {
+        path: "chat",
+        run: "2026-11-15-isolated-win32",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "win32",
+        asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+        appPath,
+        implementationRevision: voiceImplementationRevision(),
+        label: "unqualified-isolated",
+      },
+    });
+    expect(gate.chat.enabled).toBe(false);
   });
 
   it("does not treat an expired or wrong-app isolated marker as production evidence", () => {
@@ -275,6 +518,7 @@ describe("voice evidence evaluator", () => {
         expiresAt: new Date(Date.now() - 1).toISOString(),
         desktopVersion: "26.1106.51428",
         desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
         asarDigest: TEST_REVIEWED_ASAR_DIGEST,
         appPath: "/tmp/candidate/ChatGPT.app",
         implementationRevision: voiceImplementationRevision(),
@@ -290,6 +534,7 @@ describe("voice evidence evaluator", () => {
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         desktopVersion: "26.1106.51428",
         desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+        desktopPlatform: "darwin",
         asarDigest: TEST_REVIEWED_ASAR_DIGEST,
         appPath: "/tmp/candidate/ChatGPT.app",
         implementationRevision: voiceImplementationRevision(),
@@ -297,5 +542,32 @@ describe("voice evidence evaluator", () => {
       },
     });
     expect(wrongApp.chat.enabled).toBe(false);
+  });
+
+  it("keeps missing-evidence internally and uses the existing unqualified Work sentence for toasts", () => {
+    const owner = {
+      [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+        enabled: true,
+        auditedDesktopVersion: "26.1007.30912",
+        auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        desktopVersion: "26.1106.51428",
+        desktopPlatform: "darwin",
+        ...hashedVoiceTestIdentity(),
+        voiceEvidence: [],
+      },
+    };
+    expect(workVoicePathDecision(owner, "work-codex").reason).toBe("missing-evidence");
+    expect(workVoiceUserFacingUnavailable(owner, "work-codex")).toBe(
+      "Work voice is not qualified on this Desktop.",
+    );
+    expect(workVoiceUserFacingUnavailable(owner, "work-grok")).toBe(
+      "Work voice is not qualified on this Desktop.",
+    );
+    expect(startupVoiceGate(owner[CPA_LIVE_VOICE_HOOK_GLOBAL]).chat.reason).toBe(
+      "missing-evidence",
+    );
+    expect(chatVoiceUserFacingUnavailable(owner)).toBe(
+      "Chat voice is not qualified on this Desktop.",
+    );
   });
 });

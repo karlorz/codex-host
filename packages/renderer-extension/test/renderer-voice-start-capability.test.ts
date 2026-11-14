@@ -3,6 +3,7 @@ import {
   gatewayVoiceStartRequest,
   wrapGatewayVoiceStarter,
 } from "../src/renderer-voice-start-capability.js";
+import { DIRECT_VOICE_HOST_GLOBAL } from "../src/renderer-voice-gateway-wrap.js";
 
 const request = {
   source: "composer_button_new_thread",
@@ -117,6 +118,45 @@ describe("gateway start ownership", () => {
     await expect(wrapper.start(request)).resolves.toBe("native");
     expect(f.options.prepare).not.toHaveBeenCalled();
     expect(ready).not.toHaveBeenCalled();
+  });
+  it("rejects a configured Work start that is not qualified without native fallback", async () => {
+    const start = vi.fn().mockResolvedValue("native");
+    const f = fixture();
+    const ready = vi.fn();
+    const wrapper = wrapGatewayVoiceStarter(start, {
+      ...f.options,
+      configured: () => true,
+      qualifies: () => false,
+      ready,
+      unavailable: () => "Work voice is not qualified on this Desktop.",
+    });
+    await expect(wrapper.start(request)).rejects.toThrow(
+      "Work voice is not qualified on this Desktop.",
+    );
+    expect(start).not.toHaveBeenCalled();
+    expect(f.options.prepare).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+  });
+  it("cancels a pending gateway start when the Work lane drops, without native fallback", async () => {
+    const f = fixture();
+    let qualified = true;
+    let release!: () => void;
+    const wrapper = wrapGatewayVoiceStarter(f.start, {
+      ...f.options,
+      configured: () => true,
+      qualifies: () => qualified,
+      committed: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const result = wrapper.start(request);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    qualified = false;
+    release();
+    await expect(result).rejects.toThrow(/cancel/u);
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.projected()).toBe(false);
   });
   it("fails closed without ready transport and does not fall back to native account creation", async () => {
     const f = fixture();
@@ -285,21 +325,17 @@ describe("overlay starter registration", () => {
         selector === "[data-avatar-overlay-native-surface-id]"
           ? [element]
           : query.call(f.target.document, selector)) as Document["querySelectorAll"];
-      let reply: ((message: unknown) => void) | undefined;
-      const dispatchMessage = vi.fn((type, message) => {
-        expect(type).toBe("mcp-request");
-        expect(message.request.method).toBe("codexhost/voice/gateway-status");
-        reply?.({ hostId: "local", message: { id: message.request.id, result: true } });
-      });
+      const dispatchMessage = vi.fn();
       const bridge = {
-        subscribe: (_type: string, listener: (message: unknown) => void) => {
-          reply = listener;
-          return () => {
-            reply = undefined;
-          };
-        },
+        subscribe: () => () => {},
         dispatchMessage,
       };
+      Reflect.set(globalThis, DIRECT_VOICE_HOST_GLOBAL, {
+        request: async (method: string) => {
+          expect(method).toBe("codexhost/voice/gateway-status");
+          return true;
+        },
+      });
       const initialize = vi.fn();
       const importModule = async (url: string) =>
         url.endsWith(assets.shared)
@@ -335,8 +371,10 @@ describe("overlay starter registration", () => {
         expect(start).toHaveBeenCalledWith(launch);
         expect(initialize).toHaveBeenCalledOnce();
         expect(instance.getSnapshot).toBe(original);
+        expect(dispatchMessage).not.toHaveBeenCalled();
       } finally {
         handle.dispose();
+        Reflect.deleteProperty(globalThis, DIRECT_VOICE_HOST_GLOBAL);
       }
     },
   );

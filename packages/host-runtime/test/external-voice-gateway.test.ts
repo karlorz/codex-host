@@ -41,8 +41,10 @@ async function gateway(extra = "", provider = 'env_key = "TEST_VOICE_KEY"') {
 experimental_realtime_webrtc_call_base_url = "https://gateway.example/v1"
 ${extra}
 [model_providers.selected]
+name = "Selected gateway"
 ${provider}
 [model_providers.unselected]
+name = "Unselected gateway"
 experimental_bearer_token = "wrong-provider-fixture"
 `,
   );

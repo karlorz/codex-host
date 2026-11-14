@@ -84,11 +84,17 @@ jobs:
         run: npm run typecheck
 
       # Structural/fixture discovery after the Renderer build. Not attended call qualification.
+      # `test:typescript` does not build the Renderer. This Linux-only step builds once, then
+      # runs discovery tests and the strict dist identity file directly. `npm run
+      # test:voice-dist-artifacts` is the local equivalent and would build again; CI does not
+      # use that script. macOS/Windows-only workflow_dispatch does not run this gate.
+      # A frozen local dist is not a release pass.
       - name: Test voice discovery command
         if: runner.os == 'Linux'
         run: |
           npm run build:renderer
           npm run voice:discovery:test
+          npx vitest run --config tests/vitest.config.js tests/release/voice-release-artifacts.dist.test.mjs
 
       - name: Test TypeScript (full suite)
         if: runner.os == 'Linux'

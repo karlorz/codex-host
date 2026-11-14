@@ -1,3 +1,4 @@
+import type { IsolatedVoiceQualification } from "../src/renderer-cpa-live-voice-config.js";
 import {
   type VoiceEvidencePath,
   type VoiceEvidenceRecord,
@@ -20,6 +21,29 @@ export function hashedVoiceTestIdentity(): {
     desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
     asarDigest: TEST_REVIEWED_ASAR_DIGEST,
     implementationRevision: voiceImplementationRevision(),
+  };
+}
+
+export function isolatedVoiceQualificationFixture(
+  input: Partial<IsolatedVoiceQualification> &
+    Pick<IsolatedVoiceQualification, "appPath"> & {
+      path?: IsolatedVoiceQualification["path"];
+      paths?: IsolatedVoiceQualification["paths"];
+    },
+): IsolatedVoiceQualification {
+  const identity = hashedVoiceTestIdentity();
+  return {
+    run: "2026-11-14-isolated",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    desktopVersion: "26.1106.51428",
+    desktopBuild: identity.desktopBuild,
+    desktopPlatform: "darwin",
+    asarDigest: identity.asarDigest,
+    implementationRevision: identity.implementationRevision,
+    label: "unqualified-isolated",
+    ...input,
+    appPath: input.appPath,
+    path: input.path ?? input.paths?.[0] ?? "chat",
   };
 }
 

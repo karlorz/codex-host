@@ -14,6 +14,23 @@ const RESPONSE_HEADERS = ["content-type", "location", "retry-after"];
 const MAX_RESPONSE_BYTES = 16 << 20;
 const MAX_PENDING_CALLS = 16;
 
+export type VoiceGatewayFailureStage = "config" | "request" | "transport" | "identity" | "cancel";
+
+/** Maps gateway throws to a sanitized stage. Never includes payloads or URLs. */
+export function voiceGatewayFailureStage(error: unknown): VoiceGatewayFailureStage {
+  const message = error instanceof Error ? error.message : "";
+  if (
+    /configuration is unavailable|configured realtime gateway|gateway URL is invalid|matching HTTPS/u.test(
+      message,
+    )
+  )
+    return "config";
+  if (/^Invalid voice|^Voice call creation is already pending/u.test(message)) return "request";
+  if (/identity is unavailable/u.test(message)) return "identity";
+  if (/cancelled/u.test(message)) return "cancel";
+  return "transport";
+}
+
 /** The `create` body must carry the native SDP offer and session object. */
 function createCallBody(value: string): string {
   let payload: unknown;
@@ -46,7 +63,9 @@ export class NativeVoiceGateway {
   }
 
   async request(value: unknown) {
-    const params = realtimeCallParamsSchema.parse(value);
+    const parsed = realtimeCallParamsSchema.safeParse(value);
+    if (!parsed.success) throw new Error("Invalid voice call request");
+    const params = parsed.data;
     if (params.operation === "cancel") {
       this.#pending.get(params.requestId)?.abort();
       return { status: 204, body: "", headers: {} };

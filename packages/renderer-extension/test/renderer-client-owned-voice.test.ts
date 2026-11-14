@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
+import { REALTIME_CALL_METHOD, VOICE_SETTINGS_METHOD } from "@codexhost/shared-contracts";
 import {
   CLIENT_OWNED_VOICE_INITIAL_ASSET,
   CLIENT_OWNED_VOICE_SHARED_ASSET,
@@ -14,6 +14,11 @@ import {
   wrapClientOwnedVoiceFetch,
   type NativeVoiceBridge,
 } from "../src/renderer-client-owned-voice.js";
+import {
+  DIRECT_VOICE_HOST_GLOBAL,
+  requestLocalHostMcp,
+  requestVoiceHost,
+} from "../src/renderer-voice-gateway-wrap.js";
 import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "../src/renderer-new-thread-preference.js";
 import { CPA_LIVE_VOICE_HOOK_GLOBAL } from "../src/renderer-cpa-live-voice-hook.js";
 import { wrapGatewayVoiceStarter } from "../src/renderer-voice-start-capability.js";
@@ -21,7 +26,14 @@ import {
   CHAT_LIVE_VOICE_STORAGE_KEY,
   CPA_LIVE_VOICE_STORAGE_KEY,
 } from "../src/renderer-cpa-live-voice-preference.js";
-import { hashedVoiceTestIdentity, reviewedVoiceEvidenceRecord } from "./voice-evidence-fixture.js";
+import { installHashedOverlayVoiceHook } from "../src/renderer-hashed-overlay-voice.js";
+import { voiceImplementationRevision } from "../src/renderer-voice-profiles.js";
+import {
+  hashedVoiceTestIdentity,
+  reviewedVoiceEvidenceRecord,
+  TEST_REVIEWED_ASAR_DIGEST,
+  TEST_REVIEWED_NATIVE_BUILD,
+} from "./voice-evidence-fixture.js";
 
 function fixture(
   result = { status: 201, body: "answer", headers: { location: "/v1/realtime/calls/rtc_fixture" } },
@@ -59,6 +71,10 @@ function fixture(
   const responseError = vi.fn(async (response: Response) =>
     Object.assign(new Error(await response.text()), { status: response.status }),
   );
+  Reflect.set(globalThis, DIRECT_VOICE_HOST_GLOBAL, {
+    request: (method: string, params: Record<string, unknown>) =>
+      requestLocalHostMcp(bridge, method, params, { timeoutMs: 30_000 }),
+  });
   return { bridge, dispatch, listeners, client, original, responseError };
 }
 function sharedExports(f: ReturnType<typeof fixture>) {
@@ -99,6 +115,7 @@ const workOptions = (requestBody: string = speechBody()) => options(requestBody,
 afterEach(() => {
   vi.useRealTimers();
   rememberVoiceProductExperience({ productExperience: "" });
+  Reflect.deleteProperty(globalThis, DIRECT_VOICE_HOST_GLOBAL);
 });
 
 describe("client-owned voice gateway", () => {
@@ -351,6 +368,46 @@ describe("client-owned voice gateway", () => {
     expect(f.original).toHaveBeenCalledOnce();
     expect(f.dispatch).not.toHaveBeenCalled();
   });
+  it("blocks a selected Work gateway when the Work lane is unqualified", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "work" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => true,
+      () => false,
+      () => false,
+      () => true,
+      () => false,
+    );
+    await expect(f.client.fetch(url, workOptions())).rejects.toThrow(
+      "Work voice is not qualified on this Desktop.",
+    );
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+  it("keeps an intentional Desktop Work preference native when the lane is also off", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "work" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => false,
+      f.responseError,
+      () => false,
+      () => true,
+      () => false,
+      () => false,
+      () => true,
+      () => false,
+    );
+    await f.client.fetch(url, workOptions());
+    expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
   it.each([
     { experience: "work", model: "gpt-6.1-sol" },
     { experience: "work", model: undefined },
@@ -431,6 +488,153 @@ describe("client-owned voice gateway", () => {
       expect(f.dispatch).not.toHaveBeenCalled();
     },
   );
+  it("does not retry native AppServer or mcp when the direct Host capability is missing", async () => {
+    Reflect.deleteProperty(globalThis, DIRECT_VOICE_HOST_GLOBAL);
+    const sendRequest = vi.fn();
+    const dispatch = vi.fn();
+    const bridge: NativeVoiceBridge = {
+      dispatchMessage: dispatch,
+      subscribe: () => () => {},
+    };
+    await expect(requestVoiceHost(bridge, { operation: "create" })).rejects.toThrow(
+      "Voice gateway Host connection is unavailable",
+    );
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+  it("reads voice settings over Host mcp-request without native sendRequest", async () => {
+    let captured: Record<string, unknown> | undefined;
+    let listener: ((event: unknown) => void) | undefined;
+    const bridge: NativeVoiceBridge = {
+      dispatchMessage: vi.fn((_type, value: Record<string, unknown>) => {
+        captured = value;
+        const request = value.request as { id: string };
+        queueMicrotask(() =>
+          listener?.({
+            hostId: "local",
+            message: { id: request.id, result: { initialized: true, gatewayReady: false } },
+          }),
+        );
+      }),
+      subscribe: (_type, next) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      },
+    };
+    await expect(
+      requestLocalHostMcp(bridge, VOICE_SETTINGS_METHOD, { operation: "get" }),
+    ).resolves.toEqual({ initialized: true, gatewayReady: false });
+    expect(captured).toMatchObject({
+      hostId: "local",
+      request: { method: VOICE_SETTINGS_METHOD, params: { operation: "get" } },
+    });
+  });
+  it("classifies Host settings errors without parser output", async () => {
+    let listener: ((event: unknown) => void) | undefined;
+    const bridge: NativeVoiceBridge = {
+      dispatchMessage: vi.fn((_type, value: Record<string, unknown>) => {
+        const request = value.request as { id: string };
+        queueMicrotask(() =>
+          listener?.({
+            hostId: "local",
+            message: {
+              id: request.id,
+              error: {
+                code: -32602,
+                message: "Invalid voice settings request",
+                data: { issues: [{ code: "invalid_type" }] },
+              },
+            },
+          }),
+        );
+      }),
+      subscribe: (_type, next) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      },
+    };
+    await expect(
+      requestLocalHostMcp(bridge, VOICE_SETTINGS_METHOD, { operation: "create" }),
+    ).rejects.toMatchObject({ message: "Invalid voice settings request" });
+    await expect(
+      requestLocalHostMcp(bridge, VOICE_SETTINGS_METHOD, { operation: "create" }),
+    ).rejects.toSatisfy((error: unknown) => {
+      const text = JSON.stringify(error instanceof Error ? error.message : error);
+      return !text.includes("invalid_type") && !text.includes("Zod");
+    });
+  });
+  it("keeps gateway-create mapping when Host MCP returns a call error", async () => {
+    let listener: ((event: unknown) => void) | undefined;
+    const bridge: NativeVoiceBridge = {
+      dispatchMessage: vi.fn((_type, value: Record<string, unknown>) => {
+        const request = value.request as { id: string };
+        queueMicrotask(() =>
+          listener?.({
+            hostId: "local",
+            message: {
+              id: request.id,
+              error: {
+                code: -32092,
+                message: "Invalid voice call request",
+                data: { stage: "request" },
+              },
+            },
+          }),
+        );
+      }),
+      subscribe: (_type, next) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      },
+    };
+    Reflect.set(globalThis, DIRECT_VOICE_HOST_GLOBAL, {
+      request: (method: string, params: Record<string, unknown>) =>
+        requestLocalHostMcp(bridge, method, params, { timeoutMs: 30_000 }),
+    });
+    await expect(requestVoiceHost(bridge, { operation: "create" })).rejects.toThrow(
+      "Configured voice gateway request failed",
+    );
+    const log = (globalThis as { __codexhostChatVoiceDebug?: unknown[] }).__codexhostChatVoiceDebug;
+    expect(JSON.stringify(log)).toContain("gateway-create");
+    expect(JSON.stringify(log)).toContain('"stage":"request"');
+  });
+  it("records a sanitized gateway-create RPC failure without payloads", async () => {
+    const f = fixture();
+    f.dispatch.mockImplementation((_type: string, value: Record<string, unknown>) => {
+      const request = value.request as { id: string };
+      queueMicrotask(() => {
+        for (const listener of f.listeners)
+          listener({
+            hostId: "local",
+            message: {
+              id: request.id,
+              error: {
+                code: -32090,
+                message: "Configured voice gateway request failed",
+                data: { stage: "identity" },
+              },
+            },
+          });
+      });
+    });
+    rememberVoiceProductExperience({ productExperience: "work" });
+    wrapClientOwnedVoiceFetch(f.client, f.bridge, () => true, f.responseError);
+    await expect(f.client.fetch(url, workOptions())).rejects.toThrow(
+      "Configured voice gateway request failed",
+    );
+    expect(f.original).not.toHaveBeenCalled();
+    const log = (globalThis as { __codexhostChatVoiceDebug?: unknown[] }).__codexhostChatVoiceDebug;
+    expect(JSON.stringify(log)).toContain("gateway-create");
+    expect(JSON.stringify(log)).toContain('"stage":"identity"');
+    expect(JSON.stringify(log)).toContain('"cause":"failed"');
+    expect(JSON.stringify(log)).not.toContain("offer");
+  });
   it("records Chat passthrough debug without credentials", async () => {
     const f = fixture();
     wrapClientOwnedVoiceFetch(f.client, f.bridge, () => true, f.responseError);
@@ -929,6 +1133,7 @@ describe("client-owned voice gateway", () => {
       getBoundingClientRect: () => ({ width: 640 }),
       closest: () => null,
     };
+    rememberVoiceProductExperience({ productExperience: "chat" });
     const hook = installClientOwnedVoiceHook({
       target: {
         [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
@@ -976,15 +1181,17 @@ describe("client-owned voice gateway", () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(hook.status).toBe("active");
-      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
-      expect(f.original).toHaveBeenCalledOnce();
+      await expect(
+        f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" })),
+      ).rejects.toThrow("Chat voice is not qualified on this Desktop.");
+      expect(f.original).not.toHaveBeenCalled();
       expect(f.dispatch).not.toHaveBeenCalled();
     } finally {
       hook.dispose();
     }
   });
 
-  it("passes hashed overlay Chat Instant Connect to native when Chat is Desktop default", async () => {
+  it("blocks hashed overlay Chat Instant Connect /wham when Chat is not qualified", async () => {
     vi.useFakeTimers();
     const f = fixture();
     const fetchClass = Object.assign(function WebFetch() {}, {
@@ -1041,9 +1248,435 @@ describe("client-owned voice gateway", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(hook.status).toBe("active");
       const request = options(speechBody(), { originator: "codex_work_desktop" });
-      await f.client.fetch(url, request);
+      await expect(f.client.fetch(url, request)).rejects.toThrow(
+        "Chat voice is not qualified on this Desktop.",
+      );
+      expect(f.original).not.toHaveBeenCalled();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("blocks hashed overlay Work /wham when the isolated marker is Chat-only", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "work" });
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          desktopAppPath: appPath,
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          isolatedQualification: {
+            path: "chat",
+            run: "2026-11-14-isolated",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+            desktopPlatform: "darwin",
+            asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+            appPath,
+            implementationRevision: voiceImplementationRevision(),
+            label: "unqualified-isolated",
+          },
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await expect(
+        f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" })),
+      ).rejects.toThrow("Work voice is not qualified on this Desktop.");
+      expect(f.original).not.toHaveBeenCalled();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("blocks hashed overlay Chat /wham when the isolated marker is Work-only", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          desktopAppPath: appPath,
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          isolatedQualification: {
+            path: "work-codex",
+            run: "2026-11-14-isolated",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+            desktopPlatform: "darwin",
+            asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+            appPath,
+            implementationRevision: voiceImplementationRevision(),
+            label: "unqualified-isolated",
+          },
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : key === VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY
+                ? "chat"
+                : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await expect(
+        f.client.fetch(url, options(speechBody(), { originator: "Codex Desktop" })),
+      ).rejects.toThrow("Chat voice is not qualified on this Desktop.");
+      expect(f.original).not.toHaveBeenCalled();
+      expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("gateways hashed overlay Work/Codex when the isolated marker qualifies that lane", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "work" });
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          desktopAppPath: appPath,
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          isolatedQualification: {
+            path: "work-codex",
+            run: "2026-11-14-isolated",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+            desktopPlatform: "darwin",
+            asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+            appPath,
+            implementationRevision: voiceImplementationRevision(),
+            label: "unqualified-isolated",
+          },
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("gateways Work and fail-closes ChatGPT Instant Connect on an explicit Chat+Work isolated path set", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const isolated = {
+      path: "chat" as const,
+      paths: ["chat", "work-codex"] as const,
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+      desktopPlatform: "darwin",
+      asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+      appPath,
+      implementationRevision: voiceImplementationRevision(),
+      label: "unqualified-isolated" as const,
+    };
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          desktopAppPath: appPath,
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          isolatedQualification: isolated,
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : key === VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY
+                ? "chat"
+                : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      rememberVoiceProductExperience({ productExperience: "chat" });
+      await expect(
+        f.client.fetch(url, options(speechBody(), { originator: "Codex Desktop" })),
+      ).rejects.toThrow("Native Chat voice is unavailable");
+      expect(f.original).not.toHaveBeenCalled();
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+      expect(f.dispatch).toHaveBeenCalledOnce();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("passthroughs hashed overlay Codex Chat Desktop without ChatGPT Instant Connect", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "codex",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : key === VOICE_LAUNCH_EXPERIENCE_STORAGE_KEY
+                ? "chat"
+                : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await f.client.fetch(url, options(speechBody(), { originator: "Codex Desktop" }));
       expect(f.original).toHaveBeenCalledOnce();
       expect(f.dispatch).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("gateways hashed overlay Work/Grok when the isolated marker qualifies that lane", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = vi.fn((id: string) => {
+      if (id === "GDNt") return { _n: fetchClass };
+      if (id === "TL6G") return { O1: f.bridge };
+      if (id === "eShZ") return { s1: f.responseError };
+      throw new Error(id);
+    });
+    rememberVoiceProductExperience({ productExperience: "work" });
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const hook = installHashedOverlayVoiceHook({
+      target: {
+        [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+          enabled: true,
+          desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          desktopPlatform: "darwin",
+          desktopAppPath: appPath,
+          ...hashedVoiceTestIdentity(),
+          auditedDesktopVersion: "26.1007.30912",
+          auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+          isolatedQualification: {
+            path: "work-grok",
+            run: "2026-11-14-isolated",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+            desktopBuild: TEST_REVIEWED_NATIVE_BUILD,
+            desktopPlatform: "darwin",
+            asarDigest: TEST_REVIEWED_ASAR_DIGEST,
+            appPath,
+            implementationRevision: voiceImplementationRevision(),
+            label: "unqualified-isolated",
+          },
+        },
+        location: { href: "app://-/index.html?initialRoute=%2Favatar-overlay" },
+        localStorage: {
+          getItem: (key: string) =>
+            key === "codexhost.voice-routes-cache.v1"
+              ? JSON.stringify({
+                  chatExperience: "chatgpt",
+                  chatConnection: "desktop",
+                  workConnection: "gateway",
+                })
+              : null,
+        },
+        document: {
+          querySelectorAll: () => [
+            { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+          ],
+        } as unknown as ParentNode,
+        setTimeout,
+        clearTimeout,
+      },
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      await f.client.fetch(
+        url,
+        options(speechBody(), {
+          originator: "codex_work_desktop",
+          "x-codex-turn-metadata": JSON.stringify({
+            backend_model_name: "codexhost/grok/grok-4",
+          }),
+        }),
+      );
+      expect(f.dispatch).toHaveBeenCalledOnce();
+      expect(f.original).not.toHaveBeenCalled();
     } finally {
       hook.dispose();
     }
@@ -1096,7 +1729,7 @@ describe("client-owned voice gateway", () => {
     }
   });
 
-  it("does not wrap hashed Work without reviewed Work/Codex evidence", async () => {
+  it("does not create a native or CPA Work call without reviewed Work/Codex evidence", async () => {
     vi.useFakeTimers();
     const f = fixture();
     const fetchClass = Object.assign(function WebFetch() {}, {
@@ -1132,8 +1765,10 @@ describe("client-owned voice gateway", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(hook.status).toBe("active");
       rememberVoiceProductExperience({ productExperience: "work" });
-      await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
-      expect(f.original).toHaveBeenCalledOnce();
+      await expect(
+        f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" })),
+      ).rejects.toThrow("Work voice is not qualified on this Desktop.");
+      expect(f.original).not.toHaveBeenCalled();
       expect(f.dispatch).not.toHaveBeenCalled();
     } finally {
       hook.dispose();
@@ -1182,13 +1817,17 @@ describe("client-owned voice gateway", () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       rememberVoiceProductExperience({ productExperience: "work" });
-      await f.client.fetch(
-        url,
-        options(speechBody(), {
-          "x-codex-turn-metadata": JSON.stringify({ backend_model_name: "codexhost/grok/grok-4" }),
-        }),
-      );
-      expect(f.original).toHaveBeenCalledOnce();
+      await expect(
+        f.client.fetch(
+          url,
+          options(speechBody(), {
+            "x-codex-turn-metadata": JSON.stringify({
+              backend_model_name: "codexhost/grok/grok-4",
+            }),
+          }),
+        ),
+      ).rejects.toThrow("Work voice is not qualified on this Desktop.");
+      expect(f.original).not.toHaveBeenCalled();
       expect(f.dispatch).not.toHaveBeenCalled();
     } finally {
       hook.dispose();
@@ -1333,8 +1972,10 @@ describe("explicit Chat launch ownership", () => {
     const request = options(speechBody(), {
       "x-codex-turn-metadata": JSON.stringify({ backend_model_name: "codexhost/grok/grok-4" }),
     });
-    await f.client.fetch(url, request);
-    expect(f.original).toHaveBeenCalledWith(url, request);
+    await expect(f.client.fetch(url, request)).rejects.toThrow(
+      "Work voice is not qualified on this Desktop.",
+    );
+    expect(f.original).not.toHaveBeenCalled();
     expect(f.dispatch).not.toHaveBeenCalled();
   });
 
@@ -1390,6 +2031,135 @@ describe("explicit Chat launch ownership", () => {
     );
     await f.client.fetch(url, options(speechBody(), { originator: "Codex Desktop" }));
     expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("blocks Chat /wham when the Chat lane is not qualified", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+      () => true,
+      (kind) =>
+        kind === "chat"
+          ? "Chat voice is not qualified on this Desktop."
+          : "Work voice is not qualified on this Desktop.",
+      () => false,
+    );
+    await expect(f.client.fetch(url, options(speechBody()))).rejects.toThrow(
+      "Chat voice is not qualified on this Desktop.",
+    );
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not passthrough hashed Chat Instant Connect /wham when native Chat owns WM", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+      () => true,
+      () => "Work voice is not qualified on this Desktop.",
+      () => true,
+      () => false,
+    );
+    await expect(f.client.fetch(url, options(speechBody()))).rejects.toThrow(
+      "Native Chat voice is unavailable",
+    );
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("passthroughs explicit Codex Chat Desktop /wham without ChatGPT Instant Connect", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+      () => true,
+      () => "Work voice is not qualified on this Desktop.",
+      () => false,
+      () => false,
+      () => false,
+    );
+    await f.client.fetch(url, options(speechBody()));
+    expect(f.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps explicit Codex Chat gateway on Host when Chat is qualified", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => true,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+      () => true,
+      () => "Work voice is not qualified on this Desktop.",
+      () => true,
+      () => false,
+      () => false,
+    );
+    await f.client.fetch(url, options(speechBody()));
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("does not send explicit Codex Chat gateway when Chat is unqualified", async () => {
+    const f = fixture();
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    wrapClientOwnedVoiceFetch(
+      f.client,
+      f.bridge,
+      () => true,
+      f.responseError,
+      () => true,
+      () => false,
+      () => false,
+      () => false,
+      () => true,
+      () => true,
+      (kind) =>
+        kind === "chat"
+          ? "Chat voice is not qualified on this Desktop."
+          : "Work voice is not qualified on this Desktop.",
+      () => false,
+      () => false,
+      () => false,
+    );
+    await expect(f.client.fetch(url, options(speechBody()))).rejects.toThrow(
+      "Chat voice is not qualified on this Desktop.",
+    );
+    expect(f.original).not.toHaveBeenCalled();
     expect(f.dispatch).not.toHaveBeenCalled();
   });
 });

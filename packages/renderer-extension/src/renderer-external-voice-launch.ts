@@ -16,6 +16,11 @@ import {
   loadedAssetNames,
   readCpaLiveVoiceHookConfig,
 } from "./renderer-cpa-live-voice-hook.js";
+import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
+import {
+  chatVoiceQualifiedOnOwner,
+  chatVoiceUserFacingUnavailable,
+} from "./renderer-voice-evidence.js";
 
 const HOOK_GLOBAL = "__codexhostExternalVoiceLaunchV1";
 const SHARED_ASSET = "app-shared-8bd9d0399038.js";
@@ -75,6 +80,22 @@ export function routeExternalVoiceLaunch(
       },
     },
   };
+}
+
+/** Owned ChatGPT Instant Connect must use composer WM. Unqualified or inactive
+ * Chat must not dispatch official overlay start onto Work CPA /wham.
+ * Explicit Codex Chat, Work, and extension-disabled traffic stay native.
+ */
+export function ownedChatgptChatStartUnavailable(
+  request: unknown,
+  owner: object = globalThis,
+): string | undefined {
+  if (!isRecord(request) || request.productExperience !== "chat") return;
+  if (!nativeChatVoicePreferenceAllowsStart(owner)) return;
+  if (!readCpaLiveVoiceHookConfig(owner)) return;
+  return chatVoiceQualifiedOnOwner(owner)
+    ? "Native Chat voice is unavailable"
+    : chatVoiceUserFacingUnavailable(owner);
 }
 
 interface LaunchHook {
@@ -146,6 +167,11 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
           let request = args[0];
           const chatStart = startNativeChatVoiceForRequest(request, target);
           if (chatStart) return chatStart;
+          const ownedChatUnavailable = ownedChatgptChatStartUnavailable(request, target);
+          if (ownedChatUnavailable) {
+            rememberVoiceProductExperience(request, target);
+            throw new Error(ownedChatUnavailable);
+          }
           try {
             request = routeExternalVoiceLaunch(request, target.__codexhostHostRoutingV1, target);
           } catch {

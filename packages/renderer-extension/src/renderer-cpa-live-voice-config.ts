@@ -1,13 +1,27 @@
 export const CPA_LIVE_VOICE_HOOK_GLOBAL = "__codexhostCpaLiveVoiceHookV1";
+export const ISOLATED_VOICE_PATHS = ["chat", "work-codex", "work-grok"] as const;
+export const ISOLATED_DESKTOP_PLATFORMS = ["darwin", "win32", "linux"] as const;
+export const PRODUCTION_DESKTOP_APP_PATH = "/Applications/ChatGPT.app";
+const PRODUCTION_WINDOWS_APPX_PATH = /(?:^|[\\/])WindowsApps[\\/]OpenAI\.(?:Codex|ChatGPT)_/i;
+
+export function isProductionDesktopAppPath(appPath: string | undefined): boolean {
+  if (typeof appPath !== "string" || appPath.length === 0) return false;
+  if (appPath === PRODUCTION_DESKTOP_APP_PATH) return true;
+  return PRODUCTION_WINDOWS_APPX_PATH.test(appPath);
+}
 
 type RecordValue = Record<string, unknown>;
+export type IsolatedVoicePath = (typeof ISOLATED_VOICE_PATHS)[number];
+export type IsolatedDesktopPlatform = (typeof ISOLATED_DESKTOP_PLATFORMS)[number];
 
 export interface IsolatedVoiceQualification {
-  path: "chat" | "work-codex" | "work-grok";
+  path?: IsolatedVoicePath;
+  paths?: IsolatedVoicePath[];
   run: string;
   expiresAt: string;
   desktopVersion: string;
   desktopBuild: string;
+  desktopPlatform: IsolatedDesktopPlatform;
   asarDigest: string;
   appPath: string;
   implementationRevision: string;
@@ -62,13 +76,70 @@ export function readCpaLiveVoiceHookConfig(globalObject: object): CpaLiveVoiceHo
   };
 }
 
-export function isIsolatedVoiceQualification(value: unknown): value is IsolatedVoiceQualification {
+export function isIsolatedVoicePath(value: unknown): value is IsolatedVoicePath {
+  return value === "chat" || value === "work-codex" || value === "work-grok";
+}
+
+export function isIsolatedDesktopPlatform(value: unknown): value is IsolatedDesktopPlatform {
+  return value === "darwin" || value === "win32" || value === "linux";
+}
+
+/** Finite parseable expiry. Unparseable strings are not treated as future dates. */
+export function isolatedQualificationExpiresAtMs(expiresAt: unknown): number | undefined {
+  if (typeof expiresAt !== "string" || expiresAt.length === 0) return undefined;
+  const parsed = Date.parse(expiresAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Explicit `paths` must be a nonempty array of distinct known paths.
+ * Malformed `paths` does not fall back to legacy `path`. Keep in sync with
+ * `packages/desktop-control/src/cpa-live-voice-hook.ts`.
+ */
+export function isolatedQualificationPathSet(value: unknown): IsolatedVoicePath[] | undefined {
+  if (!isRecord(value)) return undefined;
+  const pathsPresent = value.paths !== undefined;
+  const pathPresent = value.path !== undefined;
+  let listed: IsolatedVoicePath[] | undefined;
+  if (pathsPresent) {
+    if (!Array.isArray(value.paths) || value.paths.length === 0) return undefined;
+    if (value.paths.some((path) => !isIsolatedVoicePath(path))) return undefined;
+    if (new Set(value.paths).size !== value.paths.length) return undefined;
+    listed = ISOLATED_VOICE_PATHS.filter((path) => (value.paths as unknown[]).includes(path));
+    if (listed.length !== value.paths.length) return undefined;
+  } else if (pathPresent) {
+    if (!isIsolatedVoicePath(value.path)) return undefined;
+    listed = [value.path];
+  } else {
+    return undefined;
+  }
+  if (pathPresent) {
+    if (!isIsolatedVoicePath(value.path) || !listed.includes(value.path)) return undefined;
+  }
+  return listed;
+}
+
+/** Explicit candidate paths for one isolated run. Single `path` stays valid. */
+export function isolatedQualificationPaths(
+  isolated: Pick<IsolatedVoiceQualification, "path" | "paths">,
+): IsolatedVoicePath[] {
+  return isolatedQualificationPathSet(isolated) ?? [];
+}
+
+export function isIsolatedVoiceQualification(
+  value: unknown,
+  now: number = Date.now(),
+): value is IsolatedVoiceQualification {
   if (!isRecord(value)) return false;
+  const paths = isolatedQualificationPathSet(value);
+  if (!paths || paths.length === 0) return false;
+  if (typeof value.appPath === "string" && isProductionDesktopAppPath(value.appPath)) return false;
+  const expiresAtMs = isolatedQualificationExpiresAtMs(value.expiresAt);
+  if (expiresAtMs === undefined || expiresAtMs <= now) return false;
   return (
-    (value.path === "chat" || value.path === "work-codex" || value.path === "work-grok") &&
     typeof value.run === "string" &&
     value.run.length > 0 &&
-    typeof value.expiresAt === "string" &&
+    isIsolatedDesktopPlatform(value.desktopPlatform) &&
     typeof value.desktopVersion === "string" &&
     typeof value.desktopBuild === "string" &&
     typeof value.asarDigest === "string" &&

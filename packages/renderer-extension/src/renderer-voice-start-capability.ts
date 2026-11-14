@@ -16,7 +16,7 @@ import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
 } from "./renderer-cpa-live-voice-preference.js";
-import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
+import { workVoiceLaneEnabled, workVoiceUserFacingUnavailable } from "./renderer-voice-evidence.js";
 import { isAvatarOverlayHref } from "./renderer-overlay-thread-isolation.js";
 
 const GLOBAL = "__codexhostVoiceStartCapabilityV1";
@@ -62,12 +62,22 @@ export function wrapGatewayVoiceStarter(
     ready(): Promise<boolean>;
     prepare(allowed: () => boolean): Promise<Binding>;
     committed(binding: Binding): Promise<void>;
+    configured?(request: unknown): boolean;
+    unavailable?(request: unknown): string;
   },
 ) {
   let active: Attempt | undefined;
   return {
     async start(...args: unknown[]) {
-      if (!options.qualifies(args[0])) return start(...args);
+      const request = args[0];
+      const qualified = options.qualifies(request);
+      const wantsGateway = options.configured?.(request) ?? qualified;
+      if (!wantsGateway) return start(...args);
+      if (!qualified) {
+        throw new Error(
+          options.unavailable?.(request) ?? "Work voice is not qualified on this Desktop.",
+        );
+      }
       if (active) throw new Error("Voice gateway start is already pending");
       const attempt: Attempt = {};
       active = attempt;
@@ -186,6 +196,17 @@ export function installVoiceStartCapabilityHook(
                   if (typeof start !== "function" || typeof cancel !== "function")
                     throw new Error("Voice starter callback unavailable");
                   const wrapper = wrapGatewayVoiceStarter(start, {
+                    configured: (request) => {
+                      const mode = record(request) ? request.activeCollaborationMode : undefined;
+                      const settings = record(mode) ? mode.settings : undefined;
+                      const model = record(settings) ? settings.model : undefined;
+                      return gatewayVoiceStartRequest(
+                        request,
+                        cpaLiveVoicePreferenceAllowsInstall(target),
+                        chatLiveVoicePreferenceAllowsOverride(target),
+                        typeof model === "string" && model.startsWith("codexhost/"),
+                      );
+                    },
                     qualifies: (request) =>
                       !disposed &&
                       !!readCpaLiveVoiceHookConfig(target) &&
@@ -196,6 +217,16 @@ export function installVoiceStartCapabilityHook(
                         chatLiveVoicePreferenceAllowsOverride(target),
                         workVoiceLaneEnabled(target, "work-grok"),
                       ),
+                    unavailable: (request) => {
+                      const mode = record(request) ? request.activeCollaborationMode : undefined;
+                      const settings = record(mode) ? mode.settings : undefined;
+                      const model = record(settings) ? settings.model : undefined;
+                      const path =
+                        typeof model === "string" && model.startsWith("codexhost/")
+                          ? "work-grok"
+                          : "work-codex";
+                      return workVoiceUserFacingUnavailable(target, path);
+                    },
                     ready: async () => {
                       const hook = target.__codexhostClientOwnedVoiceV1;
                       if (!record(hook) || hook.status !== "active") return false;

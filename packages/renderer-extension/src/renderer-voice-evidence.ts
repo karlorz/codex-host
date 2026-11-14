@@ -1,9 +1,12 @@
 import {
+  isolatedQualificationPaths,
   isIsolatedVoiceQualification,
+  isProductionDesktopAppPath,
   readCpaLiveVoiceHookConfig,
   type CpaLiveVoiceHookConfig,
 } from "./renderer-cpa-live-voice-config.js";
 import {
+  hashedVoiceCandidateOwner,
   hashedVoiceProfileSupported,
   legacyRetainedVoiceLanes,
   nativeChatVoiceUnavailableReason,
@@ -256,13 +259,26 @@ function evidenceMatchesRuntime(
   return record.desktopBuild === config.desktopBuild && record.asarDigest === config.asarDigest;
 }
 
+export function isolatedVoicePathEnabled(
+  config: CpaLiveVoiceHookConfig,
+  path: VoiceEvidencePath,
+): boolean {
+  return isolatedQualificationMatches(path, config);
+}
+
 function isolatedQualificationMatches(
   path: VoiceEvidencePath,
   config: CpaLiveVoiceHookConfig,
 ): boolean {
   const isolated = config.isolatedQualification;
-  if (!isIsolatedVoiceQualification(isolated) || isolated.path !== path) return false;
-  if (Date.parse(isolated.expiresAt) <= Date.now()) return false;
+  if (!isIsolatedVoiceQualification(isolated)) return false;
+  if (!isolatedQualificationPaths(isolated).includes(path)) return false;
+  if (
+    isProductionDesktopAppPath(isolated.appPath) ||
+    isProductionDesktopAppPath(config.desktopAppPath)
+  )
+    return false;
+  if (isolated.desktopPlatform !== config.desktopPlatform) return false;
   return (
     isolated.desktopVersion === config.desktopVersion &&
     isolated.desktopBuild === config.desktopBuild &&
@@ -313,10 +329,14 @@ function decidePath(
     if (!record) {
       return { enabled: false, policy: "unreviewed", reason: "missing-evidence" };
     }
-    return {
-      enabled: true,
-      policy: record.policy === "legacy-retained" ? "legacy-retained" : "reviewed",
-    };
+    if (hashedVoiceCandidateOwner(config) && !hashedVoiceProfileSupported(config)) {
+      // Windows hashed candidates stay unreviewed; only an exact isolated marker can enable.
+    } else {
+      return {
+        enabled: true,
+        policy: record.policy === "legacy-retained" ? "legacy-retained" : "reviewed",
+      };
+    }
   }
   const digest = voiceProfileDigest(
     productForPath(path),
@@ -398,8 +418,38 @@ export function workVoiceLaneEnabledOnConfig(
 }
 
 export function workVoiceLaneEnabled(owner: object, path: "work-codex" | "work-grok"): boolean {
+  return workVoicePathDecision(owner, path).enabled;
+}
+
+/** Lane decision for fail-closed Work/Grok gating. Preference is separate. */
+export function workVoicePathDecision(
+  owner: object,
+  path: "work-codex" | "work-grok",
+): VoiceStartupPathDecision {
   const config = readCpaLiveVoiceHookConfig(owner);
-  return config ? workVoiceLaneEnabledOnConfig(config, path) : false;
+  if (!config) {
+    return {
+      enabled: false,
+      policy: "unreviewed",
+      reason: workVoiceUnavailableReason({}) ?? "Work voice is not qualified on this Desktop.",
+    };
+  }
+  return startupVoiceGate(config)[path];
+}
+
+/** Native toast text. `startupVoiceGate` keeps kebab-case reasons for debug. */
+export function workVoiceUserFacingUnavailable(
+  owner: object,
+  path: "work-codex" | "work-grok",
+): string {
+  void path;
+  const config = readCpaLiveVoiceHookConfig(owner) ?? {};
+  return workVoiceUnavailableReason(config) ?? "Work voice is not qualified on this Desktop.";
+}
+
+export function chatVoiceUserFacingUnavailable(owner: object): string {
+  const config = readCpaLiveVoiceHookConfig(owner) ?? {};
+  return nativeChatVoiceUnavailableReason(config) ?? "Chat voice is not qualified on this Desktop.";
 }
 
 export function chatVoiceQualifiedOnOwner(owner: object): boolean {

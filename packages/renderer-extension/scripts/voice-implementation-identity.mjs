@@ -7,6 +7,7 @@ export const VOICE_IMPLEMENTATION_SEED_FILES = [
   "src/renderer-client-owned-voice.ts",
   "src/renderer-cpa-live-voice-config.ts",
   "src/renderer-cpa-live-voice-hook.ts",
+  "src/renderer-external-voice-launch.ts",
   "src/renderer-hashed-native-chat-voice.ts",
   "src/renderer-hashed-overlay-voice.ts",
   "src/renderer-hashed-webpack-voice.ts",

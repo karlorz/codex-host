@@ -1,4 +1,9 @@
-import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
+import {
+  loadedAssetNames,
+  readCpaLiveVoiceHookConfig,
+  type CpaLiveVoiceHookConfig,
+} from "./renderer-cpa-live-voice-config.js";
+import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
 import {
   rememberVoiceProductExperience,
   wrapClientOwnedVoiceFetch,
@@ -6,11 +11,18 @@ import {
   type NativeVoiceFetch,
 } from "./renderer-voice-gateway-wrap.js";
 import { isWorkComposerSurface } from "./renderer-work-composer-surface.js";
-import { workVoiceLaneEnabled } from "./renderer-voice-evidence.js";
+import {
+  chatVoiceQualifiedOnOwner,
+  chatVoiceUserFacingUnavailable,
+  isolatedVoicePathEnabled,
+  workVoiceLaneEnabled,
+  workVoiceUserFacingUnavailable,
+} from "./renderer-voice-evidence.js";
 import {
   HASHED_OVERLAY_VOICE_ROLES,
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
+  hashedVoiceCandidateOwner,
   hashedVoiceProfileSupported,
 } from "./renderer-voice-profiles.js";
 
@@ -92,11 +104,16 @@ interface VoiceHook {
   dispose(): void;
 }
 
-function hashedWebpackVoiceSupported(config: {
-  desktopVersion?: string;
-  desktopPlatform?: string;
-}): boolean {
-  return hashedVoiceProfileSupported(config);
+export function hashedOverlayVoiceSupported(config: CpaLiveVoiceHookConfig): boolean {
+  if (hashedVoiceProfileSupported(config)) return true;
+  if (!hashedVoiceCandidateOwner(config)) return false;
+  return (
+    isolatedVoicePathEnabled(config, "work-codex") || isolatedVoicePathEnabled(config, "work-grok")
+  );
+}
+
+function hashedWebpackVoiceSupported(config: CpaLiveVoiceHookConfig): boolean {
+  return hashedOverlayVoiceSupported(config);
 }
 
 function cachedConnection(owner: object, field: "workConnection" | "chatConnection"): unknown {
@@ -132,8 +149,7 @@ function storageFlag(owner: object, key: string, enabledWhenUnset: boolean): boo
   }
 }
 
-function workGatewayEnabled(owner: object): boolean {
-  if (!workVoiceLaneEnabled(owner, "work-codex")) return false;
+function workGatewayPreference(owner: object): boolean {
   const connection = cachedConnection(owner, "workConnection");
   return connection !== undefined
     ? connection === "gateway"
@@ -265,6 +281,17 @@ function hookWebpackVoiceFactory(
   return true;
 }
 
+/** Instant Connect Host MCP client for hashed 26.1106. Does not wrap fetch. */
+export async function resolveHashedVoiceHostBridge(
+  importModule: (url: string) => Promise<RecordValue> = (url) => import(url),
+): Promise<NativeVoiceBridge | undefined> {
+  try {
+    return (await resolveHashedWebpackVoice(importModule))?.bridge;
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveHashedWebpackVoice(
   importModule: (url: string) => Promise<RecordValue>,
 ): Promise<{
@@ -360,13 +387,24 @@ export function installHashedOverlayVoiceHook(
     restore = wrapClientOwnedVoiceFetch(
       client,
       bridge,
-      () => workGatewayEnabled(target),
+      () => workGatewayPreference(target),
       responseError,
       () => chatGatewayEnabled(target),
       () => !overlayCompactVoiceDocument(target) && isWorkComposerSurface(target),
       () => false,
       () => overlayCompactVoiceDocument(target),
       () => workVoiceLaneEnabled(target, "work-grok"),
+      () => workVoiceLaneEnabled(target, "work-codex"),
+      (kind) =>
+        kind === "chat"
+          ? chatVoiceUserFacingUnavailable(target)
+          : workVoiceUserFacingUnavailable(
+              target,
+              kind === "external" ? "work-grok" : "work-codex",
+            ),
+      () => chatVoiceQualifiedOnOwner(target),
+      () => false,
+      () => nativeChatVoicePreferenceAllowsStart(target),
     );
     activation.wrapperActive = true;
     handle.status = "active";

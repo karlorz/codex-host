@@ -8,6 +8,7 @@ import {
 } from "../src/renderer-native-chat-voice.js";
 import {
   HASHED_NATIVE_CHAT_PREWARM_ASSET,
+  HASHED_NATIVE_CHAT_ROLES,
   HASHED_NATIVE_CHAT_START_ASSET,
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
@@ -453,6 +454,7 @@ function installFixture() {
           : assets.map((name) => ({ getAttribute: () => `app://-/assets/${name}` })),
   } as unknown as Document;
   const target = {
+    __codexhostNativeChatVoiceV1: undefined as unknown,
     __codexhostCpaLiveVoiceHookV1: {
       enabled: true,
       desktopVersion: "26.1016.62342",
@@ -1264,6 +1266,106 @@ describe("native Chat voice lifecycle installation", () => {
     }
   });
 
+  it("navigates a hashed 26.1106 voice draft from the actual loader graph after delayed adoption", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    attachReviewedVoiceEvidence(f.target.__codexhostCpaLiveVoiceHookV1, ["chat"]);
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const draft = "local-chatgpt:bf2d4b2f-43ee-49df-b802-b55c9fb345d7";
+    const backend = "a7e3282d-f457-4586-9b28-921411364f6b";
+    const origin = { pathname: "/", key: "home" };
+    f.props.conversationId = draft;
+    f.props.composerSelectionContext.conversationId = draft;
+    f.composerNode.value.chatGptSelectionContext.conversationId = draft;
+    let adopted = false;
+    const nativeGet = f.scope.get.getMockImplementation();
+    if (!nativeGet) throw new Error("Fixture native getter is missing");
+    f.scope.get.mockImplementation((selector, argument) => {
+      if (selector === f.initial.Ycr) return origin;
+      if (selector === f.initial.B1n) return adopted ? backend : null;
+      if (selector === f.initial.Y1n) return adopted ? "message" : null;
+      if (selector === f.initial.n0n)
+        return adopted ? { message: { message: { author: { role: "user" } } } } : null;
+      return nativeGet(selector, argument);
+    });
+    const roles = HASHED_NATIVE_CHAT_ROLES;
+    const initializeVoiceSession = vi.fn(async () => {
+      f.setActive(true);
+      return {
+        getVoiceNuxMode: vi.fn(async () => "none"),
+        dispatchVoiceCommand: vi.fn(),
+        clearSessionCreate: vi.fn(),
+        startVoiceWithIntroduction: vi.fn(),
+      };
+    });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === roles.startModuleId) return { initializeVoiceSession };
+        if (id === roles.prewarmModuleId) return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === roles.appScopeModuleId) return { [roles.appScopeExport]: f.shared.Qst };
+        if (id === roles.routeScopeModuleId) return { [roles.routeScopeExport]: f.initial.MOr };
+        if (id === roles.composerScopeModuleId)
+          return { [roles.composerScopeExport]: f.initial.CDr };
+        if (id === roles.storeModuleId) return { [roles.storeExport]: f.initial.SPn };
+        if (id === roles.runtimeModuleId)
+          return {
+            [roles.runtimeEnableExport]: f.initial.aT,
+            [roles.runtimeLoaderExport]: initializeVoiceSession,
+          };
+        if (id === roles.reactModuleId) return { createElement: f.createElement };
+        if (id === roles.reactDomModuleId) return { createRoot: f.createRoot };
+        if (id === roles.conversationModuleId)
+          return {
+            [roles.backendConversationExport]: f.initial.B1n,
+            [roles.transcriptMappingExport]: f.initial.n0n,
+            [roles.currentNodeExport]: f.initial.Y1n,
+          };
+        if (id === roles.locationModuleId) return { [roles.locationExport]: f.initial.Ycr };
+        if (id === roles.navigationModuleId)
+          return {
+            [roles.navigationExport]: (scope: unknown, dest: { pathname?: unknown } | string) =>
+              f.initial.Nir(scope, typeof dest === "string" ? dest : dest?.pathname),
+          };
+        if (id === roles.conversationPathModuleId)
+          return { [roles.conversationPathExport]: f.shared.Vot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+        return { __webpack_require__: Object.assign(require, { e: vi.fn(async () => {}) }) };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await hook.start();
+      f.setVisible(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(f.initial.Nir).not.toHaveBeenCalled();
+      adopted = true;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(backend);
+      expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
+        f.scope,
+        `/c/${encodeURIComponent(backend)}`,
+      );
+      expect(f.createRoot).not.toHaveBeenCalled();
+      expect(hook.activeCall).toBe(true);
+    } finally {
+      hook.dispose();
+    }
+  });
+
   it.each([
     {
       platform: "darwin",
@@ -1407,9 +1509,9 @@ describe("native Chat voice lifecycle installation", () => {
       await vi.advanceTimersByTimeAsync(500);
       expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
         f.scope,
-        `/c/${encodeURIComponent(draft)}`,
+        `/c/${encodeURIComponent(backend)}`,
       );
-      expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(draft);
+      expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(backend);
       // Native canonicalization publishes the selected Chat composer in the same AppScope.
       f.props.conversationId = backend;
       f.props.composerSelectionContext.conversationId = backend;

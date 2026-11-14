@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { createServer } from "node:http";
@@ -8,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   consoleEntrypoint,
   createHostConsoleOpener,
+  isolatedHostConsolePort,
   parseConsoleAddress,
 } from "../src/console-opener.js";
 
@@ -117,5 +120,64 @@ describe("Host console opener", () => {
         fakeChild("", "codexhost console: port 4399 is used by another program\n", 1)) as never,
     });
     await expect(opener.open()).rejects.toThrow("port 4399 is used by another program");
+  });
+
+  it("pins a unique console port for an isolated Host data directory", async () => {
+    const data = await mkdtemp(path.join(tmpdir(), "codexhost-isolated-console-"));
+    const spawnProcess = vi.fn(() =>
+      fakeChild("codexhost console: http://127.0.0.1:54321/\n", "", 0),
+    );
+    const opener = createHostConsoleOpener({
+      entrypoint: "/console.mjs",
+      environment: { CODEXHOST_DATA_DIR: data },
+      spawnProcess: spawnProcess as never,
+    });
+    await opener.open();
+    const port = isolatedHostConsolePort(data);
+    expect(port).not.toBe("4399");
+    expect(Number(port)).toBeGreaterThanOrEqual(49152);
+    expect(Number(port)).toBeLessThanOrEqual(65535);
+    expect(spawnProcess).toHaveBeenCalledWith(
+      process.execPath,
+      ["/console.mjs", "open"],
+      expect.objectContaining({ env: expect.objectContaining({ CODEXHOST_CONSOLE_PORT: port }) }),
+    );
+    expect(await readFile(path.join(data, "console", "listen-port"), "utf8")).toBe(`${port}\n`);
+  });
+
+  it("keeps an explicit console port and the default shared-Host port", async () => {
+    const spawnIsolated = vi.fn(() =>
+      fakeChild("codexhost console: http://127.0.0.1:51234/\n", "", 0),
+    );
+    await createHostConsoleOpener({
+      entrypoint: "/console.mjs",
+      environment: {
+        CODEXHOST_DATA_DIR: "/tmp/codexhost-isolated-host",
+        CODEXHOST_CONSOLE_PORT: "51234",
+      },
+      spawnProcess: spawnIsolated as never,
+    }).open();
+    expect(spawnIsolated).toHaveBeenCalledWith(
+      process.execPath,
+      ["/console.mjs", "open"],
+      expect.objectContaining({
+        env: expect.objectContaining({ CODEXHOST_CONSOLE_PORT: "51234" }),
+      }),
+    );
+    const spawnDefault = vi.fn(() =>
+      fakeChild("codexhost console: http://127.0.0.1:4399/\n", "", 0),
+    );
+    await createHostConsoleOpener({
+      entrypoint: "/console.mjs",
+      environment: { CODEXHOST_DATA_DIR: path.join(homedir(), ".codexhost") },
+      spawnProcess: spawnDefault as never,
+    }).open();
+    expect(spawnDefault).toHaveBeenCalledWith(
+      process.execPath,
+      ["/console.mjs", "open"],
+      expect.objectContaining({
+        env: { CODEXHOST_DATA_DIR: path.join(homedir(), ".codexhost") },
+      }),
+    );
   });
 });

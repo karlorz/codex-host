@@ -23,6 +23,7 @@ import {
   publishRemoteControlAppServerDescriptor,
 } from "./remote-control-app-server.js";
 import { createRemoteAppServerWebSocketListener } from "./remote-app-server.js";
+import { consoleEntrypoint, createHostConsoleOpener } from "./console-opener.js";
 
 /** Rust owns the process tree. This owner outlives every Web/Desktop connection. */
 export async function runSharedHostService(
@@ -143,6 +144,14 @@ export async function runSharedHostService(
                 environment: hostEnvironment,
               })
             : undefined;
+        const consoleEntry =
+          runtimePath &&
+          path.isAbsolute(runtimePath) &&
+          hostEnvironment.CODEXHOST_LAUNCHER_EXECUTABLE &&
+          hostEnvironment.CODEXHOST_REMOTE_SSH_MANAGED !== "1"
+            ? consoleEntrypoint(runtimePath)
+            : null;
+        if (consoleEntry) usageStatistics.warm();
         const host = new AppServerHost({
           stockCodexPath: values["stock-codex"] ?? "",
           arguments: [],
@@ -162,6 +171,14 @@ export async function runSharedHostService(
           ...installed,
           ...(values.plugins
             ? { pluginRoots: [values.plugins, ...installed.pluginRoots.slice(1)] }
+            : {}),
+          ...(consoleEntry
+            ? {
+                consoleOpener: createHostConsoleOpener({
+                  entrypoint: consoleEntry,
+                  environment: hostEnvironment,
+                }),
+              }
             : {}),
           enrollment,
           onDelegationApi: (api, extras) => {

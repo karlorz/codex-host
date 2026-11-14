@@ -3,10 +3,15 @@ import { describe, expect, it } from "vitest";
 import { selectVoiceAssets, supportsVoiceVersion } from "../src/renderer-voice-assets.js";
 import {
   CLIENT_OWNED_VOICE_ASSETS,
+  HASHED_26_1106_VOICE_EVALUATOR,
+  HASHED_26_1106_VOICE_NATIVE_BYTES,
+  HASHED_OVERLAY_VOICE_ROLES,
+  VOICE_CAPABILITY_REASONS,
   HASHED_WEBPACK_VOICE_VERSION,
   HISTORICAL_CPA_LIVE_VOICE_DESKTOP_VERSION,
   NATIVE_CHAT_VOICE_ASSETS,
   digestJson,
+  hashedVoiceCandidateOwner,
   hashedVoiceProfileSupported,
   nativeChatVoiceKind,
   reviewedOverlayHookDesktopVersions,
@@ -83,6 +88,21 @@ describe("audited voice profile owner", () => {
         desktopPlatform: "win32",
       }),
     ).toBeUndefined();
+    expect(
+      hashedVoiceCandidateOwner({
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        desktopPlatform: "win32",
+      }),
+    ).toBe(true);
+    expect(
+      hashedVoiceCandidateOwner({
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        desktopPlatform: "linux",
+      }),
+    ).toBe(false);
+    expect(voiceProfileOwner("chat", "win32", HASHED_WEBPACK_VOICE_VERSION)).toEqual(
+      expect.objectContaining({ kind: "hashed-chat", platform: "win32" }),
+    );
   });
 
   it("exposes overlay Controller versions from Chat, Work and retained pins", () => {
@@ -143,6 +163,40 @@ describe("audited voice profile owner", () => {
     ] as const) {
       expect(digestJson({ ...work, [field]: "mutated" })).not.toBe(workDigest);
     }
+  });
+
+  it("pins hashed 26.1106 Instant Connect access to eFn4.Y3 unsupported-auth", () => {
+    expect(HASHED_OVERLAY_VOICE_ROLES.capabilityModuleId).toBe("ChYf");
+    expect(HASHED_OVERLAY_VOICE_ROLES.voiceAccessModuleId).toBe("eFn4");
+    expect(HASHED_OVERLAY_VOICE_ROLES.voiceAccessExport).toBe("Y3");
+    expect(HASHED_26_1106_VOICE_EVALUATOR).toEqual({
+      accessPolicy: "realtime-voice",
+      enableStatsig: "2380644311",
+      firstPartyStatsig: "3683713372",
+      unsupportedAuthReason: "unsupported-auth",
+      inAppVoiceFeature: "in_app_voice",
+      capabilityFamilyKind: "readable-family",
+      inferenceGateFamilyKind: "signal-family",
+      accessAtomLibrary: "un",
+      capabilityAtomLibrary: "i1",
+      accessFactoryCache: "string",
+    });
+    expect(HASHED_26_1106_VOICE_NATIVE_BYTES).toEqual({
+      atomLibrary: "un:()=>U.u,i1:()=>a.i1",
+      accessExport: "Y3:()=>P",
+      accessCtor: "P=(0,r.un)(l.u,({get:e})=>e(A).voice,{isEqual:X}",
+      capabilityCtor: "h=(0,r.i1)(l.u,(e,{get:t})=>{",
+    });
+    expect(VOICE_CAPABILITY_REASONS).toEqual([
+      "access-replay",
+      "inference-replay",
+      "other-denial",
+      "access-shape",
+      "native-ineligible",
+      "unsupported",
+      "pending",
+      "disabled",
+    ]);
   });
 
   it("emits an implementation revision without fabricating reviewed evidence", () => {

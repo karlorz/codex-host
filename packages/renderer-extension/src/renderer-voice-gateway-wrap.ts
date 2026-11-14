@@ -20,18 +20,53 @@ export interface NativeVoiceFetch {
   fetch(url: string, options?: RequestInit): Promise<Response>;
 }
 
-export function requestVoiceHost(
+const HOST_MCP_TIMEOUT_MESSAGE = "Host request timed out";
+const HOST_MCP_UNAVAILABLE_MESSAGE = "Local Host connection is unavailable";
+export const DIRECT_VOICE_HOST_GLOBAL = "__codexhostVoiceHostV1";
+
+export interface DirectVoiceHostCapability {
+  request(method: string, params: Record<string, unknown>): Promise<unknown>;
+}
+
+export function resolveDirectVoiceHost(
+  owner: object = globalThis,
+): DirectVoiceHostCapability | null {
+  const value = Reflect.get(owner, DIRECT_VOICE_HOST_GLOBAL);
+  if (!value || typeof value !== "object") return null;
+  const request = Reflect.get(value, "request");
+  return typeof request === "function"
+    ? { request: request.bind(value) as DirectVoiceHostCapability["request"] }
+    : null;
+}
+
+function hostMcpStage(
+  value: unknown,
+): "config" | "request" | "transport" | "identity" | "cancel" | "rpc" {
+  return value === "config" ||
+    value === "request" ||
+    value === "transport" ||
+    value === "identity" ||
+    value === "cancel"
+    ? value
+    : "rpc";
+}
+
+/** JSON-RPC over Instant Connect mcp-request. Native AppServer sendRequest rejects
+ * unknown `codexhost/` variants before Host sees them. */
+export function requestLocalHostMcp(
   bridge: NativeVoiceBridge,
+  method: string,
   params: RecordValue,
-  method: string = REALTIME_CALL_METHOD,
+  options: { timeoutMs?: number } = {},
 ): Promise<unknown> {
   const id = `codexhost-voice:${crypto.randomUUID()}`;
+  const timeoutMs = options.timeoutMs ?? 10_000;
   return new Promise((resolve, reject) => {
     let unsubscribe = () => {};
     const timer = setTimeout(() => {
       unsubscribe();
-      reject(new Error("Voice gateway did not answer in time"));
-    }, 30_000);
+      reject(new Error(HOST_MCP_TIMEOUT_MESSAGE));
+    }, timeoutMs);
     const done = () => {
       clearTimeout(timer);
       unsubscribe();
@@ -45,8 +80,19 @@ export function requestVoiceHost(
       )
         return;
       done();
-      if (event.message.error) reject(new Error("Configured voice gateway request failed"));
-      else resolve(event.message.result);
+      if (event.message.error) {
+        const error = object(event.message.error) ? event.message.error : undefined;
+        const data = object(error?.data) ? error.data : undefined;
+        const message =
+          typeof error?.message === "string" &&
+          error.message.length > 0 &&
+          error.message.length <= 500
+            ? error.message
+            : "Host request failed";
+        reject(Object.assign(new Error(message), { stage: hostMcpStage(data?.stage) }));
+        return;
+      }
+      resolve(event.message.result);
     });
     try {
       bridge.dispatchMessage("mcp-request", {
@@ -55,9 +101,38 @@ export function requestVoiceHost(
       });
     } catch {
       done();
-      reject(new Error("Voice gateway Host connection is unavailable"));
+      reject(new Error(HOST_MCP_UNAVAILABLE_MESSAGE));
     }
   });
+}
+
+export function requestVoiceHost(
+  _bridge: NativeVoiceBridge | null | undefined,
+  params: RecordValue,
+  method: string = REALTIME_CALL_METHOD,
+): Promise<unknown> {
+  const host = resolveDirectVoiceHost();
+  if (!host) {
+    chatVoiceDebug("gateway-create", { stage: "rpc", cause: "host-unavailable" });
+    return Promise.reject(new Error("Voice gateway Host connection is unavailable"));
+  }
+  return host.request(method, params).then(
+    (result) => result,
+    (error) => {
+      const message = error instanceof Error ? error.message : "";
+      if (message === HOST_MCP_TIMEOUT_MESSAGE || /timed out/i.test(message)) {
+        chatVoiceDebug("gateway-create", { stage: "rpc", cause: "timeout" });
+        throw new Error("Voice gateway did not answer in time");
+      }
+      if (message === HOST_MCP_UNAVAILABLE_MESSAGE) {
+        chatVoiceDebug("gateway-create", { stage: "rpc", cause: "host-unavailable" });
+        throw new Error("Voice gateway Host connection is unavailable");
+      }
+      const stage = error instanceof Error && "stage" in error ? hostMcpStage(error.stage) : "rpc";
+      chatVoiceDebug("gateway-create", { stage, cause: "failed" });
+      throw new Error("Configured voice gateway request failed");
+    },
+  );
 }
 
 function parseRealtimeCallResponse(value: unknown): {
@@ -157,6 +232,14 @@ export function wrapClientOwnedVoiceFetch(
   externalHarness: () => boolean = () => false,
   overlayExistingCall: () => boolean = () => false,
   externalLane: () => boolean = () => true,
+  workLane: () => boolean = () => true,
+  unavailableReason: (kind: "work" | "external" | "chat") => string = (kind) =>
+    kind === "chat"
+      ? "Chat voice is not qualified on this Desktop."
+      : "Work voice is not qualified on this Desktop.",
+  chatLane: () => boolean = () => true,
+  allowChatNativeWham: () => boolean = () => true,
+  chatgptInstantConnect: () => boolean = () => true,
 ): () => void {
   const original = client.fetch;
   const wrapped: NativeVoiceFetch["fetch"] = async function (this: NativeVoiceFetch, url, options) {
@@ -185,17 +268,37 @@ export function wrapClientOwnedVoiceFetch(
           isWorkBackendModel(model) ||
           workSurface()));
     const external = !chat && (model.startsWith("codexhost/") || externalHarness());
-    const gateway = external ? externalLane() : work ? workOverride() : chatOverride();
+    const intendedGateway = external ? true : work ? workOverride() : chatOverride();
+    const chatQualified = chatLane();
+    const qualified = external ? externalLane() : work ? workLane() : chat ? chatQualified : true;
+    const chatgptNative = chat && chatgptInstantConnect();
+    const nativeChatWham =
+      chatgptNative && !intendedGateway && allowChatNativeWham() && chatQualified;
+    let route: "desktop" | "gateway" | "blocked";
+    if (chatgptNative && !chatQualified) route = "blocked";
+    else if (chatgptNative && !intendedGateway && !nativeChatWham) route = "blocked";
+    else if (chat && intendedGateway && !chatQualified) route = "blocked";
+    else if (!intendedGateway) route = "desktop";
+    else if (qualified) route = "gateway";
+    else route = "blocked";
     chatVoiceDebug("wham-create", {
       work,
       external,
-      route: gateway ? "gateway" : "desktop",
+      route,
       productExperience: experience ?? "unset",
       originator: originator ?? "unset",
       overlayWork,
       overlayHostCreate,
     });
-    if (!gateway) {
+    if (route === "blocked") {
+      if (chat) {
+        throw new Error(
+          chatQualified ? "Native Chat voice is unavailable" : unavailableReason("chat"),
+        );
+      }
+      throw new Error(unavailableReason(external ? "external" : "work"));
+    }
+    if (route === "desktop") {
       if (!external && !work)
         chatVoiceDebug("chat-native-passthrough", {
           hasThreadId: new Headers(options.headers).has("Thread-Id"),
@@ -213,14 +316,26 @@ export function wrapClientOwnedVoiceFetch(
     };
     options.signal?.addEventListener("abort", cancel, { once: true });
     try {
-      const result = parseRealtimeCallResponse(
-        await requestVoiceHost(bridge, {
-          operation: "create",
-          requestId,
-          body: options.body,
-          headers: filterRealtimeCallHeaders(Object.fromEntries(new Headers(options.headers))),
-        }),
-      );
+      let result: ReturnType<typeof parseRealtimeCallResponse>;
+      try {
+        result = parseRealtimeCallResponse(
+          await requestVoiceHost(bridge, {
+            operation: "create",
+            requestId,
+            body: options.body,
+            headers: filterRealtimeCallHeaders(Object.fromEntries(new Headers(options.headers))),
+          }),
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === "Invalid voice gateway response")
+          chatVoiceDebug("gateway-create", { stage: "response", cause: "invalid" });
+        throw error;
+      }
+      chatVoiceDebug("gateway-create", {
+        stage: "status",
+        status: result.status,
+        ok: result.status >= 200 && result.status < 300,
+      });
       if (options.signal?.aborted) {
         const callId = realtimeCallIdFromLocation(result.headers.location ?? "");
         if (result.status >= 200 && result.status < 300 && isRealtimeCallId(callId))

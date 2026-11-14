@@ -4,11 +4,24 @@
  * Never targets /Applications/ChatGPT.app or ~/Applications/ChatGPT.app.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  isolatedScratchHostChainEnvironment,
+  redactScratchHostChainEnvironment,
+} from "./scratch-host-chain.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const IMPACT = path.join(ROOT, ".codexhost", "update-impact");
@@ -32,19 +45,43 @@ export const DISCOVERY_APPS = [
 ];
 
 export function usage() {
-  return `usage: npm run scratch:candidate -- [--print|--launch] [--bundle <ChatGPT.app>]
+  return `usage: npm run scratch:candidate -- [--print|--launch] [--bundle <ChatGPT.app>] [--host-chain <json>]
 
 Launch or describe a scratch Sparkle candidate. Does not stop production Desktop.
+Without --host-chain, LaunchServices starts stock Codex AppServer only (no Shim).
+The open child environment is stripped of inherited CODEX_CLI_PATH and CODEXHOST_*
+control/auth variables so no-chain mode cannot inherit production Shim/Host.
+With --host-chain, the same LaunchServices open then sets isolated Shim/Host
+settings from a verified live native launcher PID, 32-lowercase-hex nonce, and
+canonical isolated data/descriptor/official-bundle CLI. Never pass production
+~/.codexhost or the production runtime descriptor. Does not widen the voice CDP
+binding.
 
 options:
   --print             print paths, production PIDs, and the launch plan
   --launch            start the scratch executable with an isolated user-data dir
   --bundle <app>      ChatGPT.app under .codexhost/update-impact (default: newest)
+  --host-chain <json> isolated Shim/Host chain object (absolute paths)
   --help              show this help`;
 }
 
+export function parseHostChainFile(filePath) {
+  if (typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    throw new Error("--host-chain requires an absolute JSON path");
+  }
+  const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+  isolatedScratchHostChainEnvironment(parsed);
+  return parsed;
+}
+
 export function parseArguments(arguments_) {
-  const options = { help: false, print: false, launch: false, bundle: undefined };
+  const options = {
+    help: false,
+    print: false,
+    launch: false,
+    bundle: undefined,
+    hostChain: undefined,
+  };
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--help" || argument === "-h") {
@@ -66,6 +103,14 @@ export function parseArguments(arguments_) {
       const value = arguments_[index + 1];
       if (!value || value.startsWith("--")) throw new Error("--bundle requires a ChatGPT.app path");
       options.bundle = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--host-chain") {
+      if (options.hostChain) throw new Error("--host-chain may only be provided once");
+      const value = arguments_[index + 1];
+      if (!value || value.startsWith("--")) throw new Error("--host-chain requires a JSON path");
+      options.hostChain = parseHostChainFile(path.resolve(value));
       index += 1;
       continue;
     }
@@ -158,8 +203,35 @@ function freePort() {
   });
 }
 
-export function launchPlan(bundle, port) {
+export function packagedCodexCliFromBundle(app) {
+  const nested = path.join(app, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex");
+  const legacy = path.join(app, "Contents/Resources/codex");
+  const cli = existsSync(nested) ? nested : legacy;
+  if (!existsSync(cli) || !statSync(cli).isFile()) {
+    throw new Error("scratch bundle is missing the official Codex CLI");
+  }
+  return realpathSync(cli);
+}
+
+export function sanitizedScratchLaunchEnvironment(source = process.env) {
+  return Object.fromEntries(
+    Object.entries(source).filter(
+      ([key, value]) =>
+        value !== undefined && key !== "CODEX_CLI_PATH" && !key.startsWith("CODEXHOST_"),
+    ),
+  );
+}
+
+export function launchPlan(bundle, port, hostChain) {
   const layout = layoutForBundle(bundle.app);
+  let chainEnvironment = {};
+  if (hostChain) {
+    chainEnvironment = isolatedScratchHostChainEnvironment(hostChain);
+    const officialCli = packagedCodexCliFromBundle(bundle.app);
+    if (chainEnvironment.CODEXHOST_STOCK_CODEX_PATH !== officialCli) {
+      throw new Error("scratch Host chain stock Codex must be the official bundle CLI");
+    }
+  }
   return {
     launchMethod: "launch-services",
     installRoot: layout.app,
@@ -174,6 +246,7 @@ export function launchPlan(bundle, port) {
     environment: {
       CODEXHOST_INSTALL_ROOT: layout.app,
       CODEX_ELECTRON_USER_DATA_PATH: layout.userData,
+      ...chainEnvironment,
     },
   };
 }
@@ -276,10 +349,36 @@ function wait(ms) {
   });
 }
 
+export function publicScratchDescription(description) {
+  const redacted = {
+    ...description,
+    scratch: {
+      ...description.scratch,
+      environment: redactScratchHostChainEnvironment(description.scratch.environment),
+    },
+  };
+  const invocation = description.launchInvocation;
+  if (!invocation || !Array.isArray(invocation.arguments)) return redacted;
+  return {
+    ...redacted,
+    launchInvocation: {
+      ...invocation,
+      arguments: invocation.arguments.map((argument) =>
+        typeof argument === "string" && argument.startsWith("CODEXHOST_CONTROL_NONCE=")
+          ? "CODEXHOST_CONTROL_NONCE=(set)"
+          : argument,
+      ),
+    },
+  };
+}
+
 export async function describeScratch(options, listProcesses = defaultProcessList) {
   const bundle = resolveBundle(options.bundle);
-  const port = await freePort();
-  const plan = launchPlan(bundle, port);
+  const port = options.cdpPort === undefined ? await freePort() : Number(options.cdpPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("scratch remote debugging port must be an integer 1–65535");
+  }
+  const plan = launchPlan(bundle, port, options.hostChain);
   return {
     productionApp: PRODUCTION_APP,
     productionPids: productionDesktopPids(listProcesses),
@@ -303,6 +402,7 @@ export async function launchScratch(options, listProcesses = defaultProcessList)
   const opened = spawnSync(invocation.command, invocation.arguments, {
     encoding: "utf8",
     timeout: 15_000,
+    env: sanitizedScratchLaunchEnvironment(),
   });
   if (opened.status !== 0) {
     throw new Error(
@@ -370,7 +470,7 @@ async function main() {
     return;
   }
   const result = options.launch ? await launchScratch(options) : await describeScratch(options);
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(publicScratchDescription(result), null, 2)}\n`);
 }
 
 const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

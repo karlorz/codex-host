@@ -60,6 +60,212 @@ describe("voice candidate discovery", () => {
     );
   });
 
+  it("does not treat duplicate copies of the same factory as distinct role owners", () => {
+    const prewarm = {
+      id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+      digest: "canonical-prewarm",
+      exports: ["VoiceInstantConnectCacheController", "disposeVoicePrewarm"],
+      imports: ["HWpc"],
+    };
+    const result = discoverVoiceCandidate({
+      platform: "darwin",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.startModuleId,
+          path: HASHED_NATIVE_CHAT_START_ASSET,
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+        },
+        { ...prewarm, path: HASHED_NATIVE_CHAT_START_ASSET },
+        { ...prewarm, path: HASHED_NATIVE_CHAT_PREWARM_ASSET },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.appScopeModuleId,
+          path: "514766.js",
+          exports: ["u"],
+          brands: ["AppScope"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId,
+          path: "739301.js",
+          exports: ["GD"],
+          brands: ["RouteScope"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId,
+          path: "739301.js",
+          exports: ["PR"],
+          brands: ["ComposerScope"],
+        },
+      ],
+    });
+    expect(result.kind).toBe("hashed-chat");
+    expect(result.issues.map((issue) => issue.code)).not.toContain("ambiguous-roles");
+    expect(result.issues.map((issue) => issue.code)).not.toContain("wrong-role");
+  });
+
+  it("does not treat callee-only mentions as hashed role owners", () => {
+    const result = discoverVoiceCandidate({
+      platform: "darwin",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.startModuleId,
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+        },
+        {
+          id: "nV4r",
+          callees: ["initializeVoiceSession", "dispatchVoiceCommand"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          exports: ["VoiceInstantConnectCacheController"],
+        },
+        { id: HASHED_NATIVE_CHAT_ROLES.appScopeModuleId, brands: ["AppScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId, brands: ["RouteScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId, brands: ["ComposerScope"] },
+      ],
+    });
+    expect(result.issues.map((issue) => issue.code)).not.toContain("ambiguous-roles");
+    expect(result.issues.map((issue) => issue.code)).not.toContain("wrong-role");
+  });
+
+  it("keeps same-shape factories with different implementation identity as ambiguous", () => {
+    const result = discoverVoiceCandidate({
+      platform: "darwin",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.startModuleId,
+          digest: "start",
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "a.js",
+          digest: "prewarm-a",
+          exports: ["VoiceInstantConnectCacheController"],
+          imports: ["HWpc"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "b.js",
+          digest: "prewarm-b",
+          exports: ["VoiceInstantConnectCacheController"],
+          imports: ["HWpc"],
+        },
+        { id: HASHED_NATIVE_CHAT_ROLES.appScopeModuleId, digest: "app", brands: ["AppScope"] },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId,
+          digest: "route",
+          brands: ["RouteScope"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId,
+          digest: "composer",
+          brands: ["ComposerScope"],
+        },
+      ],
+    });
+    expect(result.kind).toBe("hashed-chat");
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        { code: "ambiguous-roles", details: ["VoiceInstantConnectCacheController"] },
+      ]),
+    );
+  });
+
+  it("does not collapse snapshot copies without proven implementation identity", () => {
+    const result = discoverVoiceCandidate({
+      platform: "darwin",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.startModuleId,
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "a.js",
+          exports: ["VoiceInstantConnectCacheController"],
+          imports: ["HWpc"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "b.js",
+          exports: ["VoiceInstantConnectCacheController"],
+          imports: ["HWpc"],
+        },
+        { id: HASHED_NATIVE_CHAT_ROLES.appScopeModuleId, brands: ["AppScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId, brands: ["RouteScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId, brands: ["ComposerScope"] },
+      ],
+    });
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        { code: "ambiguous-roles", details: ["VoiceInstantConnectCacheController"] },
+      ]),
+    );
+  });
+
+  it("keeps conflicting copies of the same module id as ambiguous role owners", () => {
+    const result = discoverVoiceCandidate({
+      platform: "darwin",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.startModuleId,
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "a.js",
+          exports: ["VoiceInstantConnectCacheController"],
+          imports: ["HWpc"],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_ROLES.prewarmModuleId,
+          path: "b.js",
+          exports: ["VoiceInstantConnectCacheController", "otherRole"],
+          imports: ["HWpc"],
+        },
+        { id: HASHED_NATIVE_CHAT_ROLES.appScopeModuleId, brands: ["AppScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId, brands: ["RouteScope"] },
+        { id: HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId, brands: ["ComposerScope"] },
+      ],
+    });
+    expect(result.kind).toBe("hashed-chat");
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        { code: "ambiguous-roles", details: ["VoiceInstantConnectCacheController"] },
+      ]),
+    );
+  });
+
   it("rejects ambiguous hashed semantic roles", () => {
     const owned = {
       callees: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
@@ -329,6 +535,63 @@ describe("voice candidate discovery", () => {
     expect(result.activation).toBe("rejected");
     expect(result.kind).toBe("unknown");
     expect(result.issues.map((issue) => issue.code)).toContain("wrong-role");
+  });
+
+  it("rejects hashed win32 26.1106 as reviewed-support wrong-platform, not missing loader", () => {
+    const result = discoverVoiceCandidate({
+      platform: "win32",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      asarDigest: "54b74a9131680fc9eead711ed5d9f718f6127c22222ca60d2e3b577a707e2485",
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+    });
+    expect(result.kind).toBe("hashed-chat");
+    expect(result.activation).toBe("rejected");
+    expect(result.issues).toEqual([
+      { code: "wrong-platform", details: [HASHED_WEBPACK_VOICE_VERSION] },
+    ]);
+  });
+
+  it("reports exact hashed wrong-role details for n.d exports without scope brands", () => {
+    const result = discoverVoiceCandidate({
+      platform: "win32",
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      asarDigest: "54b74a9131680fc9eead711ed5d9f718f6127c22222ca60d2e3b577a707e2485",
+      assets: [
+        HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
+        HASHED_NATIVE_CHAT_START_ASSET,
+        HASHED_NATIVE_CHAT_PREWARM_ASSET,
+      ],
+      sources: [
+        {
+          id: HASHED_NATIVE_CHAT_START_ASSET,
+          path: HASHED_NATIVE_CHAT_START_ASSET,
+          exports: ["initializeVoiceSession", "dispatchVoiceCommand", "startVoiceWithIntroduction"],
+          imports: [
+            HASHED_NATIVE_CHAT_ROLES.appScopeModuleId,
+            HASHED_NATIVE_CHAT_ROLES.routeScopeModuleId,
+            HASHED_NATIVE_CHAT_ROLES.composerScopeModuleId,
+          ],
+        },
+        {
+          id: HASHED_NATIVE_CHAT_PREWARM_ASSET,
+          path: HASHED_NATIVE_CHAT_PREWARM_ASSET,
+          exports: ["VoiceInstantConnectCacheController"],
+        },
+      ],
+    });
+    expect(result.kind).toBe("hashed-chat");
+    expect(result.activation).toBe("rejected");
+    expect(result.issues).toEqual([
+      {
+        code: "wrong-role",
+        details: ["AppScope", "RouteScope", "ComposerScope"],
+      },
+      { code: "wrong-platform", details: [HASHED_WEBPACK_VOICE_VERSION] },
+    ]);
   });
 
   it("does not treat a Work overlay asset as native Chat", () => {

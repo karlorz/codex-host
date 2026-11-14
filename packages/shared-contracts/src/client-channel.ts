@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { harnessModelRefSchema, harnessThinkingOptionIdSchema } from "./harness-models.js";
 import { harnessPermissionModeIdSchema } from "./harness-permission-modes.js";
+import { REALTIME_CALL_METHOD } from "./realtime-call-core.js";
+import { VOICE_GATEWAY_STATUS_METHOD, VOICE_SETTINGS_METHOD } from "./voice-settings.js";
 
 /** Authenticated local owner channel. Notifications invalidate state; they are
  * NOT appendable transcript deltas. Clients reconcile absolute snapshots. */
@@ -10,6 +12,9 @@ export const CLIENT_REQUEST_LIMIT_BYTES = 128 * 1024 * 1024;
 export const CLIENT_CHANNEL_METHODS = [
   "codexhost/voice/status",
   "codexhost/voice/transcribe",
+  VOICE_SETTINGS_METHOD,
+  VOICE_GATEWAY_STATUS_METHOD,
+  REALTIME_CALL_METHOD,
   "codexhost/harness/display-settings/get",
   "codexhost/harness/display-settings/set",
   "codexhost/harness/display-settings/capabilities",

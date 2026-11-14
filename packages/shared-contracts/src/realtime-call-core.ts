@@ -26,8 +26,9 @@ export function filterRealtimeCallHeaders(
   return result;
 }
 
-/** The single accepted identity form for a gateway-created realtime call. */
-export const REALTIME_CALL_ID_PATTERN = /^rtc_[A-Za-z0-9_-]{1,128}$/u;
+/** Gateway-created realtime call identity. Codex `rtc_` remains valid; configured
+ * CPA also forwards `/calls/<id>` values without that prefix. */
+export const REALTIME_CALL_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
 
 export function isRealtimeCallId(value: unknown): value is string {
   return typeof value === "string" && REALTIME_CALL_ID_PATTERN.test(value);
@@ -36,8 +37,7 @@ export function isRealtimeCallId(value: unknown): value is string {
 /**
  * Reads the created call identity from a gateway `Location` response header: a bare
  * identity, or the trailing segment after `/calls/` or `/live/`, ignoring any query
- * string or fragment. Callers that require the strict `rtc_` form check the result
- * with {@link isRealtimeCallId}.
+ * string or fragment. Host create uses {@link isRealtimeCallId} on this value.
  */
 export function realtimeCallIdFromLocation(location: string): string | undefined {
   const path = location.split(/[?#]/u)[0] ?? "";

@@ -4,6 +4,7 @@ import {
   type VoiceSettingsRequest,
   type VoiceSettingsState,
 } from "@codexhost/shared-contracts";
+import { chatVoiceDebug } from "../renderer-chat-voice-debug.js";
 import { desktopVoiceCallActive } from "../voice-settings-sync.js";
 import { h, button } from "../console/dom.js";
 import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext } from "./core.js";
@@ -14,6 +15,12 @@ import {
   preferenceId,
 } from "./preference-ui.js";
 import { voiceMessages } from "./voice-messages.js";
+import {
+  voiceSettingsAvailabilityFooter,
+  voiceSettingsEffectiveStatus,
+  voiceSettingsEffectiveStatusKey,
+  voiceSettingsRouteStatus,
+} from "./voice-status.js";
 
 export type VoiceSettingsRequestClient = (input: VoiceSettingsRequest) => Promise<unknown>;
 
@@ -42,6 +49,7 @@ export function createVoiceSettingsPage(
       let advanced = false;
       let setup = false;
       let error: string | null = null;
+      let availabilityKey = "";
       const ids = new Map<string, string>();
       const controlId = (key: string) => {
         const existing = ids.get(key);
@@ -67,8 +75,18 @@ export function createVoiceSettingsPage(
         try {
           const next = voiceSettingsStateSchema.parse(await request({ operation: "get" }));
           if (disposed || generation !== currentGeneration) return;
-          const changed = JSON.stringify(state) !== JSON.stringify(next) || offline || reset;
-          if (reset || !dirty()) {
+          const keepDraft = !reset && dirty();
+          const displayedSettings = keepDraft && draft ? draft : next.settings;
+          const nextAvailabilityKey =
+            options.desktop && doc.defaultView
+              ? voiceSettingsEffectiveStatusKey(doc.defaultView, displayedSettings)
+              : "";
+          const changed =
+            JSON.stringify(state) !== JSON.stringify(next) ||
+            offline ||
+            reset ||
+            nextAvailabilityKey !== availabilityKey;
+          if (!keepDraft) {
             base = next;
             draft = { ...next.settings };
           }
@@ -79,8 +97,16 @@ export function createVoiceSettingsPage(
             confirm = false;
           }
           if (changed) render();
-        } catch {
+        } catch (failure) {
           if (!disposed && generation === currentGeneration) {
+            const hostUnavailable =
+              failure instanceof Error &&
+              failure.message === "Local Host connection is unavailable";
+            const invalid = failure instanceof Error && failure.name === "ZodError";
+            chatVoiceDebug("voice-settings-load", {
+              stage: hostUnavailable ? "rpc" : invalid ? "response" : "rpc",
+              cause: hostUnavailable ? "host-unavailable" : invalid ? "invalid" : "failed",
+            });
             offline = true;
             render();
           }
@@ -216,7 +242,8 @@ export function createVoiceSettingsPage(
         );
         gateway.item.append(gatewayActions);
         config.card.append(gateway.item);
-        const hook = options.desktop ? desktopVoiceHookStatus(doc.defaultView) : "unknown";
+        const view = doc.defaultView;
+        const hook = options.desktop ? desktopVoiceHookStatus(view) : "unknown";
         const hookLabel =
           hook === "active"
             ? m.hookSupported
@@ -227,23 +254,49 @@ export function createVoiceSettingsPage(
                 : hook === "disabled"
                   ? m.hookDisabled
                   : m.unknown;
+        const effective =
+          options.desktop && view ? voiceSettingsEffectiveStatus(view, draft) : undefined;
+        if (effective && view) availabilityKey = voiceSettingsEffectiveStatusKey(view, draft);
+        const preferencesLabel =
+          state.routesActive === true
+            ? m.preferencesOn
+            : state.routesActive === false
+              ? m.preferencesOff
+              : m.unknown;
         const health = h(doc, "div", { className: "settings-voice__health" });
-        health.append(
-          h(doc, "p", {}, `${m.gatewayStatus}: ${gatewayReadyLabel}`),
-          h(
-            doc,
-            "p",
-            {},
-            `${m.preferencesStatus}: ${
-              state.routesActive === true
-                ? m.preferencesOn
-                : state.routesActive === false
-                  ? m.preferencesOff
-                  : m.unknown
-            }`,
-          ),
-          h(doc, "p", {}, `${m.hookStatus}: ${hookLabel}`),
-        );
+        health.append(h(doc, "p", {}, `${m.gatewayStatus}: ${gatewayReadyLabel}`));
+        health.append(h(doc, "p", {}, `${m.preferencesStatus}: ${preferencesLabel}`));
+        if (effective) {
+          const copy = {
+            desktopSelected: m.desktopSelected,
+            routeAllowed: m.routeAllowed,
+            pathUnavailable: m.pathUnavailable,
+          };
+          health.append(
+            h(
+              doc,
+              "p",
+              {},
+              `${effective.chatLabel}: ${voiceSettingsRouteStatus(
+                effective.chatAvailable,
+                effective.chatDesktopDefault,
+                copy,
+              )}`,
+            ),
+            h(
+              doc,
+              "p",
+              {},
+              `${effective.workLabel}: ${voiceSettingsRouteStatus(
+                effective.workAvailable,
+                effective.workDesktopDefault,
+                copy,
+              )}`,
+            ),
+          );
+        } else {
+          health.append(h(doc, "p", {}, `${m.hookStatus}: ${hookLabel}`));
+        }
         config.card.append(health);
         if (setup) {
           const details = h(
@@ -304,6 +357,9 @@ export function createVoiceSettingsPage(
         root.append(chat.group, work.group, config.group);
         const restarting = state.restart.phase === "restarting";
         const failed = state.restart.phase === "failed";
+        const availabilityFooter = effective
+          ? voiceSettingsAvailabilityFooter(draft, effective)
+          : undefined;
         const status = busy
           ? m.saving
           : restarting
@@ -316,13 +372,15 @@ export function createVoiceSettingsPage(
                   ? m.edited
                   : needsRestart()
                     ? m.restartNeeded
-                    : state.activeInject === null
-                      ? m.activeUnknown
+                    : availabilityFooter
+                      ? availabilityFooter
                       : state.routesActive === false
                         ? m.pending
-                        : state.routesActive === null
-                          ? m.activeUnknown
-                          : m.ready;
+                        : state.routesActive === true
+                          ? m.ready
+                          : state.activeInject === null || state.routesActive === null
+                            ? m.activeUnknown
+                            : m.ready;
         const footer = h(
           doc,
           "div",

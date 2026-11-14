@@ -558,6 +558,7 @@ export function installNativeChatVoiceHook(
     try {
       // The hashed graph is only safe to initialize after the Chat surface mounts.
       if (hashed && !visibleComposer()) {
+        selectDraft?.();
         if (handle.activeCall) return;
         release();
         handle.status = "pending";

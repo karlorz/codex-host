@@ -1,3 +1,5 @@
+import type { CpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
+import { isolatedVoicePathEnabled } from "./renderer-voice-evidence.js";
 import {
   HASHED_NATIVE_CHAT_PREWARM_ASSET,
   HASHED_NATIVE_CHAT_ROLES,
@@ -5,11 +7,13 @@ import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
   NATIVE_CHAT_VOICE_CHUNKS,
+  hashedVoiceCandidateOwner,
   hashedVoiceProfileSupported,
 } from "./renderer-voice-profiles.js";
 
 export {
   HASHED_NATIVE_CHAT_PREWARM_ASSET,
+  HASHED_NATIVE_CHAT_ROLES,
   HASHED_NATIVE_CHAT_START_ASSET,
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
@@ -90,11 +94,12 @@ function requireHashedExport(
   return usable(value) ? value : undefined;
 }
 
-export function hashedNativeChatVoiceSupported(config: {
-  desktopVersion?: string;
-  desktopPlatform?: string;
-}): boolean {
-  return hashedVoiceProfileSupported(config);
+export function hashedNativeChatVoiceSupported(
+  config: CpaLiveVoiceHookConfig | { desktopVersion?: string; desktopPlatform?: string },
+): boolean {
+  if (hashedVoiceProfileSupported(config)) return true;
+  if (!hashedVoiceCandidateOwner(config) || !("isolatedQualification" in config)) return false;
+  return isolatedVoicePathEnabled(config as CpaLiveVoiceHookConfig, "chat");
 }
 
 export async function resolveHashedWebpackRequire(
@@ -196,6 +201,30 @@ export async function loadHashedNativeChatVoiceModules(
     roles.reactDomModuleId,
     (value) => object(value) && typeof value.createRoot === "function",
   );
+  const conversation = requireHashedExport(
+    req,
+    roles.conversationModuleId,
+    (value) =>
+      object(value) &&
+      value[roles.backendConversationExport] != null &&
+      value[roles.transcriptMappingExport] != null &&
+      value[roles.currentNodeExport] != null,
+  );
+  const location = requireHashedExport(
+    req,
+    roles.locationModuleId,
+    (value) => object(value) && value[roles.locationExport] != null,
+  );
+  const navigation = requireHashedExport(
+    req,
+    roles.navigationModuleId,
+    (value) => object(value) && typeof value[roles.navigationExport] === "function",
+  );
+  const conversationPath = requireHashedExport(
+    req,
+    roles.conversationPathModuleId,
+    (value) => object(value) && typeof value[roles.conversationPathExport] === "function",
+  );
   if (
     !object(startExports) ||
     !object(prewarmExports) ||
@@ -208,6 +237,12 @@ export async function loadHashedNativeChatVoiceModules(
     !object(reactDom)
   )
     throw new Error("hashed Instant Connect exports missing");
+  const nativeNavigate = object(navigation)
+    ? (navigation[roles.navigationExport] as (...args: unknown[]) => unknown)
+    : undefined;
+  const nativeConversationPath = object(conversationPath)
+    ? conversationPath[roles.conversationPathExport]
+    : undefined;
   const initializeVoiceSession = startExports[
     roles.startInitializeExport
   ] as () => Promise<unknown>;
@@ -292,14 +327,31 @@ export async function loadHashedNativeChatVoiceModules(
     initial: {
       MOr: routeScope[roles.routeScopeExport],
       CDr: composerScope[roles.composerScopeExport],
-      B1n: {},
+      B1n: object(conversation) ? conversation[roles.backendConversationExport] : {},
       SPn: store[roles.storeExport],
       aT: runtime[roles.runtimeEnableExport],
+      ...(object(location) ? { Ycr: location[roles.locationExport] } : {}),
+      ...(object(conversation)
+        ? {
+            n0n: conversation[roles.transcriptMappingExport],
+            Y1n: conversation[roles.currentNodeExport],
+          }
+        : {}),
+      ...(typeof nativeNavigate === "function"
+        ? {
+            Nir: (scope: unknown, path: unknown) =>
+              Reflect.apply(nativeNavigate, undefined, [
+                scope,
+                typeof path === "string" ? { pathname: path } : path,
+              ]),
+          }
+        : {}),
     },
     shared: {
       Qst: appScope[roles.appScopeExport],
       FBt: () => react,
       PNt: () => reactDom,
+      ...(typeof nativeConversationPath === "function" ? { Vot: nativeConversationPath } : {}),
     },
     start: {
       t() {},

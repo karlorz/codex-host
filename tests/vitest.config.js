@@ -92,6 +92,11 @@ export default defineConfig({
       "packages/web-server/test/**",
       // Native service tests use Node's runner after building the Rust Launcher.
       "packages/host-runtime/test/native/**",
+      // Built Renderer identity. Linux CI builds the Renderer once, then invokes
+      // this file directly. `npm run test:voice-dist-artifacts` is the local
+      // equivalent and would build again. macOS/Windows-only workflow_dispatch
+      // does not run that Linux artifact gate.
+      "tests/release/**/*.dist.test.mjs",
       ...(platformOnly ? platformIndependentFiles() : []),
     ],
     maxWorkers: 4,

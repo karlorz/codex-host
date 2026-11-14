@@ -127,11 +127,13 @@ Required voice contracts:
 - **Version boundary:** Preserve exact audited asset checks. After a Desktop
   update, re-audit its native exports and call ownership before enabling another
   build; a passing source merge does not qualify new Desktop assets.
-- **Rollout and scope:** Keep `model_provider = "custom"`. Do not globally
-  override Statsig `3683713372`. Work capability/start projection must remain
-  scoped to its audited owner and assets. Chat voice qualification for 26.1016
-  stays deferred; preserve the existing qualified Chat path and fail closed on
-  unqualified builds.
+- **Rollout and scope:** Keep the working native profile’s `model_provider = "custom"`
+  (HTTPS inference `base_url`, `requires_openai_auth = true`, and the matching
+  realtime URL pair). That is the production Codex profile, not an isolated
+  name/`env_key`-only gateway home. Do not globally override Statsig
+  `3683713372`. Work capability/start projection must remain scoped to its
+  audited owner and assets. Chat voice qualification for 26.1016 stays deferred;
+  preserve the existing qualified Chat path and fail closed on unqualified builds.
 - **Gateway boundary:** Disabled-account selection and any future automatic
   quota retry belong to CPA. This fork's voice override does not implement
   account failover. Do not edit CPA core or deploy a gateway as part of a routine

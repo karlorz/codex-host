@@ -88,8 +88,12 @@ CI 使用全新 runner，且不持久化 Cargo `target` 目录，因此设置 `C
 本地 `npm run check` 和 `npm run check:rust` 保持不变，不受 CI 裁剪影响。复现 CI 的 TypeScript 范围：
 
 ```bash
-# Linux x64：构建并运行完整测试
+# Linux x64：构建并运行完整测试（不含 Renderer 构建）
 npm run test:typescript
+# 本地严格 live dist 身份：会执行 build:renderer，再跑 tests/release/voice-release-artifacts.dist.test.mjs
+npm run test:voice-dist-artifacts
+# CI Linux 在 voice-discovery step 里只 build:renderer 一次，然后直接调用上述 dist 测试文件。
+# macOS/Windows-only workflow_dispatch 不跑该 Linux artifact gate。
 # macOS / Windows：筛选平台敏感文件，另排除 Linux x64 专属测试
 # Windows PowerShell 先执行 $env:CODEXHOST_TEST_SCOPE = 'platform'
 CODEXHOST_TEST_SCOPE=platform npm run test:typescript -- \

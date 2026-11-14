@@ -1,7 +1,10 @@
 import { expect, it } from "vitest";
 import {
   CLIENT_CHANNEL_METHODS,
+  REALTIME_CALL_METHOD,
   THREAD_CATALOG_READ_METHOD,
+  VOICE_GATEWAY_STATUS_METHOD,
+  VOICE_SETTINGS_METHOD,
   threadCatalogReadParamsSchema,
   threadCatalogReadResultSchema,
   type JsonObject,
@@ -10,6 +13,13 @@ import {
 
 it("exports a client-allowlisted strict catalog request and JSON-list-row response", () => {
   expect(CLIENT_CHANNEL_METHODS).toContain(THREAD_CATALOG_READ_METHOD);
+  expect(CLIENT_CHANNEL_METHODS).toEqual(
+    expect.arrayContaining([
+      VOICE_SETTINGS_METHOD,
+      VOICE_GATEWAY_STATUS_METHOD,
+      REALTIME_CALL_METHOD,
+    ]),
+  );
   expect(threadCatalogReadParamsSchema.parse({})).toEqual({});
   expect(threadCatalogReadParamsSchema.parse({ includeArchived: true })).toEqual({
     includeArchived: true,

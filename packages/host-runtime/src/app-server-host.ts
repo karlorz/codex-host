@@ -33,7 +33,7 @@ import {
   type QuestionRecordOutcome,
 } from "@codexhost/shared-contracts";
 import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
-import { NativeVoiceGateway } from "./native-voice-gateway.js";
+import { NativeVoiceGateway, voiceGatewayFailureStage } from "./native-voice-gateway.js";
 import {
   DELEGATION_READ_METHOD,
   delegationReadParamsSchema,
@@ -303,6 +303,15 @@ import type { HostConsoleOpener } from "./console-opener.js";
 import type { HostWebOpener } from "./web-opener.js";
 
 const CONSOLE_REQUEST_TIMEOUT_MS = 120_000;
+const VOICE_CLIENT_STAGE = new Set(["config", "request", "transport", "identity", "cancel"]);
+
+function voiceGatewayStageFromReply(
+  value: unknown,
+): "config" | "request" | "transport" | "identity" | "cancel" | undefined {
+  return typeof value === "string" && VOICE_CLIENT_STAGE.has(value)
+    ? (value as "config" | "request" | "transport" | "identity" | "cancel")
+    : undefined;
+}
 
 import { ClientChannelEvents } from "./client-channel-events.js";
 import { ClientChannelHost } from "./client-channel-host.js";
@@ -335,7 +344,15 @@ import {
   type ClientChannelResponse,
 } from "@codexhost/shared-contracts";
 
-export type ConsoleHostReply = { result: JsonValue } | { error: { code: number; message: string } };
+export type ConsoleHostReply =
+  | { result: JsonValue }
+  | {
+      error: {
+        code: number;
+        message: string;
+        data?: { stage: "config" | "request" | "transport" | "identity" | "cancel" };
+      };
+    };
 
 const SUBAGENT_TERMINAL_REFRESH_DELAYS_MS = [0, 50, 100, 150] as const;
 const THREAD_USAGE_UPDATED_METHOD = "codexhost/thread/usage/updated";
@@ -1546,10 +1563,13 @@ export class AppServerHost {
         return { result: (message.result ?? null) as JsonValue };
       }
       const error = isRecord(message) && isRecord(message.error) ? message.error : undefined;
+      const data = isRecord(error?.data) ? error.data : undefined;
+      const stage = voiceGatewayStageFromReply(data?.stage);
       return {
         error: {
           code: typeof error?.code === "number" ? error.code : -32603,
           message: typeof error?.message === "string" ? error.message : "Host request failed",
+          ...(stage ? { data: { stage } } : {}),
         },
       };
     } finally {
@@ -1756,15 +1776,16 @@ export class AppServerHost {
       );
       return;
     }
-    if (request.method === REALTIME_CALL_METHOD && !this.#options.externalOnly) {
+    if (request.method === REALTIME_CALL_METHOD) {
       try {
         const result = await this.#nativeVoiceGateway.request(request.params);
         await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-      } catch {
-        // The Renderer maps every voice failure to one message; never echo request
-        // payloads, schema details or transport diagnostics back over the bridge.
+      } catch (error) {
+        // The Renderer keeps one user-facing message; stage is allowlisted only.
         await this.#writer.json(
-          rpcError(request, -32090, "Configured voice gateway request failed"),
+          rpcError(request, -32090, "Configured voice gateway request failed", {
+            stage: voiceGatewayFailureStage(error),
+          }),
         );
       }
       return;
@@ -1836,6 +1857,9 @@ export class AppServerHost {
         request.method === LOADED_SESSIONS_METHOD ||
         request.method === IDLE_RELEASE_SETTINGS_METHOD ||
         request.method === USAGE_STATISTICS_METHOD ||
+        request.method === VOICE_SETTINGS_METHOD ||
+        request.method === VOICE_GATEWAY_STATUS_METHOD ||
+        request.method === REALTIME_CALL_METHOD ||
         // Settings requests from Web clients; the shared service owns these handlers too.
         request.method.startsWith("codexhost/account/") ||
         request.method.startsWith("codexhost/update/") ||

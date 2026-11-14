@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 const OPEN_TIMEOUT_MS = 30_000;
@@ -58,6 +60,30 @@ export interface CreateHostConsoleOpenerOptions {
   spawnProcess?: typeof spawn;
 }
 
+/** Hashed fallback in 49152–65535 when CODEXHOST_CONSOLE_PORT is unset. Not
+ * collision-proof; keep an explicit port and verify the listener owner. */
+export function isolatedHostConsolePort(dataDirectory: string): string {
+  const hash = createHash("sha256").update(path.resolve(dataDirectory)).digest();
+  return String(49152 + (hash.readUInt16BE(0) % 16384));
+}
+
+function withIsolatedConsolePort(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (environment.CODEXHOST_CONSOLE_PORT) return environment;
+  const data = environment.CODEXHOST_DATA_DIR;
+  if (!data) return environment;
+  const resolved = path.resolve(data);
+  if (resolved === path.resolve(path.join(homedir(), ".codexhost"))) return environment;
+  const port = isolatedHostConsolePort(resolved);
+  try {
+    const directory = path.join(resolved, "console");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(directory, "listen-port"), `${port}\n`);
+  } catch {
+    /* Host still spawns console-server with the hashed port. */
+  }
+  return { ...environment, CODEXHOST_CONSOLE_PORT: port };
+}
+
 /**
  * Runs `console-server open`, which reuses or starts the single console and
  * opens it in the default browser through the Launcher.
@@ -66,13 +92,14 @@ export function createHostConsoleOpener(
   options: CreateHostConsoleOpenerOptions,
 ): HostConsoleOpener {
   const spawnProcess = options.spawnProcess ?? spawn;
+  const environment = withIsolatedConsolePort(options.environment);
   const address = (command: "open" | "ensure"): Promise<{ url: string }> =>
     new Promise((resolve, reject) => {
       const child = spawnProcess(
         options.nodePath ?? process.execPath,
         [options.entrypoint, command],
         {
-          env: options.environment,
+          env: environment,
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         },

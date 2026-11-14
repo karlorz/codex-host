@@ -3,6 +3,9 @@ import type { StoredSectionPlacementV1, StoredThreadRecordV1 } from "@codexhost/
 import { jsonRpcRequestSchema, type JsonObject, type JsonValue } from "@codexhost/protocol-core";
 import {
   CLIENT_CHANNEL_METHODS,
+  REALTIME_CALL_METHOD,
+  VOICE_GATEWAY_STATUS_METHOD,
+  VOICE_SETTINGS_METHOD,
   clientThreadSnapshotSchema,
   clientProjectlessWorkspaceSchema,
   harnessModelRefSchema,
@@ -163,6 +166,19 @@ export class ClientChannelHost {
     if (!parsed.success || !isRecord(parsed.data.params))
       return { error: { code: -32602, message: "Invalid client parameters" } };
     const params = parsed.data.params as JsonObject;
+    if (
+      method === VOICE_SETTINGS_METHOD ||
+      method === VOICE_GATEWAY_STATUS_METHOD ||
+      method === REALTIME_CALL_METHOD
+    ) {
+      const timeoutMs =
+        method === VOICE_GATEWAY_STATUS_METHOD
+          ? 2_000
+          : method === REALTIME_CALL_METHOD
+            ? 30_000
+            : 10_000;
+      return this.#host.submit(method, params, timeoutMs);
+    }
     if (method === "codexhost/voice/status")
       return { result: jsonValueSchema.parse(await voiceStatus(this.#host.environment())) };
     if (method === "codexhost/voice/transcribe")

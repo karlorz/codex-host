@@ -19,18 +19,23 @@ import {
   cpaLiveVoiceHookBootstrap,
   cpaLiveVoiceOverlayHookAllowed,
   overlayVoiceBootstrapPreferred,
+  readVoiceIsolatedQualification,
+  readVoiceQualification,
 } from "./cpa-live-voice-hook.js";
 import {
   installRendererCdpControlSession,
   type RendererCdpControlSession,
 } from "./renderer-cdp-control-session.js";
 import { rendererInjectionSkipReason } from "./renderer-injection-skip.js";
+import { connectControllerVoiceHost, type ControllerVoiceHost } from "./controller-voice-host.js";
+import type { RendererVoiceHostOwner } from "./renderer-voice-host-binding.js";
 
 export interface DesktopControllerOptions {
   rendererCdpEndpoint: string;
   rendererPath: string;
   attachmentPort: number;
   attachmentNonce: string;
+  hostDataDirectory?: string;
   requestStop?(): void;
 }
 
@@ -50,6 +55,7 @@ export interface DesktopControllerDependencies {
     enabledAgents?: readonly string[];
     timeoutMs: number;
     signal?: AbortSignal;
+    voiceHost?: RendererVoiceHostOwner;
   }): Promise<RendererCdpControlSession>;
   startAttachmentServer(
     options: StartControllerAttachmentServerOptions,
@@ -134,6 +140,7 @@ export function parseDesktopControllerArguments(
   let rendererPath: string | undefined;
   let attachmentPort: number | undefined;
   let attachmentNonce: string | undefined;
+  let hostDataDirectory: string | undefined;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     const value = arguments_[index + 1];
@@ -177,6 +184,14 @@ export function parseDesktopControllerArguments(
       index += 1;
       continue;
     }
+    if (argument === "--host-data") {
+      if (hostDataDirectory !== undefined) throw new Error("--host-data may only be provided once");
+      if (!value) throw new Error("--host-data requires a value");
+      if (!path.isAbsolute(value)) throw new Error("--host-data must be an absolute path");
+      hostDataDirectory = path.normalize(value);
+      index += 1;
+      continue;
+    }
     throw new Error(`unknown Desktop Controller option: ${argument}`);
   }
   if (endpoint === undefined) throw new Error("--renderer-cdp-endpoint is required");
@@ -188,6 +203,7 @@ export function parseDesktopControllerArguments(
     rendererPath,
     attachmentPort,
     attachmentNonce,
+    ...(hostDataDirectory ? { hostDataDirectory } : {}),
   };
 }
 
@@ -232,13 +248,31 @@ export async function runDesktopController(
 ): Promise<void> {
   const now = dependencies.now ?? Date.now;
   let session: RendererCdpControlSession | undefined;
+  let voiceHost: ControllerVoiceHost | undefined;
   let nextRecoveryAt = 0;
   let recoveryDelayMs = RECOVERY_RETRY_INITIAL_MS;
+  const overlayDir = path.dirname(options.rendererPath);
+  const isolated = readVoiceIsolatedQualification(overlayDir);
+  const qualification = readVoiceQualification(overlayDir);
+  const desktopVersion = process.env.CODEXHOST_DESKTOP_VERSION?.trim();
+  const desktopBuild = process.env.CODEXHOST_DESKTOP_BUILD?.trim();
+  const asarDigest = process.env.CODEXHOST_DESKTOP_ASAR_DIGEST?.trim();
+  const appPath = process.env.CODEXHOST_DESKTOP_APP_PATH?.trim();
   const skipReason = rendererInjectionSkipReason(
     process.env.CODEXHOST_DESKTOP_VERSION,
     process.platform,
+    {
+      ...(isolated ? { isolated } : {}),
+      identity: {
+        desktopPlatform: process.platform,
+        ...(desktopVersion ? { desktopVersion } : {}),
+        ...(desktopBuild ? { desktopBuild } : {}),
+        ...(asarDigest ? { asarDigest } : {}),
+        ...(appPath ? { appPath } : {}),
+        ...(qualification ? { implementationRevision: qualification.implementationRevision } : {}),
+      },
+    },
   );
-  const overlayDir = path.dirname(options.rendererPath);
   const bootstrap = cpaLiveVoiceHookBootstrap(process.env, undefined, overlayDir);
   const status = createRendererStatusReporter(
     (document) =>
@@ -294,12 +328,16 @@ export async function runDesktopController(
         ? `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${overlayBootstrapBundle}`
         : undefined;
     startupTrace("installing Renderer Session");
+    if (!voiceHost && options.hostDataDirectory && !skipReason) {
+      voiceHost = await connectControllerVoiceHost(options.hostDataDirectory);
+    }
     const installed = await installProductionSession(
       {
         rendererCdpEndpoint: options.rendererCdpEndpoint,
         rendererSource: `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${rendererSource}`,
         ...(overlayHookSource ? { overlayHookSource } : {}),
         ...(overlayVoiceBootstrapSource ? { overlayVoiceBootstrapSource } : {}),
+        ...(voiceHost ? { voiceHost } : {}),
         // External Agents are discovered from each target Host after installation.
         timeoutMs: PRODUCTION_INSTALL_TIMEOUT_MS,
         signal,
@@ -409,5 +447,6 @@ export async function runDesktopController(
     await attachmentServer?.close();
     await operation;
     resetSession();
+    voiceHost?.close();
   }
 }

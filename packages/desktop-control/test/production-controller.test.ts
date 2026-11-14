@@ -32,6 +32,48 @@ function controllerSnapshot(): RendererCdpControlSession["snapshot"] {
   return {} as RendererCdpControlSession["snapshot"];
 }
 
+async function withoutPinnedDesktopVersion<T>(run: () => Promise<T>): Promise<T> {
+  const previous = process.env.CODEXHOST_DESKTOP_VERSION;
+  delete process.env.CODEXHOST_DESKTOP_VERSION;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.CODEXHOST_DESKTOP_VERSION;
+    else process.env.CODEXHOST_DESKTOP_VERSION = previous;
+  }
+}
+
+const DESKTOP_IDENTITY_ENV = [
+  "CODEXHOST_CPA_LIVE_VOICE",
+  "CODEXHOST_DESKTOP_VERSION",
+  "CODEXHOST_DESKTOP_BUILD",
+  "CODEXHOST_DESKTOP_ASAR_DIGEST",
+  "CODEXHOST_DESKTOP_APP_PATH",
+] as const;
+
+async function withDesktopIdentityEnv<T>(
+  values: Partial<Record<(typeof DESKTOP_IDENTITY_ENV)[number], string | undefined>>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = Object.fromEntries(
+    DESKTOP_IDENTITY_ENV.map((key) => [key, process.env[key]]),
+  ) as Record<(typeof DESKTOP_IDENTITY_ENV)[number], string | undefined>;
+  for (const key of DESKTOP_IDENTITY_ENV) {
+    const value = values[key];
+    if (value === undefined) Reflect.deleteProperty(process.env, key);
+    else process.env[key] = value;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of DESKTOP_IDENTITY_ENV) {
+      const value = previous[key];
+      if (value === undefined) Reflect.deleteProperty(process.env, key);
+      else process.env[key] = value;
+    }
+  }
+}
+
 describe("production Desktop Controller", () => {
   it("accepts only a loopback Renderer CDP endpoint, absolute Renderer path, and strict attachment fields", () => {
     const rendererPath = path.resolve("fixtures/renderer-extension.js");
@@ -80,6 +122,34 @@ describe("production Desktop Controller", () => {
         "bad",
       ]),
     ).toThrow("32 lowercase hexadecimal");
+    expect(
+      parseDesktopControllerArguments([
+        "--renderer-cdp-endpoint",
+        "http://127.0.0.1:43123",
+        "--renderer",
+        rendererPath,
+        "--attachment-port",
+        "43124",
+        "--attachment-nonce",
+        attachmentNonce,
+        "--host-data",
+        "/tmp/isolated-host",
+      ]),
+    ).toMatchObject({ hostDataDirectory: "/tmp/isolated-host" });
+    expect(() =>
+      parseDesktopControllerArguments([
+        "--renderer-cdp-endpoint",
+        "http://127.0.0.1:43123",
+        "--renderer",
+        rendererPath,
+        "--attachment-port",
+        "43124",
+        "--attachment-nonce",
+        attachmentNonce,
+        "--host-data",
+        "relative-host",
+      ]),
+    ).toThrow("absolute path");
   });
 
   it("serializes only strict and bounded readiness results", () => {
@@ -100,114 +170,120 @@ describe("production Desktop Controller", () => {
   });
 
   it("signals compatible readiness, serves attachment, and monitors recovery", async () => {
-    const abort = new AbortController();
-    const snapshot = controllerSnapshot();
-    const ensureInstalled = vi.fn(async () => {
-      abort.abort();
-      return snapshot;
-    });
-    const activateDesktop = vi.fn(async () => 1);
-    const close = vi.fn();
-    const session: RendererCdpControlSession = {
-      snapshot,
-      ensureInstalled,
-      activateDesktop,
-      executeRenderer: vi.fn(),
-      close,
-    };
-    const ready = vi.fn();
-    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
-    const server = attachmentServer();
-    let attach: (() => Promise<void>) | undefined;
-    const startAttachmentServer = vi.fn(async (options) => {
-      attach = options.attach;
-      return server;
-    });
-    const dependencies: DesktopControllerDependencies = {
-      readRenderer: vi.fn(async () => "production renderer"),
-      install,
-      startAttachmentServer,
-      ready,
-      sleep: vi.fn(async () => {}),
-      monitorIntervalMs: 1,
-    };
+    await withoutPinnedDesktopVersion(async () => {
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const ensureInstalled = vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      });
+      const activateDesktop = vi.fn(async () => 1);
+      const close = vi.fn();
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled,
+        activateDesktop,
+        executeRenderer: vi.fn(),
+        close,
+      };
+      const ready = vi.fn();
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      const server = attachmentServer();
+      let attach: (() => Promise<void>) | undefined;
+      const startAttachmentServer = vi.fn(async (options) => {
+        attach = options.attach;
+        return server;
+      });
+      const dependencies: DesktopControllerDependencies = {
+        readRenderer: vi.fn(async () => "production renderer"),
+        install,
+        startAttachmentServer,
+        ready,
+        sleep: vi.fn(async () => {}),
+        monitorIntervalMs: 1,
+      };
 
-    await runDesktopController(controllerOptions(), abort.signal, dependencies);
+      await runDesktopController(controllerOptions(), abort.signal, dependencies);
 
-    expect(install).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rendererCdpEndpoint: "http://127.0.0.1:43123",
-        timeoutMs: 90_000,
-        signal: abort.signal,
-      }),
-    );
-    const source = install.mock.calls[0]?.[0].rendererSource;
-    expect(source).toContain(
-      "globalThis.__zod_globalConfig ??= {}; globalThis.__zod_globalConfig.jitless = true;",
-    );
-    expect(source).toContain("production renderer");
-    expect(source).toContain("__codexhostCpaLiveVoiceHookV1");
-    expect(install.mock.calls[0]?.[0].overlayHookSource).toContain("__codexhostCpaLiveVoiceHookV1");
-    expect(install.mock.calls[0]?.[0].overlayHookSource).toMatch(
-      /^globalThis\.__zod_globalConfig \?\?= \{\}; globalThis\.__zod_globalConfig\.jitless = true;\n/,
-    );
-    expect(startAttachmentServer).toHaveBeenCalledWith({
-      port: 43124,
-      nonce: attachmentNonce,
-      attach: expect.any(Function),
-      openLocalPage: expect.any(Function),
-      remoteConnections: expect.any(Function),
+      expect(install).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rendererCdpEndpoint: "http://127.0.0.1:43123",
+          timeoutMs: 90_000,
+          signal: abort.signal,
+        }),
+      );
+      const source = install.mock.calls[0]?.[0].rendererSource;
+      expect(source).toContain(
+        "globalThis.__zod_globalConfig ??= {}; globalThis.__zod_globalConfig.jitless = true;",
+      );
+      expect(source).toContain("production renderer");
+      expect(source).toContain("__codexhostCpaLiveVoiceHookV1");
+      expect(install.mock.calls[0]?.[0].overlayHookSource).toContain(
+        "__codexhostCpaLiveVoiceHookV1",
+      );
+      expect(install.mock.calls[0]?.[0].overlayHookSource).toMatch(
+        /^globalThis\.__zod_globalConfig \?\?= \{\}; globalThis\.__zod_globalConfig\.jitless = true;\n/,
+      );
+      expect(startAttachmentServer).toHaveBeenCalledWith({
+        port: 43124,
+        nonce: attachmentNonce,
+        attach: expect.any(Function),
+        openLocalPage: expect.any(Function),
+        remoteConnections: expect.any(Function),
+      });
+      expect(ready).toHaveBeenCalledWith({
+        schemaVersion: 2,
+        state: "compatible",
+        issues: [],
+      });
+      expect(ensureInstalled).toHaveBeenCalledOnce();
+      expect(server.close).toHaveBeenCalledOnce();
+      expect(close).toHaveBeenCalledOnce();
+      expect(attach).toEqual(expect.any(Function));
     });
-    expect(ready).toHaveBeenCalledWith({
-      schemaVersion: 2,
-      state: "compatible",
-      issues: [],
-    });
-    expect(ensureInstalled).toHaveBeenCalledOnce();
-    expect(server.close).toHaveBeenCalledOnce();
-    expect(close).toHaveBeenCalledOnce();
-    expect(attach).toEqual(expect.any(Function));
   });
 
   it("prefixes the CPA live-voice hook by default", async () => {
-    const previous = process.env.CODEXHOST_CPA_LIVE_VOICE;
-    delete process.env.CODEXHOST_CPA_LIVE_VOICE;
-    const abort = new AbortController();
-    const snapshot = controllerSnapshot();
-    const session: RendererCdpControlSession = {
-      snapshot,
-      ensureInstalled: vi.fn(async () => {
-        abort.abort();
-        return snapshot;
-      }),
-      activateDesktop: vi.fn(async () => 1),
-      executeRenderer: vi.fn(),
-      close: vi.fn(),
-    };
-    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
-    try {
-      await runDesktopController(controllerOptions(), abort.signal, {
-        readRenderer: vi.fn(async (filePath: string) =>
-          filePath.endsWith("cpa-live-voice-hook.js") ? "overlay hook" : "production renderer",
-        ),
-        install,
-        startAttachmentServer: vi.fn(async () => attachmentServer()),
-        ready: vi.fn(),
-        sleep: vi.fn(async () => {}),
-        monitorIntervalMs: 1,
-      });
-      const source = install.mock.calls[0]?.[0].rendererSource;
-      expect(source).toContain("globalThis.__codexhostCpaLiveVoiceHookV1 = Object.freeze(");
-      expect(source).toContain("26.1007.30912");
-      expect(source?.endsWith("production renderer")).toBe(true);
-      expect(install.mock.calls[0]?.[0].overlayHookSource).toContain("overlay hook");
-      expect(install.mock.calls[0]?.[0].overlayHookSource).toContain(
-        "globalThis.__codexhostCpaLiveVoiceHookV1 = Object.freeze(",
-      );
-    } finally {
-      if (previous === undefined) delete process.env.CODEXHOST_CPA_LIVE_VOICE;
-      else process.env.CODEXHOST_CPA_LIVE_VOICE = previous;
-    }
+    await withoutPinnedDesktopVersion(async () => {
+      const previous = process.env.CODEXHOST_CPA_LIVE_VOICE;
+      delete process.env.CODEXHOST_CPA_LIVE_VOICE;
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => {
+          abort.abort();
+          return snapshot;
+        }),
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      try {
+        await runDesktopController(controllerOptions(), abort.signal, {
+          readRenderer: vi.fn(async (filePath: string) =>
+            filePath.endsWith("cpa-live-voice-hook.js") ? "overlay hook" : "production renderer",
+          ),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep: vi.fn(async () => {}),
+          monitorIntervalMs: 1,
+        });
+        const source = install.mock.calls[0]?.[0].rendererSource;
+        expect(source).toContain("globalThis.__codexhostCpaLiveVoiceHookV1 = Object.freeze(");
+        expect(source).toContain("26.1007.30912");
+        expect(source?.endsWith("production renderer")).toBe(true);
+        expect(install.mock.calls[0]?.[0].overlayHookSource).toContain("overlay hook");
+        expect(install.mock.calls[0]?.[0].overlayHookSource).toContain(
+          "globalThis.__codexhostCpaLiveVoiceHookV1 = Object.freeze(",
+        );
+      } finally {
+        if (previous === undefined) delete process.env.CODEXHOST_CPA_LIVE_VOICE;
+        else process.env.CODEXHOST_CPA_LIVE_VOICE = previous;
+      }
+    });
   });
 
   it("omits the CPA live-voice hook when CODEXHOST_CPA_LIVE_VOICE=0", async () => {
@@ -431,10 +507,172 @@ describe("production Desktop Controller", () => {
     expect(states).toEqual([
       expect.objectContaining({
         state: "unavailable",
-        error: "Desktop 26.1106.51428 is skipped; Renderer injection is disabled.",
+        error: "Desktop 26.1106.51428 is skipped until hashed Renderer bindings are requalified",
         failures: 1,
       }),
     ]);
+  });
+
+  it("installs the Renderer on an owned isolated Windows 26.1106.51428 Controller", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-overlay-win32-isolated-"));
+    const scratchApp = path.join(overlayDir, "bundle", "app", "ChatGPT.exe");
+    const identity = {
+      path: "chat",
+      run: "2026-11-15-isolated-win32",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: "win32",
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: scratchApp,
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated",
+    };
+    await writeFile(
+      path.join(overlayDir, "voice-profile-pins.json"),
+      JSON.stringify({
+        hashedVersion: "26.1106.51428",
+        overlayHookDesktopVersions: ["26.1106.51428"],
+      }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-isolated-qualification.json"),
+      JSON.stringify(identity),
+    );
+    const abort = new AbortController();
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+    try {
+      await withDesktopIdentityEnv(
+        {
+          CODEXHOST_CPA_LIVE_VOICE: "1",
+          CODEXHOST_DESKTOP_VERSION: identity.desktopVersion,
+          CODEXHOST_DESKTOP_BUILD: identity.desktopBuild,
+          CODEXHOST_DESKTOP_ASAR_DIGEST: identity.asarDigest,
+          CODEXHOST_DESKTOP_APP_PATH: identity.appPath,
+        },
+        () =>
+          runDesktopController(
+            { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+            abort.signal,
+            {
+              readRenderer: vi.fn(async (filePath: string) =>
+                filePath.endsWith("overlay-voice-bootstrap.js")
+                  ? "overlay voice bootstrap"
+                  : filePath.endsWith("cpa-live-voice-hook.js")
+                    ? "overlay hook"
+                    : "production renderer",
+              ),
+              install,
+              startAttachmentServer: vi.fn(async () => attachmentServer()),
+              ready: vi.fn(),
+              sleep: vi.fn(async () => {}),
+              monitorIntervalMs: 1,
+            },
+          ),
+      );
+      expect(install).toHaveBeenCalledOnce();
+      const injected = install.mock.calls[0]?.[0];
+      expect(injected?.overlayHookSource).toContain('"isolatedQualification"');
+      expect(injected?.overlayHookSource).toContain('"path":"chat"');
+      expect(injected?.overlayHookSource).toContain('"voiceEvidence":[]');
+      expect(injected?.overlayHookSource).not.toContain("WindowsApps");
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      await rm(overlayDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the Windows production skip when the isolated marker names WindowsApps", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-overlay-win32-prod-"));
+    const productionApp =
+      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe";
+    await writeFile(
+      path.join(overlayDir, "voice-profile-pins.json"),
+      JSON.stringify({
+        hashedVersion: "26.1106.51428",
+        overlayHookDesktopVersions: ["26.1106.51428"],
+      }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-isolated-qualification.json"),
+      JSON.stringify({
+        path: "chat",
+        run: "2026-11-15-isolated-win32",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: "26.1106.51428",
+        desktopBuild: "26605",
+        desktopPlatform: "win32",
+        asarDigest: `sha256:${"ab".repeat(32)}`,
+        appPath: productionApp,
+        implementationRevision: "packaged-revision",
+        label: "unqualified-isolated",
+      }),
+    );
+    const abort = new AbortController();
+    const install = vi.fn<DesktopControllerDependencies["install"]>();
+    const publishStatus = vi.fn();
+    try {
+      await withDesktopIdentityEnv(
+        {
+          CODEXHOST_CPA_LIVE_VOICE: "1",
+          CODEXHOST_DESKTOP_VERSION: "26.1106.51428",
+          CODEXHOST_DESKTOP_BUILD: "26605",
+          CODEXHOST_DESKTOP_ASAR_DIGEST: `sha256:${"ab".repeat(32)}`,
+          CODEXHOST_DESKTOP_APP_PATH: productionApp,
+        },
+        () =>
+          runDesktopController(
+            { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+            abort.signal,
+            {
+              readRenderer: vi.fn(async () => "production renderer"),
+              install,
+              startAttachmentServer: vi.fn(async () => attachmentServer()),
+              ready: vi.fn(),
+              publishStatus,
+              sleep: vi.fn(async () => {
+                abort.abort();
+              }),
+              monitorIntervalMs: 1,
+            },
+          ),
+      );
+      expect(install).not.toHaveBeenCalled();
+      expect(publishStatus.mock.calls.map(([document]) => document.renderer)).toEqual([
+        expect.objectContaining({
+          state: "unavailable",
+          error: "Desktop 26.1106.51428 is skipped until hashed Renderer bindings are requalified",
+        }),
+      ]);
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      await rm(overlayDir, { recursive: true, force: true });
+    }
   });
 
   it("installs and monitors the Renderer on macOS Desktop 26.1106.51428", async () => {
@@ -506,6 +744,141 @@ describe("production Desktop Controller", () => {
       "installed",
     ]);
     expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it("injects overlay-dir isolated qualification only when launched identity matches", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "darwin" });
+    const overlayDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-overlay-isolated-"));
+    const scratchApp = path.join(overlayDir, "scratch", "ChatGPT.app");
+    const identity = {
+      path: "work-codex",
+      run: "2026-11-14-isolated",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      desktopVersion: "26.1106.51428",
+      desktopBuild: "26605",
+      desktopPlatform: "darwin",
+      asarDigest: `sha256:${"ab".repeat(32)}`,
+      appPath: scratchApp,
+      implementationRevision: "packaged-revision",
+      label: "unqualified-isolated",
+    };
+    await writeFile(
+      path.join(overlayDir, "voice-profile-pins.json"),
+      JSON.stringify({
+        hashedVersion: "26.1106.51428",
+        overlayHookDesktopVersions: ["26.1106.51428"],
+      }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-qualification.json"),
+      JSON.stringify({ implementationRevision: "packaged-revision", reviewedEvidence: [] }),
+    );
+    await writeFile(
+      path.join(overlayDir, "voice-isolated-qualification.json"),
+      JSON.stringify(identity),
+    );
+    const abort = new AbortController();
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+    try {
+      await withDesktopIdentityEnv(
+        {
+          CODEXHOST_CPA_LIVE_VOICE: "1",
+          CODEXHOST_DESKTOP_VERSION: "26.1106.51428",
+        },
+        () =>
+          runDesktopController(
+            { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+            abort.signal,
+            {
+              readRenderer: vi.fn(async (filePath: string) =>
+                filePath.endsWith("overlay-voice-bootstrap.js")
+                  ? "overlay voice bootstrap"
+                  : filePath.endsWith("cpa-live-voice-hook.js")
+                    ? "overlay hook"
+                    : "production renderer",
+              ),
+              install,
+              startAttachmentServer: vi.fn(async () => attachmentServer()),
+              ready: vi.fn(),
+              sleep: vi.fn(async () => {}),
+              monitorIntervalMs: 1,
+            },
+          ),
+      );
+      const incomplete = install.mock.calls[0]?.[0];
+      expect(incomplete?.overlayHookSource).toContain("overlay hook");
+      expect(incomplete?.overlayHookSource).not.toContain("isolatedQualification");
+      expect(incomplete?.overlayVoiceBootstrapSource).toContain("overlay voice bootstrap");
+      expect(incomplete?.overlayVoiceBootstrapSource).not.toContain("isolatedQualification");
+
+      abort.abort();
+      const matchedAbort = new AbortController();
+      const matchedSession: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => {
+          matchedAbort.abort();
+          return snapshot;
+        }),
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const matchedInstall = vi.fn<DesktopControllerDependencies["install"]>(
+        async () => matchedSession,
+      );
+      await withDesktopIdentityEnv(
+        {
+          CODEXHOST_CPA_LIVE_VOICE: "1",
+          CODEXHOST_DESKTOP_VERSION: identity.desktopVersion,
+          CODEXHOST_DESKTOP_BUILD: identity.desktopBuild,
+          CODEXHOST_DESKTOP_ASAR_DIGEST: identity.asarDigest,
+          CODEXHOST_DESKTOP_APP_PATH: identity.appPath,
+        },
+        () =>
+          runDesktopController(
+            { ...controllerOptions(), rendererPath: path.join(overlayDir, "renderer.js") },
+            matchedAbort.signal,
+            {
+              readRenderer: vi.fn(async (filePath: string) =>
+                filePath.endsWith("overlay-voice-bootstrap.js")
+                  ? "overlay voice bootstrap"
+                  : filePath.endsWith("cpa-live-voice-hook.js")
+                    ? "overlay hook"
+                    : "production renderer",
+              ),
+              install: matchedInstall,
+              startAttachmentServer: vi.fn(async () => attachmentServer()),
+              ready: vi.fn(),
+              sleep: vi.fn(async () => {}),
+              monitorIntervalMs: 1,
+            },
+          ),
+      );
+      const matched = matchedInstall.mock.calls[0]?.[0];
+      expect(matched?.overlayHookSource).toContain('"isolatedQualification"');
+      expect(matched?.overlayHookSource).toContain('"path":"work-codex"');
+      expect(matched?.overlayHookSource).toContain('"label":"unqualified-isolated"');
+      expect(matched?.overlayHookSource).toContain('"voiceEvidence":[]');
+      expect(matched?.overlayHookSource).not.toContain("/Applications/ChatGPT.app");
+      expect(matched?.overlayVoiceBootstrapSource).toContain('"isolatedQualification"');
+      expect(matched?.overlayVoiceBootstrapSource).toContain(scratchApp);
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      await rm(overlayDir, { recursive: true, force: true });
+    }
   });
 
   it("skips overlay injection when packaged voice pins are missing", async () => {

@@ -72,13 +72,14 @@ describe("native voice-created Chat selection", () => {
     // Native navigation recognizes the voice client draft and resolves its adopted
     // alias. The backend page is not opened before that mapping and transcript exist.
     f.initial.Nir.mockImplementation((_scope?: unknown, path?: unknown) => {
-      expect(path).toBe(`/c/${encodeURIComponent(f.draft)}`);
+      expect(path).toBe(`/c/${encodeURIComponent(f.backend)}`);
       expect(f.values.get(f.initial.B1n)).toBe(f.backend);
       return true;
     });
     select();
     select();
-    expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(f.draft);
+    expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(f.backend);
+    expect(f.shared.Vot).not.toHaveBeenCalledWith(f.draft);
     expect(f.initial.Nir).toHaveBeenCalledOnce();
     expect(f.state.isVoiceModeActive).toBe(true);
     expect(f.binding.scope.set).not.toHaveBeenCalled();
@@ -131,7 +132,7 @@ describe("native voice-created Chat selection", () => {
       select();
       expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
         f.binding.scope,
-        `/c/${encodeURIComponent(f.draft)}`,
+        `/c/${encodeURIComponent(f.backend)}`,
       );
     },
   );
@@ -212,8 +213,54 @@ describe("native voice-created Chat selection", () => {
     },
   );
 
+  it("opens the adopted conversation when Instant Connect already stores that identity", () => {
+    const f = fixture();
+    f.adopt();
+    f.state.conversationId = f.backend;
+    const select = f.check();
+    select();
+    expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(f.backend);
+    expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
+      f.binding.scope,
+      `/c/${encodeURIComponent(f.backend)}`,
+    );
+    select();
+    expect(f.initial.Nir).toHaveBeenCalledOnce();
+  });
+
+  it("does not treat an early server ID as the navigation target", () => {
+    const f = fixture();
+    f.state.earlyServerThreadId = "c0ffee00-0000-4000-8000-000000000001";
+    const select = f.check();
+    select();
+    expect(f.initial.Nir).not.toHaveBeenCalled();
+    f.values.set(f.initial.B1n, f.backend);
+    select();
+    expect(f.initial.Nir).not.toHaveBeenCalled();
+    f.adopt();
+    select();
+    expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(f.backend);
+    expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
+      f.binding.scope,
+      `/c/${encodeURIComponent(f.backend)}`,
+    );
+  });
+
+  it("selects a draft whose native mapping is already adopted before the selector is constructed", () => {
+    const f = fixture();
+    f.binding.backendConversationId = f.backend;
+    f.adopt();
+    f.check()();
+    expect(f.shared.Vot).toHaveBeenCalledExactlyOnceWith(f.backend);
+    expect(f.initial.Nir).toHaveBeenCalledExactlyOnceWith(
+      f.binding.scope,
+      `/c/${encodeURIComponent(f.backend)}`,
+    );
+  });
+
   it("leaves a saved Chat selected", () => {
     const f = fixture();
+    f.binding.props.conversationId = f.backend;
     f.binding.backendConversationId = f.backend;
     f.adopt();
     f.check()();

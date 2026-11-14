@@ -66,13 +66,42 @@ injection on **26.1106.*** and **26.1103.*** product versions so Desktop stays
 usable. Host and Web are independent of that skip.
 
 The exact-version allow attempt on `msi-1` in interactive session **4**
-reproduces this failure. The Controller can briefly report `installed` before
-recovery records `CDP command 'Runtime.enable' timed out`; the visible window
-remains on the splash. That initial status is not a successful attachment.
-Keep the Windows skip and retain a Controller backup before compatibility probes.
-Launch through the installed `codexhost-start.exe` in the interactive session;
-a session-0 Host can separately lock the Mapping Store and prevent startup.
-The macOS exact-version exception does not qualify the Windows Store build.
+reproduces Controller injection during splash: the Controller can briefly
+report `installed` before recovery records `CDP command 'Runtime.enable' timed
+out`; the visible window remains on the splash. That initial status is not a
+successful attachment. Keep the Windows production skip.
+
+An owned isolated copy of the current-user pin
+(`Local\.codexhost\update-impact\26.1106.51428\bundle`, asar digest distinct
+from the macOS scratch asar) launched in interactive session **1** with a
+separate Electron user-data directory is a different route. After
+`app://-/index.html` exists, `isolated-runtime-enable` `Runtime.enable` can
+succeed without overlay injection. That does not unskip production Controller
+injection and does not qualify Chat or Work voice.
+
+The three hashed 26.1106 voice webpack files
+(`webview/assets/348410.1a97dde15f.js`,
+`webview/assets/async/530142.1e51e7f4b2.js`,
+`webview/assets/async/586788.c871bb9b7d.js`) plus the imported scope/runtime
+owners (`484232.729c583cfe.js` `cY1t`, `514766.2d2f1ddc86.js` `OWtl`,
+`57334.3f72d1ac06.js` `cY1t`, `739301.37a39f26d6.js` `Oj9r`/`Sd8U`/`GDNt`/`bgok`)
+are byte-identical to the macOS scratch asar. Matching filenames and bytes are
+not a Windows hashed profile. Factory-bounded discovery against that extended
+inventory with `platform: win32` is bytes-verified `hashed-chat` **rejected**,
+fingerprint `9ddb828e56832a34`: the only issue is `wrong-platform`
+`["26.1106.51428"]` (expected reviewed-support rejection;
+`hashedVoiceProfileSupported` remains darwin-only). Duplicate `oWM3` copies
+digest `d899da24efbef7c5` and collapse; darwin candidate fingerprint
+`6b8b598d03a2fb43` is structural only. `OWtl`/`Oj9r`/`Sd8U` own `AppScope`/`RouteScope`/
+`ComposerScope`. Idle CDP peek on PID **22472** / CDP **18765**: `pageCount=1`
+is not Chat compositor ready (Chat composer 0, Work composer 1); hashed runtime
+script is loaded; `req.e`/`m`/`c` are not window globals. Do not `import()`
+those chunks during splash. Do not drop the production skip.
+
+Launch isolated Desktop through the interactive session; a session-0 Host
+using production data can lock the Mapping Store. Isolated Host `--data` must
+not be `~\.codexhost`. The macOS exact-version exception does not qualify the
+Windows Store build.
 
 This is not a Live Voice qualification of 26.1106. Voice pins stay in
 [cpa-live-voice-desktop-hook.md](cpa-live-voice-desktop-hook.md).

@@ -35,6 +35,30 @@ describe("native Chat voice runtime", () => {
         desktopPlatform: "win32",
       }),
     ).toBeUndefined();
+    expect(
+      selectNativeChatVoiceAdapter({
+        desktopVersion: "26.1106.51428",
+        desktopPlatform: "win32",
+        desktopBuild: "26605",
+        asarDigest: `sha256:${"ab".repeat(32)}`,
+        desktopAppPath:
+          "C:\\Users\\karlchow\\AppData\\Local\\.codexhost\\update-impact\\26.1106.51428\\bundle\\app\\ChatGPT.exe",
+        implementationRevision: "abcd1234abcd1234",
+        isolatedQualification: {
+          path: "chat",
+          run: "isolated",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          desktopVersion: "26.1106.51428",
+          desktopBuild: "26605",
+          desktopPlatform: "win32",
+          asarDigest: `sha256:${"ab".repeat(32)}`,
+          appPath:
+            "C:\\Users\\karlchow\\AppData\\Local\\.codexhost\\update-impact\\26.1106.51428\\bundle\\app\\ChatGPT.exe",
+          implementationRevision: "abcd1234abcd1234",
+          label: "unqualified-isolated",
+        },
+      }),
+    ).toBe("hashed");
   });
 
   it("treats START acknowledgment without native connected Chat state as incomplete", () => {

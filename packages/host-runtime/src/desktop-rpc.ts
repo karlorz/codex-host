@@ -19,8 +19,19 @@ export function rpcEnvelope(request: JsonRpcRequest, value: JsonObject): JsonObj
   };
 }
 
-export function rpcError(request: JsonRpcRequest, code: number, message: string): JsonObject {
-  return rpcEnvelope(request, { error: { code, message } });
+export function rpcError(
+  request: JsonRpcRequest,
+  code: number,
+  message: string,
+  data?: JsonObject,
+): JsonObject {
+  return rpcEnvelope(request, {
+    error: {
+      code,
+      message,
+      ...(data && Object.keys(data).length > 0 ? { data } : {}),
+    },
+  });
 }
 
 /**

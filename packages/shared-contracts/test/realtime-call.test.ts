@@ -32,10 +32,12 @@ describe("realtime call contract", () => {
     expect(filterRealtimeCallHeaders(undefined)).toEqual({});
   });
 
-  it("accepts only the gateway call identity form", () => {
+  it("accepts gateway call identities with or without the rtc_ prefix", () => {
     expect(isRealtimeCallId("rtc_fixture-1")).toBe(true);
-    expect(isRealtimeCallId("fixture")).toBe(false);
-    expect(isRealtimeCallId("rtc_")).toBe(false);
+    expect(isRealtimeCallId("call-123")).toBe(true);
+    expect(isRealtimeCallId("rtc_")).toBe(true);
+    expect(isRealtimeCallId("")).toBe(false);
+    expect(isRealtimeCallId("call/123")).toBe(false);
     expect(isRealtimeCallId(undefined)).toBe(false);
   });
 
@@ -44,6 +46,7 @@ describe("realtime call contract", () => {
     expect(realtimeCallIdFromLocation("/v1/realtime/calls/rtc_fixture?intent=quicksilver")).toBe(
       "rtc_fixture",
     );
+    expect(realtimeCallIdFromLocation("/v1/realtime/calls/call-123")).toBe("call-123");
     expect(realtimeCallIdFromLocation("/v1/live/rtc_fixture#fragment")).toBe("rtc_fixture");
     expect(realtimeCallIdFromLocation("/unrecognized/rtc_fixture")).toBeUndefined();
     expect(realtimeCallIdFromLocation("")).toBeUndefined();
@@ -53,7 +56,7 @@ describe("realtime call contract", () => {
     expect(
       realtimeCallParamsSchema.safeParse({
         operation: "hangup",
-        callId: "not-a-call",
+        callId: "not/a-call",
       }).success,
     ).toBe(false);
     expect(

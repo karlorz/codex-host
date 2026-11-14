@@ -8,10 +8,10 @@ import { expectedPayloadPaths } from "../../scripts/release/prepare-payload.mjs"
 import { expectedNpmPackagePaths } from "../../scripts/release/prepare-npm.mjs";
 import { releaseTarget } from "../../scripts/release/targets.mjs";
 import { computeVoiceImplementationIdentity } from "../../packages/renderer-extension/scripts/voice-implementation-identity.mjs";
+import { voiceProfilePins } from "../../packages/renderer-extension/src/renderer-voice-profiles.ts";
 import {
   VOICE_QUALIFICATION_RELATIVE,
   VOICE_PROFILE_PINS_RELATIVE,
-  loadCurrentSourceVoiceIdentity,
   parseVoiceProfilePins,
   parseVoiceQualification,
   stageAndValidateVoiceReleaseArtifacts,
@@ -114,30 +114,67 @@ describe("voice release artifacts", () => {
     }
   });
 
-  it("rejects skipBuild staging when artifacts do not match current source identity", async () => {
+  it("rejects skipBuild dummy artifacts against independently derived current-source identity", async () => {
     const staged = await temporaryDirectory();
+    const graphRevision = await computeVoiceImplementationIdentity(
+      path.join(root, "packages", "renderer-extension"),
+    );
+    const independentIdentity = {
+      pins: voiceProfilePins,
+      qualification: {
+        implementationRevision: graphRevision,
+        reviewedEvidence: [],
+      },
+    };
     try {
       await writeFile(path.join(staged, "voice-profile-pins.json"), pins);
       await writeFile(path.join(staged, "voice-qualification.json"), qualification);
       await expect(
-        validateStagedVoiceArtifacts({ stagedAppDir: staged, repositoryRoot: root }),
-      ).rejects.toThrow("does not match current source identity");
+        validateStagedVoiceArtifacts({
+          stagedAppDir: staged,
+          repositoryRoot: root,
+          sourceIdentity: independentIdentity,
+        }),
+      ).rejects.toThrow(
+        /does not match current source identity|does not match current implementation source graph/u,
+      );
     } finally {
       await rm(staged, { recursive: true, force: true });
     }
   });
 
-  it("requires generated renderer voice JSON after a renderer build", async () => {
-    const dist = voiceDistDirectory(root);
-    const pinsText = await readFile(path.join(dist, "voice-profile-pins.json"), "utf8");
-    const qualificationText = await readFile(path.join(dist, "voice-qualification.json"), "utf8");
-    const identity = await loadCurrentSourceVoiceIdentity(root);
-    expect(parseVoiceProfilePins(pinsText)).toEqual(identity.pins);
-    expect(parseVoiceQualification(qualificationText)).toEqual(identity.qualification);
-    expect(identity.qualification.reviewedEvidence).toEqual([]);
-    expect(identity.qualification.implementationRevision).toBe(
-      await computeVoiceImplementationIdentity(path.join(root, "packages", "renderer-extension")),
+  it("accepts temporary staged artifacts that match independently derived current-source identity", async () => {
+    const staged = await temporaryDirectory();
+    const source = await temporaryDirectory();
+    const graphRevision = await computeVoiceImplementationIdentity(
+      path.join(root, "packages", "renderer-extension"),
     );
+    const independentIdentity = {
+      pins: voiceProfilePins,
+      qualification: {
+        implementationRevision: graphRevision,
+        reviewedEvidence: [],
+      },
+    };
+    const pinsText = `${JSON.stringify(voiceProfilePins)}\n`;
+    const qualificationText = `${JSON.stringify(independentIdentity.qualification)}\n`;
+    try {
+      await writeFile(path.join(source, "voice-profile-pins.json"), pinsText);
+      await writeFile(path.join(source, "voice-qualification.json"), qualificationText);
+      await writeFile(path.join(staged, "voice-profile-pins.json"), pinsText);
+      await writeFile(path.join(staged, "voice-qualification.json"), qualificationText);
+      await expect(
+        validateStagedVoiceArtifacts({
+          stagedAppDir: staged,
+          sourceDistDir: source,
+          repositoryRoot: root,
+          sourceIdentity: independentIdentity,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(source, { recursive: true, force: true });
+      await rm(staged, { recursive: true, force: true });
+    }
   });
 
   it("fails packager staging when generated JSON is missing", async () => {

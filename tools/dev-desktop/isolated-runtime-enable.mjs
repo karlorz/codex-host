@@ -281,6 +281,23 @@ function fail(outcome) {
   throw error;
 }
 
+export function isPrimaryRendererPage(target) {
+  return (
+    Boolean(target) &&
+    target.type === "page" &&
+    typeof target.url === "string" &&
+    target.url.startsWith("app://-/index.html") &&
+    !target.url.includes("avatar-overlay") &&
+    typeof target.webSocketDebuggerUrl === "string"
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export async function probeIsolatedRuntimeEnable(options) {
   const startedAt = Date.now();
   const parsed = parseProbeArguments(options.arguments);
@@ -290,6 +307,7 @@ export async function probeIsolatedRuntimeEnable(options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), parsed.timeoutMs);
   let socket;
+  let pageCount = 0;
   try {
     const listener = (options.lookupListener ?? lookupListenerCommand)(parsed.port);
     if (!listener?.commandLine) fail(PROBE_OUTCOMES.identityUnverified);
@@ -297,32 +315,33 @@ export async function probeIsolatedRuntimeEnable(options) {
       fail(PROBE_OUTCOMES.identityMismatch);
     }
     const fetchImpl = options.fetchImpl ?? fetch;
-    const response = await fetchImpl(`${parsed.endpoint.replace(/\/$/, "")}/json/list`, {
-      signal: controller.signal,
-    });
-    if (!response.ok) fail(PROBE_OUTCOMES.targetListHttp);
-    const targets = await readJsonWithDeadline(response, controller.signal);
-    const rendererPages = (Array.isArray(targets) ? targets : []).filter(
-      (target) =>
-        target &&
-        target.type === "page" &&
-        typeof target.url === "string" &&
-        target.url.startsWith("app://-/index.html") &&
-        !target.url.includes("avatar-overlay") &&
-        typeof target.webSocketDebuggerUrl === "string",
-    );
-    if (rendererPages.length === 0) {
+    const sleep = options.sleep ?? delay;
+    const listUrl = `${parsed.endpoint.replace(/\/$/, "")}/json/list`;
+    let pages = [];
+    while (!controller.signal.aborted) {
+      const response = await fetchImpl(listUrl, {
+        signal: controller.signal,
+      });
+      if (!response.ok) fail(PROBE_OUTCOMES.targetListHttp);
+      const targets = await readJsonWithDeadline(response, controller.signal);
+      const rendererPages = (Array.isArray(targets) ? targets : []).filter(isPrimaryRendererPage);
+      pageCount = rendererPages.length;
+      pages = rendererPages.filter((target) =>
+        websocketMatchesVerifiedListener(target.webSocketDebuggerUrl, parsed.port),
+      );
+      if (pages.length > 0) break;
+      if (rendererPages.length > 0) fail(PROBE_OUTCOMES.listenerWebsocketMismatch);
+      if (controller.signal.aborted) break;
+      await sleep(250);
+    }
+    if (pages.length === 0) {
       return {
         ok: false,
         error: PROBE_OUTCOMES.noRendererPage,
         elapsedMs: Date.now() - startedAt,
-        pageCount: 0,
+        pageCount,
       };
     }
-    const pages = rendererPages.filter((target) =>
-      websocketMatchesVerifiedListener(target.webSocketDebuggerUrl, parsed.port),
-    );
-    if (pages.length === 0) fail(PROBE_OUTCOMES.listenerWebsocketMismatch);
     const socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
     socket = socketFactory(pages[0].webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
@@ -355,9 +374,18 @@ export async function probeIsolatedRuntimeEnable(options) {
     });
     return { ok: true, elapsedMs: Date.now() - startedAt, pageCount: pages.length };
   } catch (error) {
+    const classified = classifyProbeFailure(error);
+    if (classified === PROBE_OUTCOMES.aborted && pageCount === 0 && !socket) {
+      return {
+        ok: false,
+        error: PROBE_OUTCOMES.noRendererPage,
+        elapsedMs: Date.now() - startedAt,
+        pageCount: 0,
+      };
+    }
     return {
       ok: false,
-      error: classifyProbeFailure(error),
+      error: classified,
       elapsedMs: Date.now() - startedAt,
     };
   } finally {

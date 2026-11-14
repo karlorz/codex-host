@@ -8,7 +8,10 @@ import {
   NATIVE_CHAT_VOICE_ASSETS,
   loadNativeChatVoiceModules,
 } from "./renderer-native-chat-voice-assets.js";
-import { loadHashedNativeChatVoiceModules } from "./renderer-hashed-native-chat-voice.js";
+import {
+  hashedNativeChatVoiceSupported,
+  loadHashedNativeChatVoiceModules,
+} from "./renderer-hashed-native-chat-voice.js";
 import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
 import type { ChatVoiceScope } from "./renderer-native-chat-voice.js";
 import { observeNativeChatVoiceState } from "./renderer-native-chat-voice-state.js";
@@ -103,8 +106,15 @@ export function createNativeChatPrepareBudget(maxFailures = NATIVE_CHAT_PREPARE_
 export function selectNativeChatVoiceAdapter(config: {
   desktopVersion?: string;
   desktopPlatform?: string;
+  isolatedQualification?: unknown;
+  desktopBuild?: string;
+  asarDigest?: string;
+  desktopAppPath?: string;
+  implementationRevision?: string;
 }): NativeChatVoiceKind | undefined {
-  return nativeChatVoiceKind(config);
+  const kind = nativeChatVoiceKind(config);
+  if (kind) return kind;
+  return hashedNativeChatVoiceSupported(config) ? "hashed" : undefined;
 }
 
 export async function loadNativeChatVoiceGraph(options: {

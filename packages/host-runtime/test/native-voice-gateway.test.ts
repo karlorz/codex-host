@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NativeVoiceGateway } from "../src/native-voice-gateway.js";
+import { NativeVoiceGateway, voiceGatewayFailureStage } from "../src/native-voice-gateway.js";
 import { REALTIME_CALL_METHOD } from "@codexhost/shared-contracts";
 import { createFixture, requestId, stopFixture, writeRequest } from "./app-server-host-fixture.js";
 
@@ -12,7 +12,7 @@ async function gateway() {
   homes.push(home);
   await writeFile(
     path.join(home, "config.toml"),
-    'model_provider="custom"\nexperimental_realtime_webrtc_call_base_url="https://gateway.example/v1"\nexperimental_realtime_ws_base_url="https://gateway.example/v1"\n[model_providers.custom]\nenv_key="VOICE_KEY"\n',
+    'model_provider="custom"\nexperimental_realtime_webrtc_call_base_url="https://gateway.example/v1"\nexperimental_realtime_ws_base_url="https://gateway.example/v1"\n[model_providers.custom]\nname="Custom"\nenv_key="VOICE_KEY"\n',
   );
   await writeFile(
     path.join(home, "auth.json"),
@@ -66,6 +66,37 @@ describe("native voice gateway", () => {
       await stopFixture(fixture);
     }
   });
+  it("returns an allowlisted failure stage without transport diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockRejectedValue(new Error("secret upstream detail")),
+    );
+    await gateway();
+    const home = homes.at(-1);
+    if (!home) throw new Error("Missing gateway config");
+    const fixture = createFixture({
+      environment: { CODEX_HOME: home, VOICE_KEY: "gateway-fixture" },
+    });
+    try {
+      writeRequest(fixture.desktopInput, {
+        id: "voice-create-failed",
+        method: REALTIME_CALL_METHOD,
+        params: create(),
+      });
+      const response = await fixture.collector.waitFor((message) =>
+        requestId(message, "voice-create-failed"),
+      );
+      expect(response).toMatchObject({
+        error: {
+          message: "Configured voice gateway request failed",
+          data: { stage: "transport" },
+        },
+      });
+      expect(JSON.stringify(response)).not.toContain("secret");
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
   it("hangs up a known created call if reading its answer fails", async () => {
     const failedBody = new ReadableStream({
       start(controller) {
@@ -89,6 +120,131 @@ describe("native voice gateway", () => {
     expect(request.mock.calls[1]?.[0]).toBe(
       "https://gateway.example/v1/realtime/calls/rtc_fixture/hangup",
     );
+  });
+  it("accepts a gateway Location without an rtc_ prefix", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("answer", {
+        status: 201,
+        headers: { location: "/v1/realtime/calls/call-123" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    expect(await (await gateway()).request(create())).toEqual({
+      status: 201,
+      body: "answer",
+      headers: {
+        "content-type": "text/plain;charset=UTF-8",
+        location: "/v1/realtime/calls/call-123",
+      },
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("hangs up a non-rtc created call if reading its answer fails", async () => {
+    const failedBody = new ReadableStream({
+      start(controller) {
+        controller.error(new Error("transport secret"));
+      },
+    });
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(failedBody, {
+          status: 201,
+          headers: { location: "/v1/realtime/calls/call-123" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", request);
+    await expect((await gateway()).request(create())).rejects.toThrow(
+      "Configured voice gateway request failed",
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]?.[0]).toBe(
+      "https://gateway.example/v1/realtime/calls/call-123/hangup",
+    );
+    expect(JSON.stringify(request.mock.calls[1]?.[1])).not.toContain("secret");
+  });
+  it("classifies malformed params as request without exposing parser output", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const service = await gateway();
+    await expect(service.request({ operation: "create" })).rejects.toThrow("Invalid voice");
+    await expect(service.request({ operation: "hangup", callId: "not/a-call" })).rejects.toThrow(
+      "Invalid voice",
+    );
+    expect(voiceGatewayFailureStage(new Error("Invalid voice call request"))).toBe("request");
+    expect(fetcher).not.toHaveBeenCalled();
+    const home = homes.at(-1);
+    if (!home) throw new Error("Missing gateway config");
+    const fixture = createFixture({
+      environment: { CODEX_HOME: home, VOICE_KEY: "gateway-fixture" },
+    });
+    try {
+      writeRequest(fixture.desktopInput, {
+        id: "voice-create-malformed",
+        method: REALTIME_CALL_METHOD,
+        params: { operation: "create" },
+      });
+      const response = await fixture.collector.waitFor((message) =>
+        requestId(message, "voice-create-malformed"),
+      );
+      expect(response).toMatchObject({
+        error: {
+          message: "Configured voice gateway request failed",
+          data: { stage: "request" },
+        },
+      });
+      expect(JSON.stringify(response)).not.toContain("Zod");
+      expect(JSON.stringify(response)).not.toContain("invalid_type");
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+  it("classifies a missing gateway Location as identity, not transport", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response("answer", { status: 201 })),
+    );
+    await expect((await gateway()).request(create())).rejects.toThrow(/identity/u);
+    expect(
+      voiceGatewayFailureStage(
+        new Error("Voice call identity is unavailable; remote cleanup is unconfirmed"),
+      ),
+    ).toBe("identity");
+    expect(
+      voiceGatewayFailureStage(new Error("External voice gateway configuration is unavailable")),
+    ).toBe("config");
+  });
+  it("returns an identity stage on Host RPC when Location is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response("answer", { status: 201 })),
+    );
+    await gateway();
+    const home = homes.at(-1);
+    if (!home) throw new Error("Missing gateway config");
+    const fixture = createFixture({
+      environment: { CODEX_HOME: home, VOICE_KEY: "gateway-fixture" },
+    });
+    try {
+      writeRequest(fixture.desktopInput, {
+        id: "voice-create-identity",
+        method: REALTIME_CALL_METHOD,
+        params: create(),
+      });
+      const response = await fixture.collector.waitFor((message) =>
+        requestId(message, "voice-create-identity"),
+      );
+      expect(response).toMatchObject({
+        error: {
+          message: "Configured voice gateway request failed",
+          data: { stage: "identity" },
+        },
+      });
+      expect(JSON.stringify(response)).not.toContain("answer");
+    } finally {
+      await stopFixture(fixture);
+    }
   });
   it("uses configured URLs and gateway auth, dropping Desktop account credentials", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(

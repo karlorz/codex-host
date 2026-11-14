@@ -8,6 +8,7 @@ import {
 import { CLIENT_OWNED_VOICE_ASSETS } from "../src/renderer-client-owned-voice.js";
 import {
   installExternalVoiceLaunchHook,
+  ownedChatgptChatStartUnavailable,
   routeExternalVoiceLaunch,
 } from "../src/renderer-external-voice-launch.js";
 import { applySharedVoiceRoutes } from "../src/renderer-cpa-live-voice-preference.js";
@@ -15,6 +16,8 @@ import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
 } from "../src/renderer-hashed-native-chat-voice.js";
+import { hashedVoiceTestIdentity } from "./voice-evidence-fixture.js";
+import { voiceImplementationRevision } from "../src/renderer-voice-profiles.js";
 
 const carrier = "codexhost/plugin-v1@grok-test-model-permission";
 const source = "composer_button_new_thread";
@@ -392,8 +395,8 @@ describe("native Chat service interception", () => {
     hook.dispose();
   });
 
-  it.each(["absent", "disabled", "unsupported", "pending"])(
-    "leaves official Instant Connect on Desktop when the Chat hook is %s",
+  it.each(["absent", "disabled", "unsupported", "pending"] as const)(
+    "does not dispatch official Instant Connect for owned ChatGPT Chat when the Chat hook is %s",
     async (status) => {
       const f = hookFixture();
       const chatStart = vi.fn();
@@ -404,22 +407,163 @@ describe("native Chat service interception", () => {
       const hook = installExternalVoiceLaunchHook(f);
       try {
         await settle();
-        await f.services.realtimeVoiceRuntime.requestRealtimeStart({
-          ...request(),
-          productExperience: "chat",
-        });
+        expect(() =>
+          f.services.realtimeVoiceRuntime.requestRealtimeStart({
+            ...request(),
+            productExperience: "chat",
+          }),
+        ).toThrow("Chat voice is waiting for Desktop identity.");
         expect(chatStart).not.toHaveBeenCalled();
-        expect(f.start).toHaveBeenCalledOnce();
-        await f.services.realtimeVoiceRuntime.requestRealtimeStart({
+        expect(f.start).not.toHaveBeenCalled();
+        f.services.realtimeVoiceRuntime.requestRealtimeStart({
           ...request(),
           productExperience: "work",
         });
-        expect(f.start).toHaveBeenCalledTimes(2);
+        expect(f.start).toHaveBeenCalledOnce();
       } finally {
         hook.dispose();
       }
     },
   );
+
+  it("does not dispatch hashed Chat Instant Connect onto overlay transport when Chat is unqualified", async () => {
+    const f = hookFixture();
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    Reflect.set(
+      f.target[CPA_LIVE_VOICE_HOOK_GLOBAL],
+      "desktopVersion",
+      HASHED_WEBPACK_VOICE_VERSION,
+    );
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopPlatform", "darwin");
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopAppPath", appPath);
+    Object.assign(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], hashedVoiceTestIdentity(), {
+      isolatedQualification: {
+        path: "work-codex",
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        ...hashedVoiceTestIdentity(),
+        desktopPlatform: "darwin",
+        appPath,
+        label: "unqualified-isolated",
+      },
+    });
+    applySharedVoiceRoutes(f.target, {
+      chatExperience: "chatgpt",
+      chatConnection: "desktop",
+      workConnection: "gateway",
+    });
+    f.names.splice(0, f.names.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GaA7") return { appServices: f.services };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    const hook = installExternalVoiceLaunchHook({
+      target: f.target,
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await settle();
+      expect(hook.status).toBe("active");
+      expect(ownedChatgptChatStartUnavailable({ productExperience: "chat" }, f.target)).toBe(
+        "Chat voice is not qualified on this Desktop.",
+      );
+      expect(() =>
+        f.services.realtimeVoiceRuntime.requestRealtimeStart({
+          ...request(),
+          productExperience: "chat",
+        }),
+      ).toThrow("Chat voice is not qualified on this Desktop.");
+      expect(f.start).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("does not dispatch overlay transport when owned Chat is qualified but the WM hook is pending", async () => {
+    const f = hookFixture();
+    const appPath = "/tmp/codexhost-update-impact/26.1106.51428/bundle/ChatGPT.app";
+    const identity = hashedVoiceTestIdentity();
+    Reflect.set(
+      f.target[CPA_LIVE_VOICE_HOOK_GLOBAL],
+      "desktopVersion",
+      HASHED_WEBPACK_VOICE_VERSION,
+    );
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopPlatform", "darwin");
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopAppPath", appPath);
+    Object.assign(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], identity, {
+      isolatedQualification: {
+        path: "chat",
+        run: "2026-11-14-isolated",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        ...identity,
+        implementationRevision: voiceImplementationRevision(),
+        desktopPlatform: "darwin",
+        appPath,
+        label: "unqualified-isolated",
+      },
+    });
+    const pendingHook = { status: "pending" as const, start: vi.fn() };
+    Object.assign(f.target, {
+      __codexhostNativeChatVoiceV1: pendingHook,
+    });
+    applySharedVoiceRoutes(f.target, {
+      chatExperience: "chatgpt",
+      chatConnection: "desktop",
+      workConnection: "gateway",
+    });
+    f.names.splice(0, f.names.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GaA7") return { appServices: f.services };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    const hook = installExternalVoiceLaunchHook({
+      target: f.target,
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    try {
+      await settle();
+      expect(() =>
+        f.services.realtimeVoiceRuntime.requestRealtimeStart({
+          ...request(),
+          productExperience: "chat",
+        }),
+      ).toThrow("Native Chat voice is unavailable");
+      expect(f.start).not.toHaveBeenCalled();
+      expect(pendingHook.start).not.toHaveBeenCalled();
+      expect(
+        (f.target as { __codexhostNativeChatVoiceV1?: { status?: string } })
+          .__codexhostNativeChatVoiceV1?.status,
+      ).toBe("pending");
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("leaves Chat Instant Connect on the original service when the extension voice hook is disabled", async () => {
+    const f = hookFixture();
+    Reflect.deleteProperty(f.target, CPA_LIVE_VOICE_HOOK_GLOBAL);
+    const hook = installExternalVoiceLaunchHook(f);
+    try {
+      await settle();
+      expect(hook.status).toBe("disabled");
+      expect(f.services.realtimeVoiceRuntime).toBe(f.runtime);
+      f.services.realtimeVoiceRuntime.requestRealtimeStart({
+        ...request(),
+        productExperience: "chat",
+      });
+      expect(f.start).toHaveBeenCalledOnce();
+    } finally {
+      hook.dispose();
+    }
+  });
 
   it.each(["desktop", "gateway"] as const)(
     "preserves explicit Codex Chat on %s without a native Chat binding",

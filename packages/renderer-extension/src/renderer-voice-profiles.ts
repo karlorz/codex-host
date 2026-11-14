@@ -430,6 +430,20 @@ export const HASHED_NATIVE_CHAT_ROLES = {
   reactDomModuleId: "CE87",
   startInitializeExport: "initializeVoiceSession",
   prewarmControllerExport: "VoiceInstantConnectCacheController",
+  /** Conversation store: adopted backend ID, transcript mapping, current node. */
+  conversationModuleId: "MrGp",
+  backendConversationExport: "jS",
+  transcriptMappingExport: "Jv",
+  currentNodeExport: "Od",
+  /** App location atom used as the draft-selection origin. */
+  locationModuleId: "nlNF",
+  locationExport: "x2",
+  /** AppNavigation.navigate(scope, location). */
+  navigationModuleId: "E8Sp",
+  navigationExport: "oo",
+  /** `/c/:conversationId` builder; not a GPT `/g/` path. */
+  conversationPathModuleId: "jAnS",
+  conversationPathExport: "mv",
 } as const;
 
 export const HASHED_OVERLAY_VOICE_ROLES = {
@@ -439,7 +453,48 @@ export const HASHED_OVERLAY_VOICE_ROLES = {
   bridgeExport: "O1",
   responseErrorModuleId: "eShZ",
   responseErrorExport: "s1",
+  capabilityModuleId: "ChYf",
+  capabilityExport: "G",
+  inferenceGateModuleId: "OMIV",
+  inferenceGateExport: "JW",
+  /** Workspace voice access derived atom `P` via `zTeN.un`; Instant Connect ANDs `Y3.status`. */
+  voiceAccessModuleId: "eFn4",
+  voiceAccessExport: "Y3",
 } as const;
+
+/** Hashed 26.1106 Instant Connect evaluator roles from webpack `ChYf` / `ZnQ7` / `eFn4`. */
+export const HASHED_26_1106_VOICE_EVALUATOR = {
+  accessPolicy: "realtime-voice",
+  enableStatsig: "2380644311",
+  firstPartyStatsig: "3683713372",
+  unsupportedAuthReason: "unsupported-auth",
+  inAppVoiceFeature: "in_app_voice",
+  capabilityFamilyKind: "readable-family",
+  inferenceGateFamilyKind: "signal-family",
+  accessAtomLibrary: "un",
+  capabilityAtomLibrary: "i1",
+  accessFactoryCache: "string",
+} as const;
+
+/** Source-byte fragments from hashed 26.1106 `zTeN` / `ChYf` / `eFn4`. */
+export const HASHED_26_1106_VOICE_NATIVE_BYTES = {
+  atomLibrary: "un:()=>U.u,i1:()=>a.i1",
+  accessExport: "Y3:()=>P",
+  accessCtor: "P=(0,r.un)(l.u,({get:e})=>e(A).voice,{isEqual:X}",
+  capabilityCtor: "h=(0,r.i1)(l.u,(e,{get:t})=>{",
+} as const;
+
+export const VOICE_CAPABILITY_REASONS = [
+  "access-replay",
+  "inference-replay",
+  "other-denial",
+  "access-shape",
+  "native-ineligible",
+  "unsupported",
+  "pending",
+  "disabled",
+] as const;
+export type VoiceCapabilityReason = (typeof VOICE_CAPABILITY_REASONS)[number];
 
 export const HASHED_NATIVE_CHAT_SEMANTIC_ANCHORS = [
   "initializeVoiceSession",
@@ -490,6 +545,16 @@ export const WORK_SEMANTIC_ROLE_MATCHERS: readonly VoiceSemanticRoleMatcher[] = 
     brands: ["codex_work_desktop"],
   },
 ];
+
+export function hashedVoiceCandidateOwner(config: {
+  desktopVersion?: string;
+  desktopPlatform?: string;
+}): boolean {
+  return (
+    config.desktopVersion === HASHED_WEBPACK_VOICE_VERSION &&
+    (config.desktopPlatform === "darwin" || config.desktopPlatform === "win32")
+  );
+}
 
 export function hashedVoiceProfileSupported(config: {
   desktopVersion?: string;
@@ -640,7 +705,7 @@ export function voiceProfileOwner(
   version: string,
 ): Record<string, unknown> | undefined {
   if (product === "chat") {
-    if (hashedVoiceProfileSupported({ desktopVersion: version, desktopPlatform: platform })) {
+    if (hashedVoiceCandidateOwner({ desktopVersion: version, desktopPlatform: platform })) {
       return {
         kind: "hashed-chat",
         platform,
@@ -692,7 +757,7 @@ export function voiceProfileOwner(
       inferenceGateFamily: namedWork.inferenceGateFamily,
     };
   }
-  if (hashedVoiceProfileSupported({ desktopVersion: version, desktopPlatform: platform })) {
+  if (hashedVoiceCandidateOwner({ desktopVersion: version, desktopPlatform: platform })) {
     return {
       kind: "hashed-work",
       platform,
