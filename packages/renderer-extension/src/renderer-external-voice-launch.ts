@@ -1,4 +1,3 @@
-import { encodeHarnessPluginRoute, harnessPluginIdSchema } from "@codexhost/shared-contracts";
 import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets.js";
 import { startNativeChatVoiceForRequest } from "./renderer-native-chat-voice.js";
 import {
@@ -17,7 +16,6 @@ import {
   loadedAssetNames,
   readCpaLiveVoiceHookConfig,
 } from "./renderer-cpa-live-voice-hook.js";
-import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
 
 const HOOK_GLOBAL = "__codexhostExternalVoiceLaunchV1";
 const SHARED_ASSET = "app-shared-8bd9d0399038.js";
@@ -41,27 +39,6 @@ function hashedAppServices(value: unknown): RecordValue | undefined {
   return isRecord(value) && isRecord(value.appServices) ? value.appServices : undefined;
 }
 
-function lastAgentPluginRoute(owner: object): string | undefined {
-  try {
-    const storage = (owner as { localStorage?: { getItem(key: string): string | null } })
-      .localStorage;
-    const parsed = JSON.parse(storage?.getItem(RENDERER_NEW_THREAD_PREFERENCE_KEY) ?? "") as {
-      lastAgent?: unknown;
-    };
-    if (
-      typeof parsed.lastAgent !== "string" ||
-      parsed.lastAgent === "" ||
-      parsed.lastAgent === "codex"
-    )
-      return undefined;
-    const harnessId = harnessPluginIdSchema.safeParse(parsed.lastAgent);
-    if (!harnessId.success) return undefined;
-    return encodeHarnessPluginRoute({ harnessId: harnessId.data });
-  } catch {
-    return undefined;
-  }
-}
-
 /** The native overlay creates its Thread from collaborationMode.settings.model.
  * Capture the primary Composer's explicit selection before crossing that boundary.
  */
@@ -70,7 +47,7 @@ export function routeExternalVoiceLaunch(
   routing?: RendererHostRouting,
   owner: object = globalThis,
 ): unknown {
-  rememberVoiceProductExperience(request);
+  rememberVoiceProductExperience(request, owner);
   if (!routing || !isRecord(request) || request.source !== "composer_button_new_thread")
     return request;
   if (request.productExperience === "chat") return request;
@@ -78,12 +55,10 @@ export function routeExternalVoiceLaunch(
   if (typeof hostId !== "string" || !hostId) return request;
   const route = routing.forComposer();
   if (!route || route.hostId !== hostId || routing.forHost(hostId) !== route) return request;
-  const selected = route.policy.selectedModel();
-  const model =
-    typeof selected === "string" && selected.startsWith("codexhost/")
-      ? selected
-      : lastAgentPluginRoute(owner);
-  if (!model) return request;
+  // Without a bound external carrier, preserve the native collaboration model.
+  // Saved draft defaults do not identify the current Composer.
+  const model = route.policy.selectedModel();
+  if (typeof model !== "string" || !model.startsWith("codexhost/")) return request;
   const mode = request.activeCollaborationMode;
   if (mode !== undefined && mode !== null && !isRecord(mode)) return request;
   const settings = isRecord(mode) ? mode.settings : undefined;

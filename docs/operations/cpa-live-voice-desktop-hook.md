@@ -133,32 +133,48 @@ hook IIFE, so compact Voice Chat start is not stalled by a large
 `348410.1a97dde15f.js` → `GDNt._n` and Host bridge `TL6G.O1`. ChatGPT Chat
 voice on this build is still the CodexHost Start Voice waveform beside Send,
 not the official overlay Voice Chat button. Named `start-voice-*` files are
-absent, so the native Chat hook loads hashed Instant Connect instead:
-`async/530142.1e51e7f4b2.js` (`j9r7.initializeVoiceSession` /
-`startVoiceWithIntroduction`) and `async/586788.c871bb9b7d.js`
-(`VoiceInstantConnectCacheController`). Empty `j9r7` / `oWM3` webpack cache
-entries are unpoisoned after those async factories are installed. Empty
-ChatGPT home has no Send control; the waveform occupies the official voice
-slot, then hides Codex Start new voice chat / Start voice chat in that Chat
-composer. While the waveform is present those official controls stay hidden.
-An empty existing Chat still has a disabled Send; Start Voice copies the official
-voice control classes instead of Send's `pointer-events-none`, and a leftover
-Instant Connect flag that is not `connected` does not disable the waveform.
-Hashed Chat must not set `hOYb.H3`. That flag freezes ChatGPT home and cancels
-Instant Connect introduction. Hashed idle still mounts
-`VoiceInstantConnectCacheController` so queued START runs. Hashed START reads
-`getVoiceNuxMode`: first-run `wingman` uses `startVoiceWithIntroduction` with
-`{kind:"full", showIntroduction:true}`; after `hasSeenAdvancedVoice` it clears a
-stale Instant Connect intent and dispatches `{type:"START", args:{conversationId,
-eventSource:"composer"}}`. A missing intro payload would reopen Meet Voice on every
-click. Leftover intent makes native `ip.ac` reject START and return to Chat home.
-`GaA7.appServices.realtimeVoiceRuntime.requestRealtimeStart` intercepts Chat only
-while `__codexhostNativeChatVoiceV1.status === "active"`. A failed hashed bind
-must not reject the official Instant Connect wave with Native Chat voice is
-unavailable. Chat START still goes through `startNativeChatVoiceForRequest` when
-that hook is bound. Existing Chat threads still show Start Voice beside Send
-when hashed Instant Connect bind fails; that click remembers Chat and uses
-`GaA7` Instant Connect. ChatGPT Instant Connect that still reaches
+absent, so the native Chat hook uses hashed browser Instant Connect:
+`async/530142.1e51e7f4b2.js` (`j9r7.initializeVoiceSession`) and
+`async/586788.c871bb9b7d.js` (`VoiceInstantConnectCacheController`). The loader
+first asks Desktop's webpack chunk loader for the same 34 dependencies as its
+native voice initializer, including the DSP module in chunk `422391`. Loading
+starts only after a unique visible Chat composer mounts; splash and hidden Chat
+surfaces do not import the runtime, load chunks, or repair module caches. Loading
+only the two exported chunks leaves dependencies unavailable. Rspack caches a
+failed module's `error` even when it has already published exports; function-shaped
+exports alone do not establish a healthy initializer. After loading dependencies,
+the hook removes failed START/prewarm cache entries and empty dependency entries
+whose missing factories are now registered. Healthy native factories and cached
+modules are preserved.
+
+The waveform calls the bound native browser Chat START on both hashed and
+named-asset builds. It does not use
+`GaA7.appServices.realtimeVoiceRuntime.requestRealtimeStart` as a fallback:
+that service's existing-thread path loads the locator through the Work thread
+manager. Passing a ChatGPT Chat UUID fails with `Voice chat is unavailable` at
+`THREAD_LOAD` in the avatar overlay. A resolved service request is not proof of
+a connected Chat call. Until the Chat composer binding is ready, the waveform is
+disabled and titled **Chat voice is not ready**.
+
+Empty ChatGPT home has no Send control; the waveform occupies the official voice
+slot, then hides competing Codex voice controls. An empty existing Chat has a
+disabled Send, but the ready Start Voice does not inherit Send's
+`pointer-events-none`. Hashed Chat does not set `hOYb.H3` or mount a second
+`VoiceInstantConnectCacheController`; Desktop owns the prewarm lifecycle.
+The runtime enable selector is **`cY1t.Iy`**, distinct from the native voice-active
+flag `hOYb.H3`. The hook enables it while bound and restores its prior value on
+idle disposal. START first calls **`cY1t.Re`**, which retains native authentication,
+eligibility and navigation checks and loads the session through the native app
+root. Calling `initializeVoiceSession` alone does not mount the `VoiceRoom`
+command processor. Queuing START without that processor leaves commands pending.
+The adapter awaits native STOP/START command completion so repeated clicks cannot
+enqueue another START while the first command is pending. Command completion
+still does not establish a connected session.
+Hashed START reads `getVoiceNuxMode`: first-run `wingman` uses
+`startVoiceWithIntroduction` with `{kind:"full", showIntroduction:true}`;
+after `hasSeenAdvancedVoice` it clears stale intent and dispatches
+`{type:"START", args:{conversationId,eventSource:"composer"}}`.
+ChatGPT Instant Connect that still reaches
 the overlay can POST `/wham`, so the avatar-overlay URL is not Work ownership.
 The primary hashed hook records the visible Composer surface in
 `codexhost.voice-launch-experience.v1`; the overlay wrap reads that shared
@@ -168,6 +184,20 @@ Work. Overlay Work create still goes through Host when launch experience is Work
 or unset. Thread identity stays the native conversation id. Explicit Work launch
 ownership and a Work-surface `originator=codex_work_desktop` use the Work
 connection preference.
+
+Attended macOS validation on **2026-11-14**, after an idle developer-hook refresh,
+confirmed an existing web-backed Chat remained selected with native
+`sessionType=wm`, `connection=connected`, `sessionStarted=true` and **End Voice**.
+Both user and assistant speaking flags were observed; the operator confirmed the
+voice test. Local and remote audio tracks were live, then both ended after
+**End Voice**. A new Chat draft also connected with matching native selection and
+ended cleanly. An active existing-Chat call stayed connected while navigating
+to Work and back, with its native selection still matching and no queued START.
+Idle leave/return re-enabled the runtime. A fresh Work external-Harness attempt recorded
+`wham-create` with `route=gateway`; that event alone does not qualify Grok or
+gateway speech. The splash-time load deferral has focused regression coverage;
+the earlier signed-in splash hang has not been reproduced or conclusively
+attributed to this loader.
 `__codexhostClientOwnedVoiceV1.activation`
 reports asset seen, import started/resolved/failed, and wrapper active. Other skipped
 builds retain their guards. Host and Web run independently. Windows daily-driver steps are in
@@ -1273,10 +1303,18 @@ Existing-Thread launches, avatar/global launches, official Codex selection,
 ambiguous Composers and mismatched/disconnected Host owners pass through.
 Selection is captured before launch, so changing the draft later cannot retarget
 an in-flight voice chat. This is generic to the selected Harness, including Grok and Cursor CLI.
-A Work composer whose lastAgent is an external plugin qualifies Start and the
-new-chat model stamp even when Codex Work uses Desktop default and the Host
-carrier is not selected yet. Chat launches stay native. Installed native
+Only the current matching Host's bound external carrier qualifies the new-chat
+model stamp and external-Harness capability. Saved `lastAgent` is a draft default,
+not the active Composer selection; voice never uses it to replace a native Codex
+model or force the external gateway route. Without a selected carrier, the
+native request is preserved, including its collaboration settings. Chat launches stay native. Installed native
 button acceptance is still required for the README Live voice row.
+
+Attended **2026-11-14** validation on macOS **26.1106.51428** confirmed a Work
+voice click created **Agent: Codex** while saved `lastAgent` remained Cursor CLI.
+The fresh call event reported `work=true`, `external=false`, `route=gateway`.
+This verifies Harness selection and configured gateway routing; that check did
+not independently qualify a full Codex Work speech exchange.
 
 External `thread/start`, `thread/resume`, and `thread/fork` report
 `sandbox: { type: "externalSandbox", networkAccess: "enabled" }`. Codex does not

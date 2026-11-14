@@ -10,7 +10,6 @@ import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   hashedNativeChatVoiceSupported,
   loadHashedNativeChatVoiceModules,
-  startHashedChatInstantConnect,
 } from "./renderer-hashed-native-chat-voice.js";
 import { rememberVoiceProductExperience } from "./renderer-voice-gateway-wrap.js";
 import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
@@ -206,9 +205,7 @@ interface ChatVoiceTarget {
   clearTimeout: typeof clearTimeout;
 }
 
-/** Instant Connect is intercepted only while the Chat hook is bound.
- * A failed hashed bind must not reject the official composer wave.
- */
+/** Chat starts use the browser Chat runtime owned by the bound composer. */
 export function startNativeChatVoiceForRequest(
   request: unknown,
   target: object = globalThis,
@@ -382,10 +379,7 @@ export function installNativeChatVoiceHook(
   target[HOOK_GLOBAL] = handle;
   const onWaveClick = (): void => {
     rememberVoiceProductExperience({ productExperience: "chat" }, target);
-    const run =
-      hashed && handle.status !== "active"
-        ? startHashedChatInstantConnect(importModule)
-        : handle.start();
+    const run = handle.start();
     void Promise.resolve(run).catch((error: unknown) => {
       chatVoiceDebug("native-chat-start-failed", {
         hashed,
@@ -446,6 +440,7 @@ export function installNativeChatVoiceHook(
       anchor;
     if (button && styleSource) {
       button.disabled = disabled;
+      if (!disabled && button.title === "Chat voice is not ready") button.title = "Start Voice";
       // Empty Send is disabled independently of whether voice can start.
       const className = [
         ...String(styleSource.className ?? "")
@@ -471,13 +466,21 @@ export function installNativeChatVoiceHook(
     mounted?.dispose();
     mounted = undefined;
     boundScope = undefined;
-    placeComposerWave(composer, starting);
+    placeComposerWave(composer, true);
+    if (button) button.title = "Chat voice is not ready";
     handle.status = "pending";
     return true;
   };
   const refresh = async (): Promise<void> => {
     if (disposed) return;
     try {
+      // The hashed graph is only safe to initialize after the Chat surface mounts.
+      if (hashed && !visibleComposer()) {
+        if (handle.activeCall) return;
+        release();
+        handle.status = "pending";
+        return;
+      }
       if (renderFailed) throw new Error();
       if (!modules) {
         const names = loadedAssetNames(doc, target.performance);
@@ -526,62 +529,80 @@ export function installNativeChatVoiceHook(
         const { scope } = current;
         const initial = modules.initial;
         const stopObserving = observeNativeChatVoiceState(scope, initial);
-        // Hashed Chat never sets hOYb.H3: that flag freezes home and cancels NUX.
-        // Instant Connect still needs VoiceInstantConnectCacheController to run START.
-        const previous = hashed ? undefined : scope.get(initial.aT);
-        const container = doc.createElement("div");
-        container.setAttribute("data-codexhost-chat-voice-prewarm", "");
-        doc.body.append(container);
-        const react = Reflect.apply(modules.shared.FBt as () => unknown, undefined, []) as {
-          createElement(type: unknown, props: unknown, ...children: unknown[]): unknown;
-        };
-        const reactDom = Reflect.apply(modules.shared.PNt as () => unknown, undefined, []) as {
-          createRoot(
-            container: Element,
-            options: { onUncaughtError(): void },
-          ): { render(element: unknown): void; unmount(): void };
-        };
-        const root = reactDom.createRoot(container, {
-          onUncaughtError() {
-            renderFailed = true;
-          },
-        });
-        let appChain: Map<unknown, unknown> | undefined;
-        let composerChain: Map<unknown, unknown> | undefined;
-        mounted = {
-          node: current.appNode,
-          render(next) {
-            if (appChain === next.scope.chain && composerChain === next.composerContext.chain)
-              return;
-            appChain = next.scope.chain;
-            composerChain = next.composerContext.chain;
-            root.render(
-              react.createElement(
-                next.context,
-                { value: appChain },
+        // Enable the browser runtime, whose native app root owns VoiceRoom and
+        // prewarm. The voice-active flag hOYb.H3 is a different selector.
+        if (hashed) {
+          const previous = scope.get(initial.aT);
+          mounted = {
+            node: current.appNode,
+            render() {},
+            dispose() {
+              stopObserving();
+              if (scope.get(initial.aT) === true) scope.set(initial.aT, previous);
+              chatVoiceDebug("native-chat-unbound");
+            },
+          };
+          scope.set(initial.aT, true);
+          chatVoiceDebug("native-chat-bound", {
+            hashed: true,
+            hasConversationId: current.backendConversationId !== undefined,
+          });
+        } else {
+          const previous = scope.get(initial.aT);
+          const container = doc.createElement("div");
+          container.setAttribute("data-codexhost-chat-voice-prewarm", "");
+          doc.body.append(container);
+          const react = Reflect.apply(modules.shared.FBt as () => unknown, undefined, []) as {
+            createElement(type: unknown, props: unknown, ...children: unknown[]): unknown;
+          };
+          const reactDom = Reflect.apply(modules.shared.PNt as () => unknown, undefined, []) as {
+            createRoot(
+              container: Element,
+              options: { onUncaughtError(): void },
+            ): { render(element: unknown): void; unmount(): void };
+          };
+          const root = reactDom.createRoot(container, {
+            onUncaughtError() {
+              renderFailed = true;
+            },
+          });
+          let appChain: Map<unknown, unknown> | undefined;
+          let composerChain: Map<unknown, unknown> | undefined;
+          mounted = {
+            node: current.appNode,
+            render(next) {
+              if (appChain === next.scope.chain && composerChain === next.composerContext.chain)
+                return;
+              appChain = next.scope.chain;
+              composerChain = next.composerContext.chain;
+              root.render(
                 react.createElement(
-                  next.composerContext.context,
-                  { value: composerChain },
+                  next.context,
+                  { value: appChain },
                   react.createElement(
-                    modules?.prewarm.VoiceInstantConnectCacheController,
-                    record(modules?.prewarm.props) ? modules.prewarm.props : null,
+                    next.composerContext.context,
+                    { value: composerChain },
+                    react.createElement(
+                      modules?.prewarm.VoiceInstantConnectCacheController,
+                      record(modules?.prewarm.props) ? modules.prewarm.props : null,
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
-          dispose() {
-            stopObserving();
-            root.unmount();
-            container.remove();
-            if (!hashed && scope.get(initial.aT) === true) scope.set(initial.aT, previous);
-            chatVoiceDebug("native-chat-unbound");
-          },
-        };
-        if (!hashed) scope.set(initial.aT, true);
-        chatVoiceDebug("native-chat-bound", {
-          hasConversationId: current.backendConversationId !== undefined,
-        });
+              );
+            },
+            dispose() {
+              stopObserving();
+              root.unmount();
+              container.remove();
+              if (scope.get(initial.aT) === true) scope.set(initial.aT, previous);
+              chatVoiceDebug("native-chat-unbound");
+            },
+          };
+          scope.set(initial.aT, true);
+          chatVoiceDebug("native-chat-bound", {
+            hasConversationId: current.backendConversationId !== undefined,
+          });
+        }
       }
       mounted.render(current);
       const voiceState = (
@@ -614,8 +635,11 @@ export function installNativeChatVoiceHook(
         starting || current.props.isStreaming === true || voiceLive,
       );
       handle.status = "active";
-    } catch {
-      chatVoiceDebug("native-chat-binding-failed");
+    } catch (error) {
+      chatVoiceDebug("native-chat-binding-failed", {
+        message:
+          error instanceof Error && error.message ? error.message.slice(0, 120) : "unspecified",
+      });
       if (showHashedComposerWave()) return;
       release();
       handle.status = "pending";

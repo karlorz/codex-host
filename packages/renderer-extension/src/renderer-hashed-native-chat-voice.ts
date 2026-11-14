@@ -10,6 +10,13 @@ export const HASHED_NATIVE_CHAT_START_ASSET = "530142.1e51e7f4b2.js";
 /** Hashed VoiceInstantConnectCacheController. */
 export const HASHED_NATIVE_CHAT_PREWARM_ASSET = "586788.c871bb9b7d.js";
 
+/** Dependency graph used by Desktop 26.1106's native Chat voice initializer. */
+const NATIVE_CHAT_VOICE_CHUNKS = [
+  157963, 74692, 198336, 543449, 904485, 459859, 822019, 431137, 108823, 208490, 384218, 843292,
+  652289, 907652, 796195, 144338, 140959, 587936, 904817, 426774, 452048, 490954, 445991, 612928,
+  42903, 363341, 997826, 223736, 21878, 89655, 333490, 422391, 792483, 530142,
+];
+
 type RecordValue = Record<string, unknown>;
 
 function object(value: unknown): value is RecordValue {
@@ -22,6 +29,7 @@ function scopeBrand(value: unknown, brand: string): boolean {
 
 interface WebpackModule {
   exports?: unknown;
+  error?: unknown;
 }
 
 interface WebpackFactory {
@@ -30,6 +38,7 @@ interface WebpackFactory {
 
 export interface HashedWebpackRequire {
   (id: string): unknown;
+  e?: (chunk: number) => Promise<unknown>;
   m?: Record<string, WebpackFactory | undefined>;
   c?: Record<string, WebpackModule | undefined>;
 }
@@ -39,12 +48,17 @@ function webpackRequireFrom(runtime: unknown): HashedWebpackRequire | undefined 
   return runtime.__webpack_require__ as HashedWebpackRequire;
 }
 
+function peekHashedExport(req: HashedWebpackRequire, id: string): unknown {
+  const cached = req.c?.[id];
+  return cached?.error === undefined ? cached?.exports : undefined;
+}
+
 function unpoisonEmptyWebpackModule(req: HashedWebpackRequire, id: string): void {
   const cache = req.c;
   const cached = cache?.[id];
   if (!cache || !cached) return;
   const exports = cached.exports;
-  if (object(exports) && Object.keys(exports).length > 0) return;
+  if (cached.error === undefined && object(exports) && Object.keys(exports).length > 0) return;
   try {
     Reflect.deleteProperty(cache, id);
   } catch {
@@ -55,7 +69,8 @@ function unpoisonEmptyWebpackModule(req: HashedWebpackRequire, id: string): void
 function installHashedWebpackModules(req: HashedWebpackRequire, modules: unknown): void {
   if (!req.m || !object(modules)) return;
   for (const [id, factory] of Object.entries(modules)) {
-    if (typeof factory === "function") req.m[id] = factory as WebpackFactory;
+    if (typeof factory !== "function" || typeof req.m[id] === "function") continue;
+    req.m[id] = factory as WebpackFactory;
   }
 }
 
@@ -64,6 +79,8 @@ function requireHashedExport(
   id: string,
   usable: (value: unknown) => boolean,
 ): unknown {
+  const peeked = peekHashedExport(req, id);
+  if (usable(peeked)) return peeked;
   unpoisonEmptyWebpackModule(req, id);
   let value: unknown;
   try {
@@ -102,7 +119,29 @@ export async function loadHashedNativeChatVoiceModules(
   prewarm: RecordValue;
 }> {
   const req = await resolveHashedWebpackRequire(importModule);
-  if (!req) throw new Error();
+  if (!req) throw new Error("hashed webpack require missing");
+  const loadChunk = req.e;
+  if (typeof loadChunk !== "function") throw new Error("native Chat voice chunk loader missing");
+  // A failed require of an unloaded dependency leaves an empty cached module.
+  // Repair only entries whose missing factory is supplied by the native loader.
+  const missingFactories = Object.entries(req.c ?? {})
+    .filter(
+      ([id, module]) =>
+        !req.m?.[id] && object(module?.exports) && Object.keys(module.exports).length === 0,
+    )
+    .map(([id]) => id);
+  await Promise.all(NATIVE_CHAT_VOICE_CHUNKS.map((chunk) => loadChunk.call(req, chunk)));
+  // Rspack stores failures even after exports have been published. Requiring a
+  // failed START/prewarm module rethrows that cached failure until it is removed.
+  for (const id of new Set([...missingFactories, "j9r7", "oWM3"])) {
+    const cached = req.c?.[id];
+    if (
+      typeof req.m?.[id] === "function" &&
+      (cached?.error !== undefined || missingFactories.includes(id))
+    ) {
+      unpoisonEmptyWebpackModule(req, id);
+    }
+  }
   const [startChunk, prewarmChunk] = await Promise.all([
     importModule(`app://-/assets/async/${HASHED_NATIVE_CHAT_START_ASSET}`),
     importModule(`app://-/assets/async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`),
@@ -139,7 +178,11 @@ export async function loadHashedNativeChatVoiceModules(
     "bgok",
     (value) => object(value) && typeof value.MH === "function",
   );
-  const flags = requireHashedExport(req, "hOYb", (value) => object(value) && value.H3 != null);
+  const runtime = requireHashedExport(
+    req,
+    "cY1t",
+    (value) => object(value) && value.Iy != null && typeof value.Re === "function",
+  );
   const react = requireHashedExport(
     req,
     "zd8w",
@@ -157,11 +200,11 @@ export async function loadHashedNativeChatVoiceModules(
     !object(routeScope) ||
     !object(composerScope) ||
     !object(store) ||
-    !object(flags) ||
+    !object(runtime) ||
     !object(react) ||
     !object(reactDom)
   )
-    throw new Error();
+    throw new Error("hashed Instant Connect exports missing");
   const initializeVoiceSession = startExports.initializeVoiceSession as () => Promise<unknown>;
   let skipIntroduction = false;
   const startVoice = async (
@@ -170,11 +213,18 @@ export async function loadHashedNativeChatVoiceModules(
     _meta: unknown,
     signal: unknown,
   ): Promise<void> => {
-    const session = await initializeVoiceSession();
-    if (!object(session)) throw new Error();
     const conversationId =
       object(props) && typeof props.conversationId === "string" ? props.conversationId : undefined;
     if (!conversationId) throw new Error();
+    // The native loader mounts VoiceRoom through the app root before commands
+    // are queued, and preserves authentication, availability and navigation gates.
+    const session = await (runtime.Re as (...args: unknown[]) => Promise<unknown>)(
+      scope,
+      conversationId,
+      { event_source: "composer" },
+      signal,
+    );
+    if (!object(session)) throw new Error();
     const nux =
       typeof session.getVoiceNuxMode === "function"
         ? await session.getVoiceNuxMode(scope)
@@ -197,7 +247,11 @@ export async function loadHashedNativeChatVoiceModules(
         state.server?.connectionState !== "connected" &&
         typeof session.dispatchVoiceCommand === "function"
       )
-        session.dispatchVoiceCommand(scope, { type: "STOP", reason: "failed" }, { prepend: true });
+        await session.dispatchVoiceCommand(
+          scope,
+          { type: "STOP", reason: "failed" },
+          { prepend: true },
+        );
     } catch {
       /* A stuck Instant Connect flag must not block the next Start Voice click. */
     }
@@ -223,7 +277,7 @@ export async function loadHashedNativeChatVoiceModules(
       typeof session.getConversationVoiceStartOverrides === "function"
         ? session.getConversationVoiceStartOverrides(scope, conversationId)
         : undefined;
-    session.dispatchVoiceCommand(scope, {
+    await session.dispatchVoiceCommand(scope, {
       type: "START",
       args: {
         conversationId,
@@ -238,7 +292,7 @@ export async function loadHashedNativeChatVoiceModules(
       CDr: composerScope.PR,
       B1n: {},
       SPn: store.MH,
-      aT: flags.H3,
+      aT: runtime.Iy,
     },
     shared: {
       Qst: appScope.u,
@@ -254,41 +308,4 @@ export async function loadHashedNativeChatVoiceModules(
       props: { loadVoiceSession: initializeVoiceSession },
     },
   };
-}
-
-function hashedRealtimeStart(
-  ga: unknown,
-): { runtime: object; start: (...args: unknown[]) => unknown } | undefined {
-  const services = object(ga) ? ga.appServices : undefined;
-  const runtime = object(services) ? services.realtimeVoiceRuntime : undefined;
-  // 26.1106 GaA7.appServices.realtimeVoiceRuntime is a function carrying the
-  // requestRealtimeStart property. A plain-object check misses it.
-  if (typeof runtime !== "function" && !object(runtime)) return;
-  const start = Reflect.get(runtime as object, "requestRealtimeStart");
-  if (typeof start !== "function") return;
-  return { runtime: runtime as object, start: start as (...args: unknown[]) => unknown };
-}
-
-/** Existing Chat threads have Send and no official Instant Connect slot.
- * Hashed START needs j9r7; GaA7 Instant Connect still starts Chat voice.
- */
-export async function startHashedChatInstantConnect(
-  importModule: (url: string) => Promise<RecordValue>,
-): Promise<void> {
-  const req = await resolveHashedWebpackRequire(importModule);
-  if (!req) throw new Error("Hashed Chat Instant Connect is unavailable");
-  let ga: unknown;
-  try {
-    ga = req("GaA7");
-  } catch {
-    throw new Error("Hashed Chat Instant Connect is unavailable");
-  }
-  const bound = hashedRealtimeStart(ga);
-  if (!bound) throw new Error("Hashed Chat Instant Connect is unavailable");
-  await Reflect.apply(bound.start, bound.runtime, [
-    {
-      productExperience: "chat",
-      source: "composer_button_new_thread",
-    },
-  ]);
 }

@@ -1,5 +1,4 @@
 import type { RendererHostRouting } from "@codexhost/desktop-control/renderer-bindings";
-import { encodeHarnessPluginRoute, harnessPluginIdSchema } from "@codexhost/shared-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUDITED_CPA_LIVE_VOICE_APP_INITIAL_ASSET,
@@ -83,6 +82,23 @@ const settle = async () => {
 afterEach(() => vi.useRealTimers());
 
 describe("native new-voice selection", () => {
+  it("forwards native Codex Work through the installed hook despite a saved Cursor default", async () => {
+    const f = hookFixture();
+    f.policy.selectedModel.mockReturnValue(null);
+    Object.assign(f.target, {
+      localStorage: {
+        getItem: () => JSON.stringify({ version: 1, lastAgent: "cursor-cli" }),
+      },
+    });
+    const hook = installExternalVoiceLaunchHook(f);
+    await settle();
+    const original = { ...request(), productExperience: "work" };
+    f.services.realtimeVoiceRuntime.requestRealtimeStart(original);
+    expect(f.start).toHaveBeenCalledExactlyOnceWith(original);
+    expect(original.activeCollaborationMode.settings.model).toBe("gpt-6.1-sol");
+    hook.dispose();
+  });
+
   it.each(CLIENT_OWNED_VOICE_ASSETS)(
     "keeps the selected Harness on Desktop $version",
     async (assets) => {
@@ -188,11 +204,11 @@ describe("native new-voice selection", () => {
   });
 
   it.each(["grok", "cursor-cli"] as const)(
-    "stamps lastAgent %s when the Composer has no selected carrier yet",
+    "preserves Codex Work when saved lastAgent %s disagrees with the current selection",
     (lastAgent) => {
       const { routing, policy } = routingFixture();
       policy.selectedModel.mockReturnValue(null);
-      const original = request();
+      const original = { ...request(), productExperience: "work" };
       const owner = {
         localStorage: {
           getItem: () => JSON.stringify({ version: 1, lastAgent, externalByAgent: {} }),
@@ -201,9 +217,9 @@ describe("native new-voice selection", () => {
       const routed = routeExternalVoiceLaunch(original, routing, owner) as ReturnType<
         typeof request
       >;
-      expect(routed.activeCollaborationMode.settings.model).toBe(
-        encodeHarnessPluginRoute({ harnessId: harnessPluginIdSchema.parse(lastAgent) }),
-      );
+      expect(routed).toBe(original);
+      const threadStart = structuredClone(routed.activeCollaborationMode.settings);
+      expect(threadStart.model).toBe("gpt-6.1-sol");
       expect(original.activeCollaborationMode.settings.model).toBe("gpt-6.1-sol");
     },
   );

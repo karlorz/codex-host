@@ -254,7 +254,7 @@ describe("client-owned voice gateway", () => {
     expect(await (await f.client.fetch(path, options())).text()).toBe("native");
     expect(f.dispatch).not.toHaveBeenCalled();
   });
-  it("treats lastAgent grok as external only for a Work voice launch", () => {
+  it("does not treat a saved lastAgent as the current Work Harness", () => {
     const grokOwner = {
       localStorage: {
         getItem: () => JSON.stringify({ version: 1, lastAgent: "grok", externalByAgent: {} }),
@@ -263,7 +263,7 @@ describe("client-owned voice gateway", () => {
     rememberVoiceProductExperience({ productExperience: "chat" });
     expect(isExternalHarnessComposer(grokOwner)).toBe(false);
     rememberVoiceProductExperience({ productExperience: "work" });
-    expect(isExternalHarnessComposer(grokOwner)).toBe(true);
+    expect(isExternalHarnessComposer(grokOwner)).toBe(false);
     rememberVoiceProductExperience({ productExperience: "work" });
     expect(
       isExternalHarnessComposer({
@@ -274,7 +274,7 @@ describe("client-owned voice gateway", () => {
     ).toBe(false);
   });
   it.each(["grok", "cursor-cli"])(
-    "treats lastAgent %s as external on a Work composer before any voice launch",
+    "does not infer the current Harness from saved lastAgent %s on Work home",
     (lastAgent) => {
       rememberVoiceProductExperience({});
       expect(
@@ -288,9 +288,21 @@ describe("client-owned voice gateway", () => {
                   : null,
           },
         }),
-      ).toBe(true);
+      ).toBe(false);
     },
   );
+  it("identifies the currently selected external carrier despite a different saved default", () => {
+    const owner = {
+      __codexhostHostRoutingV1: {
+        forComposer: () => ({ policy: { selectedModel: () => "codexhost/grok/grok-4" } }),
+      },
+      localStorage: { getItem: () => JSON.stringify({ version: 1, lastAgent: "cursor-cli" }) },
+    };
+    rememberVoiceProductExperience({ productExperience: "work" });
+    expect(isExternalHarnessComposer(owner)).toBe(true);
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    expect(isExternalHarnessComposer(owner)).toBe(false);
+  });
   it("sends external Harness voice through Host even when the Work gateway switch is off", async () => {
     const f = fixture();
     wrapClientOwnedVoiceFetch(
@@ -806,7 +818,9 @@ describe("client-owned voice gateway", () => {
         wrapperActive: false,
       });
       const exports: Record<string, unknown> = {};
-      factories.GDNt({}, exports);
+      const factory = factories.GDNt;
+      if (!factory) throw new Error("Expected installed voice factory");
+      factory({}, exports);
       expect(hook.status).toBe("active");
       expect(hook.activation?.wrapperActive).toBe(true);
       rememberVoiceProductExperience({ productExperience: "work" });
@@ -995,7 +1009,6 @@ describe("client-owned voice gateway", () => {
 
   it("records hashed webpack import failure without wrapping", async () => {
     vi.useFakeTimers();
-    const f = fixture();
     const hook = installClientOwnedVoiceHook({
       target: {
         [CPA_LIVE_VOICE_HOOK_GLOBAL]: {

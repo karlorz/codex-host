@@ -4,7 +4,6 @@ import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
 } from "./renderer-cpa-live-voice-preference.js";
-import { RENDERER_NEW_THREAD_PREFERENCE_KEY } from "./renderer-new-thread-preference.js";
 import {
   lastVoiceLaunchProductExperience,
   rememberVoiceProductExperience,
@@ -160,7 +159,7 @@ function selectedComposerModel(owner: object): string {
   const routing = (
     owner as {
       __codexhostHostRoutingV1?: {
-        forComposer(): { policy: { selectedModel(): string | undefined } } | undefined;
+        forComposer(): { policy: { selectedModel(): string | null } } | undefined;
       };
     }
   ).__codexhostHostRoutingV1;
@@ -172,30 +171,10 @@ function selectedComposerModel(owner: object): string {
   }
 }
 
-function lastAgentIsExternalHarness(owner: object): boolean {
-  const storage = (owner as { localStorage?: Storage }).localStorage;
-  if (!storage) return false;
-  try {
-    const parsed = JSON.parse(storage.getItem(RENDERER_NEW_THREAD_PREFERENCE_KEY) ?? "") as {
-      lastAgent?: unknown;
-    };
-    return (
-      typeof parsed.lastAgent === "string" &&
-      parsed.lastAgent !== "" &&
-      parsed.lastAgent !== "codex"
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function isExternalHarnessComposer(owner: object = globalThis): boolean {
   const experience = lastVoiceLaunchProductExperience();
   if (experience === "chat") return false;
-  if (selectedComposerModel(owner).startsWith("codexhost/")) return true;
-  if (experience === "codex") return false;
-  if (experience !== "work" && !isWorkComposerSurface(owner)) return false;
-  return lastAgentIsExternalHarness(owner);
+  return selectedComposerModel(owner).startsWith("codexhost/");
 }
 
 type RecordValue = Record<string, unknown>;
