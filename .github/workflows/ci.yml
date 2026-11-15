@@ -110,7 +110,8 @@ jobs:
         env:
           CODEXHOST_TEST_SCOPE: platform
         run: >
-          npm run test:typescript --
+          npm run build:typescript &&
+          npx vitest run --config tests/vitest.config.js
           --exclude 'packages/repository-automation/test/**'
           --exclude 'packages/shared-contracts/test/**'
           --exclude 'packages/renderer-extension/test/**'

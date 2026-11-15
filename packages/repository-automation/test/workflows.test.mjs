@@ -61,6 +61,9 @@ describe("workflow and form contracts", () => {
 
   it("retains native Windows lock queries in a dedicated step", async () => {
     const workflow = await read(".github/workflows/ci.yml");
+    expect(workflow).toContain("npm run build:typescript &&");
+    expect(workflow).toContain("npx vitest run --config tests/vitest.config.js");
+    expect(workflow).not.toContain("npm run test:typescript --");
     expect(workflow).toContain(
       "--exclude 'packages/mapping-store/test/windows-lock-native.test.ts'",
     );
