@@ -31,6 +31,15 @@ fn windows_error(context: &str, error: windows::core::Error) -> PlatformError {
     PlatformError::Invalid(format!("{context}: {error}"))
 }
 
+fn is_absent_debug_registration(error: &windows::core::Error) -> bool {
+    const WIN32_NOT_FOUND: u32 = 0x8007_0490;
+    const APPX_PACKAGE_NOT_FOUND: u32 = 0x8007_3CF1;
+    matches!(
+        error.code().0 as u32,
+        WIN32_NOT_FOUND | APPX_PACKAGE_NOT_FOUND
+    )
+}
+
 struct ComApartment {
     uninitialize: bool,
 }
@@ -106,11 +115,13 @@ impl PackageEnvironment {
         })
     }
 
-    fn disable(&mut self) -> Result<(), PlatformError> {
+    fn disable(&mut self) -> Result<(), windows::core::Error> {
         if self.armed {
-            unsafe { self.settings.DisableDebugging(&self.package_full_name) }.map_err(
-                |error| windows_error("cannot remove the temporary AppX environment", error),
-            )?;
+            if let Err(error) = unsafe { self.settings.DisableDebugging(&self.package_full_name) } {
+                if !is_absent_debug_registration(&error) {
+                    return Err(error);
+                }
+            }
             self.armed = false;
         }
         Ok(())
@@ -384,8 +395,18 @@ pub fn activate_packaged_desktop(
     .map_err(|error| windows_error("cannot activate Codex Desktop AppX package", error))?;
     let desktop = ActivatedProcessGuard::new(supervise_desktop(activation_process_id)?);
     wait_for_desktop_root(activation_process_id, Duration::from_secs(5))?;
-    package_environment.disable()?;
-    Ok(desktop.disarm())
+    let desktop = desktop.disarm();
+    // Desktop already owns the verified live root. A leftover debug
+    // registration is observable; it is not a reason to terminate Desktop.
+    // Drop retries DisableDebugging while `armed` remains set.
+    if let Err(error) = package_environment.disable() {
+        eprintln!("{}", debug_cleanup_failure_warning(error.code().0 as u32));
+    }
+    Ok(desktop)
+}
+
+fn debug_cleanup_failure_warning(code: u32) -> String {
+    format!("codexhost: AppX debug registration remained after Desktop start (0x{code:08X})")
 }
 
 pub fn supervise_desktop(process_id: u32) -> Result<WindowsDesktopProcess, PlatformError> {
@@ -447,9 +468,34 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        quote_windows_argument, resume_packaged_application, supervise_desktop,
-        windows_command_line, windows_environment_block,
+        debug_cleanup_failure_warning, is_absent_debug_registration, quote_windows_argument,
+        resume_packaged_application, supervise_desktop, windows_command_line,
+        windows_environment_block,
     };
+
+    #[test]
+    fn treats_missing_debug_registration_as_already_cleared() {
+        let not_found = windows::core::Error::from(windows::core::HRESULT(0x8007_0490_u32 as i32));
+        let package_not_found =
+            windows::core::Error::from(windows::core::HRESULT(0x8007_3CF1_u32 as i32));
+        let access_denied =
+            windows::core::Error::from(windows::core::HRESULT(0x8007_0005_u32 as i32));
+        assert!(is_absent_debug_registration(&not_found));
+        assert!(is_absent_debug_registration(&package_not_found));
+        assert!(!is_absent_debug_registration(&access_denied));
+    }
+
+    #[test]
+    fn debug_cleanup_warning_is_sanitized() {
+        let warning = debug_cleanup_failure_warning(0x8007_0005);
+        assert!(warning.contains("0x80070005"));
+        assert!(
+            warning.starts_with("codexhost: AppX debug registration remained after Desktop start")
+        );
+        assert!(!warning.contains('\\'));
+        assert!(!warning.contains("OpenAI"));
+        assert!(!warning.contains("WindowsApps"));
+    }
 
     #[test]
     fn quotes_packaged_activation_arguments() {

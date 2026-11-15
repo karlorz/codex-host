@@ -117,44 +117,18 @@ pub(super) fn host_chain_ready_timeout() -> Duration {
     HOST_CHAIN_READY_TIMEOUT
 }
 
-/// Prefer the unique current Desktop root for this installation.
+/// Wait until Shim and bundled Node appear under the launched Desktop process.
 ///
-/// Windows AppX/Electron can replace the activation PID after splash. Host-chain
-/// lookup must follow that single live root instead of the original snapshot.
-/// Zero or multiple roots keep the launched identity so an unmanaged Desktop is
-/// not treated as the Host chain.
-pub(super) fn host_chain_root_id(launched_id: u32, current_roots: &[u32]) -> u32 {
-    match current_roots {
-        [id] => *id,
-        _ => launched_id,
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+/// Readiness stays on that verified process. Another live Desktop root is not
+/// adopted for Host-chain lookup, supervision, or cleanup.
 pub(super) fn wait_for_host_chain(
     desktop: &ProcessSnapshot,
     options: &ResolvedLaunchOptions,
     timeout: Duration,
 ) -> Result<bool, Box<dyn Error>> {
-    wait_for_host_chain_with_roots(desktop, options, timeout, || Ok(vec![desktop.id]))
-}
-
-pub(super) fn wait_for_host_chain_with_roots(
-    launched: &ProcessSnapshot,
-    options: &ResolvedLaunchOptions,
-    timeout: Duration,
-    mut current_roots: impl FnMut() -> Result<Vec<u32>, Box<dyn Error>>,
-) -> Result<bool, Box<dyn Error>> {
     let started = Instant::now();
     while started.elapsed() < timeout {
-        let roots = current_roots().unwrap_or_else(|_| Vec::new());
-        let root_id = host_chain_root_id(launched.id, &roots);
-        let desktop = if root_id == launched.id {
-            launched.clone()
-        } else {
-            process_snapshot(root_id).unwrap_or_else(|_| launched.clone())
-        };
-        if descendant_executable_pair_exists(&desktop, &options.shim, &options.node)? {
+        if descendant_executable_pair_exists(desktop, &options.shim, &options.node)? {
             return Ok(true);
         }
         thread::sleep(Duration::from_millis(100));
@@ -560,10 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn host_chain_follows_a_unique_live_root_only() {
-        assert_eq!(host_chain_root_id(10, &[20]), 20);
-        assert_eq!(host_chain_root_id(10, &[]), 10);
-        assert_eq!(host_chain_root_id(10, &[20, 21]), 10);
+    fn host_chain_ready_timeout_is_longer_on_windows() {
         assert_eq!(
             host_chain_ready_timeout(),
             if cfg!(target_os = "windows") {
@@ -571,6 +542,84 @@ mod tests {
             } else {
                 Duration::from_secs(30)
             }
+        );
+    }
+
+    #[test]
+    fn host_chain_stays_on_the_launched_process_snapshot() {
+        let snapshot = process_snapshot(std::process::id()).expect("current process snapshot");
+        let missing = PathBuf::from("codexhost-missing-host-chain-shim");
+        let options = ResolvedLaunchOptions {
+            shim: missing.clone(),
+            node: missing.clone(),
+            host_runtime: missing.clone(),
+            desktop_controller: missing.clone(),
+            renderer_extension: missing,
+            pi: None,
+        };
+        let ready =
+            wait_for_host_chain(&snapshot, &options, Duration::from_millis(150)).expect("wait");
+        assert!(
+            !ready,
+            "a process without Shim/Node descendants is not Host-chain ready"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn host_chain_does_not_adopt_another_live_root() {
+        use codexhost_platform::{process_snapshot, spawn_supervised};
+        use std::process::{Command, Stdio};
+
+        let shell = Path::new("/bin/bash").canonicalize().unwrap();
+        let sleep = Path::new("/bin/sleep").canonicalize().unwrap();
+        let mut decoy = Command::new(&shell);
+        decoy
+            .args([
+                "-c",
+                "\"$1\" -c '\"$1\" 30 & wait' fixture \"$2\" & wait",
+                "fixture",
+            ])
+            .arg(&shell)
+            .arg(&sleep)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut decoy_root = spawn_supervised(&mut decoy).unwrap();
+        let decoy_snapshot = process_snapshot(decoy_root.id()).unwrap();
+        let options = ResolvedLaunchOptions {
+            shim: shell,
+            node: sleep.clone(),
+            host_runtime: sleep.clone(),
+            desktop_controller: sleep.clone(),
+            renderer_extension: sleep.clone(),
+            pi: None,
+        };
+        let decoy_ready =
+            wait_for_host_chain(&decoy_snapshot, &options, Duration::from_secs(2)).unwrap();
+
+        let mut launched = Command::new(&sleep);
+        launched
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut launched_root = spawn_supervised(&mut launched).unwrap();
+        let launched_snapshot = process_snapshot(launched_root.id()).unwrap();
+        let launched_ready =
+            wait_for_host_chain(&launched_snapshot, &options, Duration::from_millis(250)).unwrap();
+
+        decoy_root.force_terminate().unwrap();
+        decoy_root.wait().unwrap();
+        launched_root.force_terminate().unwrap();
+        launched_root.wait().unwrap();
+        assert!(
+            decoy_ready,
+            "the decoy tree must actually satisfy Host chain readiness"
+        );
+        assert!(
+            !launched_ready,
+            "Host chain readiness must stay on the launched process, not another live root"
         );
     }
 

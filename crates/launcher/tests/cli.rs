@@ -26,14 +26,21 @@ fn output_of_copied_binary(command: &mut Command) -> io::Result<Output> {
 
 #[test]
 fn production_launcher_uses_the_three_state_running_desktop_flow() {
-    let source = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))
-        .expect("read Launcher source");
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(manifest.join("src/main.rs")).expect("read Launcher source");
+    let attachment = fs::read_to_string(manifest.join("src/desktop_attachment.rs"))
+        .expect("read Launcher attachment source");
     assert!(source.contains("StartupState::RecoverStale"));
     assert!(source.contains("StartupState::CleanLaunch"));
     assert!(source.contains("StartupState::Attach"));
     assert!(source.contains("acquire_launcher_ownership"));
     assert!(source.contains("recover_stale_controller"));
-    assert!(source.contains("wait_for_host_chain_with_roots"));
+    assert!(source.contains("wait_for_host_chain("));
+    assert!(!source.contains("wait_for_host_chain_with_roots"));
+    assert!(!source.contains("host_chain_root_id"));
+    assert!(attachment.contains("wait_for_host_chain("));
+    assert!(!attachment.contains("wait_for_host_chain_with_roots"));
+    assert!(!attachment.contains("host_chain_root_id"));
     assert!(source.contains("host_chain_ready_timeout"));
     assert!(source.contains("completely quit it before starting codexhost"));
     assert!(!source.contains("attach_unmanaged_desktop"));

@@ -92,7 +92,7 @@
     "compat:daily:test": "node --test tools/compat-daily/run.test.mjs",
     "voice:discovery": "node tools/voice-discovery/run.mjs",
     "voice:discovery:test": "node --test tools/voice-discovery/run.test.mjs",
-    "test:voice-dist-artifacts": "npm run build:renderer && vitest run --config tests/vitest.config.js tests/release/voice-release-artifacts.dist.test.mjs",
+    "test:voice-dist-artifacts": "npm run build:renderer && vitest run --config tests/vitest.voice-dist.config.js",
     "scratch:candidate": "node tools/dev-desktop/scratch-candidate.mjs",
     "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets --locked --features codexhost-shim/test-utils,codexhost-gate-a-native/gate-tools -- -D warnings && cargo test --workspace --locked --features codexhost-shim/test-utils,codexhost-gate-a-native/gate-tools",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:typescript && npm run check:rust",

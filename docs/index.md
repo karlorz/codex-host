@@ -168,7 +168,7 @@
 | [`operations/cpa-live-voice-desktop-hook.md`](operations/cpa-live-voice-desktop-hook.md) | Current Desktop voice procedure, packaged pin/qualification artifacts, independent Chat/Work support table, maintainer discovery, START-versus-connected rules, and sanitized capture/remote-response/output debug flags. |
 | [`operations/cpa-live-voice-desktop-hook-history.md`](operations/cpa-live-voice-desktop-hook-history.md) | Historical voice export mappings, older pins and incident notes; not a current support claim. |
 | [`operations/macos-desktop-pin-daily-driver.md`](operations/macos-desktop-pin-daily-driver.md) | Keep production `/Applications/ChatGPT.app` on 26.1027.61615; unaudited Sparkle skipped; pin-drift opens a new issue per surface and supersedes the previous tracker. |
-| [`operations/windows-desktop-pin-daily-driver.md`](operations/windows-desktop-pin-daily-driver.md) | Keep Windows Store ChatGPT on MSIX 26.1106.6628.0 (product 26.1106.51428); Renderer injection is skipped so the splash does not hang. Windows delivery acceptance is automated shortcut/startup smoke; attended voice stays deferred and unverified. |
+| [`operations/windows-desktop-pin-daily-driver.md`](operations/windows-desktop-pin-daily-driver.md) | Retained Windows pin is still MSIX 26.1106.6628.0; msi-1 current-user Store is now 26.1111.2228.0 (not a new pin). Installed 0.18.0-0 shortcut smoke passed; attended voice stays deferred and unverified. |
 | [`operations/browser-annotation-cursor.md`](operations/browser-annotation-cursor.md) | Built-in browser Annotate cursor recovery when page CSP blocks its stylesheet; scoped Host shim, persistence, ownership, and regression checks. |
 
 ## 平台、进程与远程运行

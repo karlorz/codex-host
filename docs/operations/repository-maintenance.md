@@ -90,9 +90,10 @@ CI 使用全新 runner，且不持久化 Cargo `target` 目录，因此设置 `C
 ```bash
 # Linux x64：构建并运行完整测试（不含 Renderer 构建）
 npm run test:typescript
-# 本地严格 live dist 身份：会执行 build:renderer，再跑 tests/release/voice-release-artifacts.dist.test.mjs
+# 本地严格 live dist 身份：会执行 build:renderer，再通过 tests/vitest.voice-dist.config.js 跑 dist 身份测试
 npm run test:voice-dist-artifacts
-# CI Linux 在 voice-discovery step 里只 build:renderer 一次，然后直接调用上述 dist 测试文件。
+# CI Linux 在 voice-discovery step 里只 build:renderer 一次，然后用同一 dedicated config 跑该 dist 文件。
+# 共享 tests/vitest.config.js 会排除 tests/release/**/*.dist.test.mjs，即使 CLI 传入该文件也找不到用例。
 # macOS/Windows-only workflow_dispatch 不跑该 Linux artifact gate。
 # macOS / Windows：筛选平台敏感文件，另排除 Linux x64 专属测试
 # Windows PowerShell 先执行 $env:CODEXHOST_TEST_SCOPE = 'platform'
