@@ -254,8 +254,11 @@ Fork head used for the `v0.18.0` sync is annotated tag `v0.17.4-8` at
 `2c5600a33bde7adfcb3a6ff377b396f34f2a6c61`. Recurl GitHub
 `/releases/latest` and the six platform packages after provenance; a `+` log
 line can still 404 until the staged version is visible. A fetched local tag
-`v0.18.0` is BytePioneer's annotated tag — do not push it to origin. After
-upstream holds `0.18.0`, the first unused fork tag is `0.18.0-0`.
+`v0.18.0` is BytePioneer's annotated tag — do not push it to origin. Fork
+`v0.18.0-0` is published on origin and npm. The next unused counter on this
+held `0.18.0` line is `0.18.0-1`. Upstream `main` and GitHub latest currently
+hold `0.19.0`; this fork has not merged that release, so do not jump to
+`0.19.0-0`.
 
 ## GitHub Actions secrets
 
@@ -289,7 +292,7 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.18.0-0` while upstream holds `0.18.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.18.0-1` while this fork still holds `0.18.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
 
 ## Next unused counter
 
@@ -300,4 +303,4 @@ git fetch origin --tags --prune
 git ls-remote --tags origin 'refs/tags/v0.18.0-*'
 ```
 
-Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, and `v0.17.4-0` through `v0.17.4-8`. After upstream `0.18.0`, the first fork tag is `0.18.0-0`. Then `npm run release:prepare -- 0.18.0-0` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, and `v0.18.0-0`. Next unused on the held `0.18.0` line is `0.18.0-1`. Then `npm run release:prepare -- 0.18.0-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
