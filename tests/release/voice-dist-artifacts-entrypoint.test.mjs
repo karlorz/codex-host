@@ -27,4 +27,12 @@ describe("voice dist artifact test entry point", () => {
       /npx vitest run --config tests\/vitest\.config\.js tests\/release\/voice-release-artifacts\.dist\.test\.mjs/,
     );
   });
+
+  it("keeps node:test voice-discovery out of the shared TypeScript suite", () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+    expect(sharedConfig.test.exclude).toContain("tools/voice-discovery/**");
+    expect(pkg.scripts["voice:discovery:test"]).toBe(
+      "node --test tools/voice-discovery/run.test.mjs",
+    );
+  });
 });

@@ -95,6 +95,9 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       "tools/compat-daily/**",
+      // Node's runner via `npm run voice:discovery:test`; Linux CI runs that
+      // after the Renderer build. Vitest has no suite here.
+      "tools/voice-discovery/**",
       "packages/web-server/test/**",
       // Native service tests use Node's runner after building the Rust Launcher.
       "packages/host-runtime/test/native/**",
