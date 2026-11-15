@@ -76,7 +76,6 @@ import {
   getGrokComputerUseSettings,
   setGrokComputerUse,
 } from "@codexhost/harness-plugin-files";
-import { externalTurnInputText } from "./external-turn-input.js";
 import {
   HARNESS_PREFERENCES_CHANGED_METHOD,
   DEFAULT_IDLE_RELEASE_SETTINGS,

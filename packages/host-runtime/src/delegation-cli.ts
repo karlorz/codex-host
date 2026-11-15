@@ -368,7 +368,7 @@ export async function runDelegationCli(input: {
       const limit = value(options, "--limit")
         ? positiveInteger(value(options, "--limit"), "--limit", MAX_LIMIT)
         : MAX_LIMIT;
-      const poll = (timeoutMs: number) =>
+      const poll = async (timeoutMs: number) =>
         requestRuntime({
           connection: await connection(),
           path: "/v1/events/poll",
@@ -584,7 +584,7 @@ export async function runDelegationCli(input: {
             branch: value(parsed, "--worktree"),
             base: value(parsed, "--base"),
           },
-          (cwd) =>
+          async (cwd) =>
             requestRuntime({
               connection: await connection(),
               path: "/v1/delegate/start",
@@ -752,7 +752,7 @@ export async function runDelegationCli(input: {
             }
           : {}),
       };
-      const request = (requestBody: Record<string, unknown>) =>
+      const request = async (requestBody: Record<string, unknown>) =>
         requestRuntime({
           connection: await connection(),
           path: command === "read" ? "/v1/thread/read" : "/v1/thread/wait",

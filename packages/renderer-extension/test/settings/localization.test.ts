@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   codexLocaleOverrideForSettingsSelection,
   rendererSettingsLanguageSelection,
+  rendererSettingsMessages,
   resolveRendererSettingsLocale,
 } from "../../src/settings/localization.js";
 import { voiceMessages } from "../../src/settings/voice-messages.js";

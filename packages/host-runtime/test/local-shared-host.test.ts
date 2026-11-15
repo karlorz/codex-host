@@ -24,6 +24,7 @@ import {
 import { startClientChannelServer } from "../src/client-channel-server.js";
 import { runSharedHostService } from "../src/shared-host-service.js";
 import { sharedHostDesktop } from "../src/shared-host-desktop.js";
+import { EnrollmentAuthority } from "../src/client-enrollment-authority.js";
 import { prepareLocalCodex } from "../src/native-account-host.js";
 import { ModelPriceCatalog } from "../src/model-prices.js";
 import { readNativeWorkspaceSnapshot } from "../src/native-workspace-snapshot.js";
@@ -124,6 +125,10 @@ it("returns an actionable failure when authenticated Desktop admission finds a r
         }),
         delegation: () => undefined,
         register,
+        enrollment: new EnrollmentAuthority({
+          hostToken: "test-host",
+          dataDirectory: f.root,
+        }),
         connected,
         running,
       },
@@ -184,6 +189,10 @@ it("forwards Desktop's app tools pipe to the shared official Codex startup", asy
         }),
         delegation: () => undefined,
         register: () => undefined,
+        enrollment: new EnrollmentAuthority({
+          hostToken: "test-host",
+          dataDirectory: f.root,
+        }),
         connected: new Set<AppServerHost>(),
         running: new Set<Promise<number>>(),
       },

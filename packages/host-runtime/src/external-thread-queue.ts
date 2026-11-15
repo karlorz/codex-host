@@ -194,6 +194,8 @@ export class ExternalThreadQueue {
       id == null ? 0 : items.findIndex((item) => item.id === id || item.clientUserMessageId === id);
     const submission = index === -1 ? undefined : items[index];
     if (!submission) throw new ExternalQueueError(-32602, "Queued submission was not found");
+    const automaticStartAllowed = !this.#automaticStartBlocked.has(submission.id);
+    this.#automaticStartBlocked.delete(submission.id);
     items.splice(index, 1);
     if (state) this.#prune(threadId, state);
     return {
@@ -201,6 +203,7 @@ export class ExternalThreadQueue {
       sourceHostId: submission.sourceHostId ?? undefined,
       index,
       pausedReason: state?.pausedReason ?? null,
+      automaticStartAllowed,
     };
   }
 

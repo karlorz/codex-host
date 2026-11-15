@@ -130,7 +130,6 @@ export type ClaudeTurnEvent =
       description: string;
       prompt?: string;
       role?: string;
-      model?: string;
       background: boolean;
       nativeSubagentId?: string;
     }
@@ -142,7 +141,6 @@ export type ClaudeTurnEvent =
       status: "pending" | "running" | "completed" | "failed" | "interrupted";
       description?: string;
       role?: string;
-      model?: string;
       nativeSubagentId?: string;
       resultSummary?: string;
     }
