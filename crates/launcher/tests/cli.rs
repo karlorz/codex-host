@@ -218,8 +218,10 @@ fn help_prints_usage_to_stdout_and_succeeds() {
         for command in [
             "codexhost --version",
             "codexhost desktop-screenshot",
+            "codexhost host info ...",
+            "codexhost project list ...",
             "codexhost harness list|inspect ...",
-            "codexhost thread send|cancel|read|wait|watch|watches|list ...",
+            "codexhost thread send|cancel|read|wait|watch|watches|list|file ...",
             "codexhost enroll [--client <id>]|status|revoke ...",
             "codexhost broker install|status|stop|uninstall",
         ] {

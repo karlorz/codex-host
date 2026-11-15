@@ -180,6 +180,7 @@ describe("release Host and independent plugin Bundles", () => {
         "diff",
         "smol-toml",
         "ws",
+        "yaml",
         "zod",
       ]);
       const pluginAudits = await buildPreinstalledHarnessPlugins({

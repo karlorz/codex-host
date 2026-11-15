@@ -9,6 +9,8 @@ export * from "./grok-computer-use.js";
 export * from "./client-channel.js";
 export * from "./thread-catalog.js";
 export * from "./voice.js";
+export * from "./skills.js";
+export * from "./skill-reference.js";
 export * from "./web-access-tokens.js";
 export * from "./delegation-read.js";
 export * from "./credential-imports.js";
@@ -379,6 +381,15 @@ export {
 export { desktopImageAttachmentPaths } from "./desktop-attachments.js";
 
 export {
+  THREAD_WATCH_NOTICE_HEADER,
+  THREAD_WATCH_NOTICE_OUTCOMES,
+  formatThreadWatchNotice,
+  parseThreadWatchNotice,
+  type ThreadWatchNoticeEntry,
+  type ThreadWatchNoticeOutcome,
+} from "./thread-watch-notice.js";
+
+export {
   REMOTE_SSH_SETUP_METHOD,
   remoteSshSetupParamsSchema,
   remoteSshSetupResultSchema,
@@ -402,6 +413,12 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
+
+export {
+  threadTitleInputSchema,
+  threadTitleResultSchema,
+  type ThreadTitleInput,
+} from "./thread-title.js";
 
 export { usageMeasurementsSchema, type UsageMeasurementsSnapshot } from "./thread-usage.js";
 
@@ -428,3 +445,10 @@ export {
 export * from "./voice-settings.js";
 
 export * from "./background-activity.js";
+export {
+  encodeOfficialCodexModelRef,
+  decodeOfficialCodexModelRef,
+  decodeOfficialCodexModelSelection,
+  canonicalizeOfficialCodexModelRef,
+  OFFICIAL_CODEX_MODEL_REF_PREFIX,
+} from "./official-codex-model-ref.js";

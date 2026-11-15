@@ -1,3 +1,9 @@
+import { decodeModel } from "./models.js";
+import {
+  configureSubagentEvent,
+  configureSubagentSnapshot,
+  type SubagentConfiguration,
+} from "@codexhost/harness-adapter";
 import { randomUUID } from "node:crypto";
 import {
   unsupportedSteer,
@@ -130,6 +136,7 @@ export class ZcodeSession implements HarnessSession {
     return Boolean(this.#active || this.#configuring || this.#goalControl || this.isLocked());
   }
   #emit(event: HostEvent) {
+    event = configureSubagentEvent(event, this.#subagentConfiguration());
     this.#channel.emit({ kind: "event", event });
   }
   async subscribe() {
@@ -249,7 +256,25 @@ export class ZcodeSession implements HarnessSession {
       /* Usage is optional; the transport separately reports fatal failures. */
     }
   }
+  #subagentConfiguration(): SubagentConfiguration {
+    const state = this.#state;
+    const model = state.effectiveModel ? decodeModel(state.effectiveModel).modelId : undefined;
+    return {
+      ...(model ? { model } : {}),
+      ...(state.effectiveThinkingOptionId
+        ? { reasoningEffort: state.effectiveThinkingOptionId }
+        : {}),
+    };
+  }
+
   async readSnapshot(): Promise<HarnessResult<HostThreadSnapshot>> {
+    const result = await this.#readSnapshot();
+    return result.ok
+      ? { ok: true, value: configureSubagentSnapshot(result.value, this.#subagentConfiguration()) }
+      : result;
+  }
+
+  async #readSnapshot(): Promise<HarnessResult<HostThreadSnapshot>> {
     if (this.#closed || this.#faulted) return failure("invalidState", "ZCode session is closed");
     if (this.busy) return failure("sessionBusy", "ZCode is executing an operation", true);
     try {

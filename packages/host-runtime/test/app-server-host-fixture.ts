@@ -61,6 +61,10 @@ export class FailingListMappingStore extends MappingStore {
   override listThreads(): Promise<never> {
     return Promise.reject(new Error("Synthetic list read failure"));
   }
+
+  override listThreadSummaries(): Promise<never> {
+    return Promise.reject(new Error("Synthetic list read failure"));
+  }
 }
 
 export class FailingDelegationMappingStore extends MappingStore {
@@ -353,6 +357,8 @@ export function createFixture(
       ? { closeMappingStoreOnExit: options.closeMappingStoreOnExit }
       : {}),
     environment: {
+      HOME: mappingStoreDirectory,
+      CODEX_HOME: path.join(mappingStoreDirectory, ".codex"),
       CODEXHOST_DATA_DIR: mappingStoreDirectory,
       ...(options.environment ?? {}),
     },

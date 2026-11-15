@@ -123,6 +123,8 @@ export type ClaudeTurnEvent =
     }
   | {
       type: "subagent.started";
+      model?: string;
+      reasoningEffort?: string;
       callId: string;
       operation: "spawn" | "send";
       description: string;
@@ -134,6 +136,8 @@ export type ClaudeTurnEvent =
     }
   | {
       type: "subagent.updated";
+      model?: string;
+      reasoningEffort?: string;
       callId: string;
       status: "pending" | "running" | "completed" | "failed" | "interrupted";
       description?: string;

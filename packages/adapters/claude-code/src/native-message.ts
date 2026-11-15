@@ -1,3 +1,4 @@
+import { subagentConfiguration } from "@codexhost/harness-adapter";
 import { claudeUsageRecord, isClaudeModelRequest } from "./claude-usage.js";
 import { jsonValueSchema } from "@codexhost/shared-contracts";
 
@@ -717,6 +718,7 @@ export class ClaudeNativeTurnAccumulator {
       const agentId = boundedString(message.task_id, SUBAGENT_DESCRIPTION_LIMIT);
       events.push({
         type: "subagent.updated",
+        ...subagentConfiguration(message),
         callId,
         status: "running",
         ...(description ? { description } : {}),
@@ -732,6 +734,7 @@ export class ClaudeNativeTurnAccumulator {
       const agentId = boundedString(message.task_id, SUBAGENT_DESCRIPTION_LIMIT);
       events.push({
         type: "subagent.updated",
+        ...subagentConfiguration(message),
         callId,
         status: "running",
         ...(description ? { description } : {}),
@@ -749,8 +752,10 @@ export class ClaudeNativeTurnAccumulator {
       const agentId = boundedString(message.task_id, SUBAGENT_DESCRIPTION_LIMIT);
       events.push({
         type: "subagent.updated",
+        ...subagentConfiguration(message),
         callId,
         status,
+        ...subagentConfiguration(message.patch),
         ...(description ? { description } : {}),
         ...(agentId ? { nativeSubagentId: agentId } : {}),
         ...(resultSummary ? { resultSummary } : {}),
@@ -946,6 +951,7 @@ export class ClaudeNativeTurnAccumulator {
         const agentId = targetedSubagentId(argumentsResult.data);
         events.push({
           type: "subagent.started",
+          ...subagentConfiguration(argumentsResult.data),
           callId: block.id,
           operation: block.name === "SendMessage" ? "send" : "spawn",
           description: subagentDescription(argumentsResult.data, block.name),

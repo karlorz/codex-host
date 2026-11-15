@@ -8,6 +8,7 @@ export { StateDot } from "./StateDot.tsx";
 export { RemotePluginIcon } from "./RemotePluginIcon.tsx";
 export type { StateDotState } from "./StateDot.tsx";
 export { IconFileDiffOutlineRegular } from "./icons/file-diff.tsx";
+export { IconBellOutlineRegular } from "./icons/bell.tsx";
 export { DisclosureRow } from "./DisclosureRow.tsx";
 export type { DisclosureRowProps } from "./DisclosureRow.tsx";
 export { TextShimmer } from "./TextShimmer.tsx";
@@ -15,6 +16,7 @@ export type { TextShimmerProps } from "./TextShimmer.tsx";
 export { Button } from "./Button.tsx";
 export type { ButtonVariant } from "./Button.tsx";
 export { Pill } from "./Pill.tsx";
+export { default as preferenceRowStyles } from "./settings-form/PreferenceRow.module.css";
 export { SegmentedTabs } from "./SegmentedTabs.tsx";
 export type { SegmentedTab } from "./SegmentedTabs.tsx";
 export { Tag } from "./Tag.tsx";
@@ -149,6 +151,7 @@ export type {
   MarkdownLinkResolver,
 } from "./markdown/MarkdownDelegate.tsx";
 export { MarkdownText } from "./markdown/MarkdownText.tsx";
+export { MarkdownAnchor } from "./markdown/MarkdownAnchor.tsx";
 export type {
   MarkdownCodeLabels,
   MarkdownFileMentions,

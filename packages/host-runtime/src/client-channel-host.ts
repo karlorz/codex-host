@@ -7,6 +7,7 @@ import {
   VOICE_GATEWAY_STATUS_METHOD,
   VOICE_SETTINGS_METHOD,
   clientThreadSnapshotSchema,
+  threadTitleInputSchema,
   clientProjectlessWorkspaceSchema,
   harnessModelRefSchema,
   restoreHarnessCommandMentions,
@@ -16,6 +17,7 @@ import {
   type ClientSnapshotOptions,
   type ClientThreadSnapshot,
 } from "@codexhost/shared-contracts";
+import { NativeThreadTitles } from "./native-thread-title.js";
 
 import type { ConsoleHostReply } from "./app-server-host.js";
 import { transcribeVoice, voiceStatus } from "./voice-transcription.js";
@@ -116,12 +118,14 @@ export class ClientChannelHost {
   readonly clientEvents: ClientChannelEvents;
   readonly #host: ClientChannelHostDependencies;
   readonly #native: NativeClientChannel | undefined;
+  readonly #titles: NativeThreadTitles | undefined;
   readonly #clientOwnedThreads = new Set<string>();
   readonly #clientReceipts = new ClientCommandReceipts();
 
   constructor(host: ClientChannelHostDependencies) {
     this.#host = host;
     this.#native = host.native ? new NativeClientChannel(host.native) : undefined;
+    this.#titles = host.native ? new NativeThreadTitles(host.native) : undefined;
     this.clientEvents = host.events;
   }
 
@@ -151,10 +155,12 @@ export class ClientChannelHost {
   /** Native app-server notifications are invalidations and server requests for
    * the same Web snapshot/response boundary. */
   observeNativeMessage(value: JsonValue): void {
+    if (this.#titles?.observe(value)) return;
     this.#native?.observeMessage(value);
   }
 
   resetNativeSession(): void {
+    this.#titles?.reset();
     this.#native?.resetGeneration();
   }
 
@@ -178,6 +184,12 @@ export class ClientChannelHost {
             ? 30_000
             : 10_000;
       return this.#host.submit(method, params, timeoutMs);
+    }
+    if (method === "codexhost/thread/title/generate") {
+      const title = threadTitleInputSchema.safeParse(params);
+      if (!title.success)
+        return { error: { code: -32602, message: "Invalid title generation input" } };
+      return { result: this.#titles ? await this.#titles.generate(title.data) : null };
     }
     if (method === "codexhost/voice/status")
       return { result: jsonValueSchema.parse(await voiceStatus(this.#host.environment())) };

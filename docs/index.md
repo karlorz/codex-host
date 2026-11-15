@@ -19,6 +19,7 @@
 | [`architecture/harness-goals.md`](architecture/harness-goals.md) | Shared external native-goal controls, completion/history restoration, accounting, ownership and producer qualification. |
 | [`architecture/harness-plugin-architecture.md`](architecture/harness-plugin-architecture.md) | 插件化目标架构与未完成迁移方案；规划后续解耦时阅读，接口示例不代表当前 API。 |
 | [`architecture/harness-command-integration.md`](architecture/harness-command-integration.md) | Harness 原生命令的 Adapter、Host、Renderer 边界；新增命令能力时阅读。 |
+| [`architecture/skill-library.md`](architecture/skill-library.md) | Host 统一发现全局与项目 Skill 的目录清单、扫描与刷新、`codexhost/skills/list` 接口，以及 Web/Desktop 以带路径文本引用选用 Skill；修改 Skill 发现或选用时阅读。 |
 | [`architecture/harness-executable-discovery.md`](architecture/harness-executable-discovery.md) | Harness CLI 的跨平台发现、连接页安装指引和 DSH 特殊连接范围；修改安装指引、发现或启动逻辑时阅读。 |
 | [`architecture/harness-session-import.md`](architecture/harness-session-import.md) | 原生会话的本地/远程 Host 导入契约、Broker 转发和恢复边界；扩展导入能力时阅读。 |
 | [`architecture/harness-questions.md`](architecture/harness-questions.md) | 外部 Harness 多选提问卡片、对话内默认位置与 Appearance 开关、只读回答记录、原生单选分流、回答归属与生命周期；修改提问交互时阅读。 |
@@ -29,11 +30,13 @@
 | [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 共享 Host 的官方 Codex 与外部 Thread 所有权、存储边界、启动发现及生命周期；不提供旧 standalone 迁移。 |
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
+| [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | CLI 与 HTTP/MCP 委派创建独立 Git worktree 的目录、HEAD 基线、返回字段、状态校验与失败保留边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
+| [`architecture/web-thread-tree.md`](architecture/web-thread-tree.md) | Web 侧栏会话树：委派关系决定的显示父 Thread、Host 树接口、祖先补齐、归档级联、排序与置顶规则；修改侧栏层级或委派显示时阅读。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/client-enrollment.md`](architecture/client-enrollment.md) | Allowlisted collaborator enrollment (not same-Mac `:4398` MCP). `--enrolled-client` / `CODEXHOST_ENROLL_CLIENT` identity, machine pairing, Path 2 command for tailnet peers, Settings/console list and revoke. |
 | [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Outbound MCP hop at `https://codexhost.karldigi.dev/mcp`. Legacy four-tool Muse grant during staging; full eleven-tool catalog after Console client + consent. Mac `enroll relay-link` carries operational client identity. |
-| [`architecture/external-clients.md`](architecture/external-clients.md) | Shared Muse/Grok Bot MCP dispatch: Console Add client, All Threads or Selected workspaces, public-relay/local/direct, loopback `:4398`, events. |
+| [`architecture/external-clients.md`](architecture/external-clients.md) | Shared Muse/Grok Bot MCP dispatch: Console Add client, All Threads or Selected workspaces, public-relay/local/direct, loopback `:4398`, events. Same-user CLI auto-auth, named client registry, Thread refs, debug export. |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
 | [`architecture/turn-activity-folding.md`](architecture/turn-activity-folding.md) | 回合完成后过程折叠的 Desktop 条件与 `final_answer` 推断规则；修改 Agent 消息阶段投影或排查过程无法收起时阅读。 |

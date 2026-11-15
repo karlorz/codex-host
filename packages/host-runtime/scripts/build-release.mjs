@@ -23,6 +23,7 @@ const allowedRuntimePackages = new Set([
   "diff",
   "smol-toml",
   "ws",
+  "yaml",
   "zod",
 ]);
 

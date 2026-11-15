@@ -10,6 +10,7 @@ export const CLIENT_CHANNEL_VERSION = 1;
 /** Request-body ceiling of the channel's POST routes; large enough for an inline image prompt. */
 export const CLIENT_REQUEST_LIMIT_BYTES = 128 * 1024 * 1024;
 export const CLIENT_CHANNEL_METHODS = [
+  "codexhost/skills/list",
   "codexhost/voice/status",
   "codexhost/voice/transcribe",
   VOICE_SETTINGS_METHOD,
@@ -30,6 +31,7 @@ export const CLIENT_CHANNEL_METHODS = [
   "thread/items/list",
   "thread/start",
   "thread/name/set",
+  "codexhost/thread/title/generate",
   "thread/archive",
   "thread/unarchive",
   "turn/start",
@@ -43,6 +45,7 @@ export const CLIENT_CHANNEL_METHODS = [
   "thread/queue/start",
   "codexhost/thread/queue/send-now",
   "codexhost/workspace/read",
+  "codexhost/thread/tree/read",
   "codexhost/thread/pins/list",
   "codexhost/thread/pins/set",
   "codexhost/harness/plugins/list",
@@ -61,6 +64,8 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/harness/session-import/import",
   // Settings pages shared with the console and GUI (connections, accounts, usage, updates, idle release).
   "codexhost/harness/installation",
+  "codexhost/harness/installation/start",
+  "codexhost/harness/installation/status",
   "codexhost/harness/launch-settings/get",
   "codexhost/harness/launch-settings/set",
   "codexhost/harness/web-ui/open",
@@ -86,6 +91,15 @@ export const clientThreadPinParamsSchema = z
   .object({ threadId: z.string().min(1).max(1_024), pinned: z.boolean() })
   .strict();
 
+/** Delegation parents for the sidebar tree; independent of native Subagent ownership. */
+export const clientThreadTreeReadParamsSchema = z.object({}).strict();
+export const clientThreadTreeSchema = z
+  .object({
+    parents: z.record(z.string().min(1), z.string().min(1)),
+  })
+  .strict();
+export type ClientThreadTree = z.infer<typeof clientThreadTreeSchema>;
+
 /** Explicit no-project creation; naming input is not a cwd or a project ID. */
 export const clientProjectlessWorkspaceSchema = z
   .object({
@@ -108,6 +122,11 @@ export const clientChannelCursorSchema = z.object({
 });
 export type ClientChannelCursor = z.infer<typeof clientChannelCursorSchema>;
 export const clientChannelEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("skills-changed"),
+    cursor: clientChannelCursorSchema,
+    cwd: z.string().optional(),
+  }),
   z.object({ type: z.literal("display-settings-changed"), cursor: clientChannelCursorSchema }),
   z.object({
     type: z.literal("preferences-changed"),

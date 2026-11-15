@@ -141,3 +141,10 @@ export {
 } from "./live-command-catalog.js";
 
 export type { HarnessBackgroundActivityCapability } from "./background-activity.js";
+export {
+  subagentConfiguration,
+  inheritSubagentConfiguration,
+  configureSubagentEvent,
+  configureSubagentSnapshot,
+  type SubagentConfiguration,
+} from "./subagent-configuration.js";

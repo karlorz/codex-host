@@ -63,6 +63,7 @@ fn stop_waits_for_the_recorded_instance_without_its_original_image() {
             thread::sleep(Duration::from_millis(10));
         }
         thread::sleep(Duration::from_millis(200));
+        fs::write(root.join("stopped"), "done").unwrap();
         return;
     }
     let nonce = SystemTime::now()
@@ -117,9 +118,10 @@ fn stop_waits_for_the_recorded_instance_without_its_original_image() {
             ready: None,
         };
         assert!(super::stop(&options).unwrap());
-        assert!(
-            child.try_wait().unwrap().is_some(),
-            "stop returned before exit"
+        assert_eq!(
+            fs::read_to_string(root.join("stopped")).unwrap(),
+            "done",
+            "stop returned before shutdown completed"
         );
     }));
     if result.is_err() {

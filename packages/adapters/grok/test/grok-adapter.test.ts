@@ -4442,16 +4442,16 @@ describe("Grok Adapter ACP projection", () => {
 
   it.each(
     [
-      { model: undefined, reportedModel: undefined },
-      { model: "grok-4.5", reportedModel: undefined },
-      { model: "grok-4.5", reportedModel: "grok-4.6" },
-      { model: undefined, reportedModel: "provider/child-model" },
+      { model: undefined, reportedModel: undefined, effort: undefined },
+      { model: "grok-4.5", reportedModel: undefined, effort: undefined },
+      { model: "grok-4.5", reportedModel: "grok-4.6", effort: undefined },
+      { model: undefined, reportedModel: "provider/child-model", effort: "low" },
     ].flatMap((configuration) =>
       [false, true].map((identityFromSpawned) => ({ ...configuration, identityFromSpawned })),
     ),
   )(
-    "projects Grok Subagents without inferring child configuration: %j",
-    async ({ model, reportedModel, identityFromSpawned }) => {
+    "projects Grok Subagents using native configuration before parent defaults: %j",
+    async ({ model, reportedModel, effort, identityFromSpawned }) => {
       const transport = new FakeGrokTransport();
       const { adapter, session } = await openedSession(transport);
       expect(session.capabilities.subagents).toEqual({ observe: true, readTranscript: true });
@@ -4475,6 +4475,7 @@ describe("Grok Adapter ACP projection", () => {
           prompt: "Look at the repo",
           subagent_type: "explore",
           ...(model ? { model } : {}),
+          ...(effort ? { reasoning_effort: effort } : {}),
           background: true,
         },
         status: "in_progress",
@@ -4519,9 +4520,12 @@ describe("Grok Adapter ACP projection", () => {
       if (started.type !== "item.started" || started.item.type !== "subagentDelegation") {
         throw new Error("Expected Subagent delegation");
       }
-      expect(started.item.subagents[0]?.model).toBe(model);
-      expect(started.item.subagents[0]).not.toHaveProperty("reasoningEffort");
-      if (!model) expect(started.item.subagents[0]).not.toHaveProperty("model");
+      expect(started.item.subagents[0]?.model).toBe(
+        model ?? session.initialState.effectiveModel?.id,
+      );
+      expect(started.item.subagents[0]?.reasoningEffort).toBe(
+        effort ?? session.initialState.effectiveThinkingOptionId,
+      );
 
       expect(await nextEvent(iterator)).toMatchObject({
         type: "subagent.state.changed",

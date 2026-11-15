@@ -257,7 +257,7 @@ const displaySettings: WebHarnessDisplaySettings = new WebHarnessDisplaySettings
 );
 const preferences: WebHarnessPreferences = new WebHarnessPreferences(chHost, events);
 const images = new WebImages(data);
-const files = new WebFiles(data);
+const files = new WebFiles(data, images);
 const sessions = new ChSessions(
   chHost,
   workspaces,
@@ -483,8 +483,8 @@ async function readBody(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<string | undefined> {
-  // 32 MiB of image bytes plus base64/JSON overhead. Reject before parsing or saving.
-  const limit = 48 * 1024 * 1024;
+  // 50 MiB of image bytes plus base64/JSON overhead. Reject before parsing or saving.
+  const limit = 72 * 1024 * 1024;
   const reject = () => {
     response
       .writeHead(413, { "content-type": "text/plain", "cache-control": "no-store" })
@@ -567,7 +567,7 @@ const server = createWebServer((request, response) => {
         return;
       }
       if (pathname === "/api/session/uploadFileBinary") {
-        await serveFileUpload(sessions, request, response);
+        await serveFileUpload(sessions, request, response, trust.relaySockets.has(request.socket));
         return;
       }
       const body = await readBody(request, response);

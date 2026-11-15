@@ -42,6 +42,7 @@ import {
   type StoredDelegationRecordV1,
   type StoredThreadMetadataV1,
   type StoredThreadRecordV1,
+  type StoredThreadSummaryV1,
   type StoredTurnMappingV1,
   type ThreadMetadataPatch,
 } from "./records.js";
@@ -578,6 +579,16 @@ export class MappingStore {
   async listThreads(): Promise<StoredThreadRecordV1[]> {
     this.#requireInitialized();
     return [...this.#records.values()].map(cloneRecord);
+  }
+
+  /** Every Thread without Turn mappings, which dominate record size and no catalog reads. */
+  async listThreadSummaries(): Promise<StoredThreadSummaryV1[]> {
+    this.#requireInitialized();
+    return [...this.#records.values()].map((record) => {
+      const summary: Partial<StoredThreadRecordV1> = { ...record };
+      delete summary.turnMappings;
+      return cloneRecord(summary as StoredThreadSummaryV1);
+    });
   }
 
   async getThreadByCreateRequest(createRequestId: string): Promise<StoredThreadRecordV1 | null> {
@@ -1448,7 +1459,10 @@ export class MappingStore {
       // An invalid lock cannot prove a live owner and is treated as stale.
     }
     if (typeof existing.pid === "number" && lockOwnerIsLive(existing)) {
-      throw new MappingStoreError("STORE_LOCKED", "Another codexhost process owns Mapping Store");
+      throw new MappingStoreError(
+        "STORE_LOCKED",
+        `Another codexhost process owns Mapping Store at ${this.#directory} (owner PID ${existing.pid}; startedAt: ${typeof existing.startedAt === "string" ? existing.startedAt : "unknown"})`,
+      );
     }
     await rename(this.#lockPath, `${this.#lockPath}.stale-${this.#now().getTime()}`).catch(
       () => undefined,

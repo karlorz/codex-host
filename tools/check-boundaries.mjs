@@ -117,6 +117,16 @@ export function findSourceBoundaryViolations({
         );
       }
     }
+    if (
+      (specifier === "@codexhost/skill-library" &&
+        !isInside(filePath, resolve(packagesDirectory, "host-runtime"))) ||
+      (isInside(filePath, resolve(packagesDirectory, "skill-library", "src")) &&
+        !specifier.startsWith(".") &&
+        !builtins.has(specifier.replace(/^node:/u, "")) &&
+        specifier !== "yaml")
+    ) {
+      violations.push(`${filePath}: Skill Library is Node/YAML-only and owned by Host Runtime`);
+    }
     if (isInside(filePath, rendererDirectory) && isForbiddenLocalRuntimeImport(specifier)) {
       violations.push(`${filePath}: Renderer cannot import '${specifier}'`);
     }
