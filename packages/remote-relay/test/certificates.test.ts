@@ -52,6 +52,7 @@ async function fixture(hostname = "relay.example.test") {
   };
 }
 
+// Windows CI caps tests at 20s; this case already waits up to 15s for ACME.
 it("renews at two-thirds of validity without disconnecting existing controls", async () => {
   const f = await fixture();
   const key = await acme.crypto.createPrivateEcdsaKey();
@@ -87,7 +88,7 @@ it("renews at two-thirds of validity without disconnecting existing controls", a
   expect(client.getPeerCertificate().fingerprint256).not.toBe(certificate.fingerprint256);
   client.destroy();
   await relay.close();
-});
+}, 30_000);
 
 it("keeps the old certificate after a failed renewal and rejects new controls at expiry", async () => {
   const f = await fixture();
