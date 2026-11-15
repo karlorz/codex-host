@@ -239,7 +239,7 @@ describe("text delegation CLI output", () => {
           ["child", "other"]
             .map(
               (threadId) =>
-                `thread: codex://threads/${threadId}   notify: codex://threads/parent   state: undeliverable   outcome: completed   reason: 失败 "原因"   taskName: 任务 "中文"   threadStatus: running   watchedForMs: 2500\n`,
+                `thread: codex://threads/${threadId}   notify: codex://threads/parent   state: undeliverable   outcome: completed   turnId: turn-1   reason: 失败 "原因"   taskName: 任务 "中文"   threadStatus: running   watchedForMs: 2500\n`,
             )
             .join(""),
         );
@@ -253,6 +253,7 @@ describe("text delegation CLI output", () => {
                   notify: "codex://threads/parent",
                   state: watch.state,
                   outcome: watch.outcome,
+                  turnId: watch.turnId,
                   reason: watch.reason,
                   taskName: watch.taskName,
                   threadStatus: watch.threadStatus,

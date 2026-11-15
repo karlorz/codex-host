@@ -1966,25 +1966,35 @@ it.each([false, true])(
       { model: "parent-model", reasoningEffort: "high" },
     );
     if (event.type !== "item.started") throw new Error("Expected delegation start");
+    if (event.item.type !== "subagentDelegation") throw new Error("Expected subagent delegation");
     value.project({ type: "turn.started", turnId });
     expect(value.project(event).messages).toMatchObject([
       {
         method: "item/started",
         params: {
           item: {
-            type: "collabAgentToolCall",
-            tool: "spawnAgent",
-            prompt: "Inspect the repository",
-            receiverThreadIds: ["child-1", "child-2"],
-            model: mixed ? null : "parent-model",
-            reasoningEffort: mixed ? null : "high",
-            agentsStates: {
-              "child-1": { status: "running" },
-              "child-2": { status: "pendingInit" },
-            },
+            type: "subAgentActivity",
+            agentThreadId: "child-1",
+            agentPath: "Explorer",
+            kind: "started",
+          },
+        },
+      },
+      {
+        method: "item/started",
+        params: {
+          item: {
+            type: "subAgentActivity",
+            agentThreadId: "child-2",
+            agentPath: "Reviewer",
+            kind: "started",
           },
         },
       },
     ]);
+    expect(event.item.subagents[0]?.model).toBe("parent-model");
+    expect(event.item.subagents[0]?.reasoningEffort).toBe("high");
+    expect(event.item.subagents[1]?.model).toBe(mixed ? "native-override" : "parent-model");
+    expect(event.item.subagents[1]?.reasoningEffort).toBe(mixed ? "low" : "high");
   },
 );

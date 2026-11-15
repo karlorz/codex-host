@@ -128,6 +128,7 @@ describe("tailnet enrollment transport", () => {
     expect(read).toHaveBeenCalledWith({
       threadId: "reviewer",
       callerThreadId: record.threadId,
+      view: "result",
     });
   });
 
@@ -200,7 +201,11 @@ describe("tailnet enrollment transport", () => {
     expect(
       (await post("/v1/thread/read", { threadId: "reviewer", callerThreadId: "parent" })).status,
     ).toBe(200);
-    expect(read).toHaveBeenCalledWith({ threadId: "reviewer", callerThreadId: record.threadId });
+    expect(read).toHaveBeenCalledWith({
+      threadId: "reviewer",
+      callerThreadId: record.threadId,
+      view: "result",
+    });
     expect(
       (await post("/v1/thread/send", { threadId: "reviewer", message: "connectivity" })).status,
     ).toBe(200);

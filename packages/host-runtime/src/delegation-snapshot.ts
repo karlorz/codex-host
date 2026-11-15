@@ -2,10 +2,13 @@ import type { JsonObject, RoutedHarnessId } from "@codexhost/protocol-core";
 
 import {
   DelegationControlError,
+  isTerminalDelegationStatus,
   type DelegationMessage,
   type DelegationMessageTurn,
+  type DelegationThreadResult,
   type DelegationThreadSnapshot,
   type DelegationThreadStatus,
+  type DelegationTurnError,
   type ThreadReadInput,
 } from "./delegation-types.js";
 
@@ -85,6 +88,63 @@ function messageTurn(
   return { turnId: stringValue(turn.id), turnNumber, status, messages };
 }
 
+function turnErrorPayload(turn: JsonObject | null): DelegationTurnError | undefined {
+  if (!isRecord(turn?.error)) return undefined;
+  const error = turn.error;
+  const message = typeof error.message === "string" && error.message ? error.message : undefined;
+  const diagnostic =
+    typeof error.diagnostic === "string" && error.diagnostic
+      ? error.diagnostic
+      : typeof error.additionalDetails === "string" && error.additionalDetails
+        ? error.additionalDetails
+        : undefined;
+  const code = typeof error.code === "string" && error.code ? error.code : undefined;
+  if (!message && !diagnostic) return undefined;
+  return {
+    message: message ?? diagnostic ?? "Turn failed",
+    ...(code ? { code } : {}),
+    ...(diagnostic && diagnostic !== message ? { diagnostic } : {}),
+  };
+}
+
+function resultForTurn(
+  turn: JsonObject | null,
+  messages: readonly { phase?: string; text: string }[],
+  running: boolean,
+): DelegationThreadResult {
+  const final = messages
+    .filter((message) => message.phase === "final" && message.text.trim())
+    .at(-1);
+  const error = turnErrorPayload(turn);
+  if (running)
+    return { availability: "pending", ...(error ? { error, message: error.message } : {}) };
+  if (final) return { availability: "available", text: final.text };
+  return {
+    availability: "unavailable",
+    ...(error ? { message: error.message, error } : {}),
+  };
+}
+
+function lastCompletedForRunningTurns(
+  turns: readonly JsonObject[],
+  latestTurnId: string | null,
+): DelegationThreadSnapshot["lastCompleted"] {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (!isRecord(turn)) continue;
+    const turnId = stringValue(turn.id);
+    if (!turnId || turnId === latestTurnId) continue;
+    const status = turnStatus(turn.status);
+    if (!isTerminalDelegationStatus(status)) continue;
+    return {
+      turnId,
+      status,
+      result: resultForTurn(turn, latestAgentMessages(turn), false),
+    };
+  }
+  return undefined;
+}
+
 function latestAgentMessages(turn: JsonObject | null) {
   const turnId = turn ? stringValue(turn.id) : null;
   if (!turn || !turnId) return [];
@@ -160,23 +220,17 @@ export function projectDelegationThreadSnapshot(input: {
       ? latestTurnStatus
       : threadStatus(input.thread.status, input.running);
   const latestTurnMessages = latestAgentMessages(latestTurn);
-  const final = latestTurnMessages.filter((message) => message.phase === "final").at(-1);
   const progress =
     options.view === "result"
       ? latestTurnMessages
           .filter((message) => message.phase !== "final")
           .map(({ id, turnId, text }) => ({ id, turnId, text }))
       : [];
-  const result = input.running
-    ? ({ availability: "pending" } as const)
-    : final
-      ? ({ availability: "available", text: final.text } as const)
-      : ({
-          availability: "unavailable",
-          ...(isRecord(latestTurn?.error) && typeof latestTurn.error.message === "string"
-            ? { message: latestTurn.error.message }
-            : {}),
-        } as const);
+  const result = resultForTurn(latestTurn, latestTurnMessages, input.running);
+  const lastCompleted =
+    input.running && input.turns.length >= 2
+      ? lastCompletedForRunningTurns(input.turns, latestTurnId)
+      : undefined;
   const title = threadTitle(input.thread);
   const snapshot: DelegationThreadSnapshot = {
     threadId: input.threadId,
@@ -186,8 +240,10 @@ export function projectDelegationThreadSnapshot(input: {
     status,
     turn:
       latestTurnId && latestTurnStatus ? { turnId: latestTurnId, status: latestTurnStatus } : null,
+    ...(input.turns.length > 0 ? { turnIndex: input.turns.length } : {}),
     progress,
     result,
+    ...(lastCompleted ? { lastCompleted } : {}),
   };
   if (options.view === "messages") {
     const totalTurns = input.turns.length;

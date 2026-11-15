@@ -951,7 +951,7 @@ export class ClaudeNativeTurnAccumulator {
         const agentId = targetedSubagentId(argumentsResult.data);
         events.push({
           type: "subagent.started",
-          ...subagentConfiguration(argumentsResult.data),
+          ...(block.name === "SendMessage" ? {} : subagentConfiguration(argumentsResult.data)),
           callId: block.id,
           operation: block.name === "SendMessage" ? "send" : "spawn",
           description: subagentDescription(argumentsResult.data, block.name),

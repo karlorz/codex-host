@@ -255,12 +255,15 @@ export async function routeDelegationRequest(
         "view",
         "from",
         "to",
-        ...(route === "/v1/thread/read" ? ["hostId", "callerThreadId"] : ["timeoutMs"]),
+        ...(route === "/v1/thread/read"
+          ? ["hostId", "callerThreadId"]
+          : ["timeoutMs", "callerThreadId"]),
       ]);
       for (const key of Object.keys(body)) {
         if (!allowed.has(key))
           throw new DelegationControlError("INVALID_ARGUMENT", `Unknown read option: ${key}`);
       }
+      if (body.view === undefined) body.view = "result";
       validateReadOptions(body as unknown as ThreadReadInput);
       return route === "/v1/thread/read"
         ? handlers.api.read(body as unknown as ThreadReadInput)

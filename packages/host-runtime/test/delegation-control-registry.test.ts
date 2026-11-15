@@ -287,7 +287,11 @@ describe("DelegationControlRegistry cancel watches", () => {
       }),
     };
     const clientEvents = { append: vi.fn(async () => undefined) };
-    const registry = new DelegationControlRegistry({ watchStore: store, clientEvents });
+    const registry = new DelegationControlRegistry({
+      watchStore: store,
+      clientEvents,
+      quietMs: 0,
+    });
     registries.push(registry);
     const child = registration("child");
     const parent = registration("parent");

@@ -5496,21 +5496,6 @@ export class AppServerHost {
     }
   }
 
-  /** Desktop leaves queued follow-ups to the app-server once a Turn completes normally. */
-  async #drainExternalQueue(thread: ExternalThread): Promise<void> {
-    if (
-      !this.#externalQueue.has(thread.id) ||
-      this.#externalThreadBusy(thread) ||
-      this.#pendingExternalCommandRequests.has(thread.id)
-    )
-      return;
-    try {
-      (await this.#startQueuedSubmission(thread)).gate.resolve();
-    } catch (error) {
-      this.#diagnose(error);
-    }
-  }
-
   async #sendQueuedExternalTurnNow(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
     const params = requestObject(request);
     const itemId = typeof params.itemId === "string" ? params.itemId : undefined;
@@ -6235,7 +6220,7 @@ export class AppServerHost {
       thread.turns.at(-1)?.status === "completed" &&
       this.#externalQueue.has(thread.id)
     ) {
-      void this.#drainExternalQueue(thread);
+      void this.#startNextQueuedExternalTurn(thread);
     }
   }
 

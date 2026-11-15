@@ -96,7 +96,7 @@ describe("DelegationWatchService", () => {
     "uses the observed title as the link label, falling back to the Thread id (%s)",
     async (title) => {
       const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
-      const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+      const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
       await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
       fake.update("child", { status: "completed", ...(title ? { title } : {}) });
 
@@ -111,7 +111,7 @@ describe("DelegationWatchService", () => {
   it("shortens a historical title only in the notification, without changing the Thread", async () => {
     const title = "summary-row · " + "父会话首条消息".repeat(10);
     const fake = runtime({ child: { status: "running", title }, parent: { status: "completed" } });
-    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS, quietMs: 0 });
     await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 60_000 });
     fake.update("child", { status: "completed" });
 
@@ -464,8 +464,9 @@ describe("DelegationWatchService", () => {
     expect(fake.sent).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(fake.sent).toHaveLength(1);
-    expect(fake.sent[0]?.message).toContain("codex://threads/child: completed (Turn turn-child).");
-    expect(fake.sent[0]?.message).toContain("Turn index 1, status completed.");
+    expect(parseThreadWatchNotice(fake.sent[0]?.message ?? "")).toEqual([
+      { threadId: "child", label: "child", outcome: "completed" },
+    ]);
   });
 
   it("cancels a completed quiet period when a new Turn starts", async () => {
@@ -483,7 +484,9 @@ describe("DelegationWatchService", () => {
     expect(fake.sent).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(fake.sent).toHaveLength(1);
-    expect(fake.sent[0]?.message).toContain("(Turn turn-2).");
+    expect(parseThreadWatchNotice(fake.sent[0]?.message ?? "")).toEqual([
+      { threadId: "child", label: "child", outcome: "completed" },
+    ]);
   });
 
   it("notifies failed immediately even when a completed quiet period is configured", async () => {
@@ -496,7 +499,8 @@ describe("DelegationWatchService", () => {
     fake.update("child", { status: "failed" });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(fake.sent).toHaveLength(1);
-    expect(fake.sent[0]?.message).toContain("codex://threads/child: failed (Turn turn-child).");
-    expect(fake.sent[0]?.message).toContain("Turn index 1, status failed.");
+    expect(parseThreadWatchNotice(fake.sent[0]?.message ?? "")).toEqual([
+      { threadId: "child", label: "child", outcome: "failed" },
+    ]);
   });
 });

@@ -1283,7 +1283,8 @@ describe("client enrollment store and Runtime", () => {
     ).toBe(0);
     const sendHelpText = outputText(sendHelp);
     expect(sendHelpText).toContain("--enrolled-client");
-    expect(sendHelpText).toContain("No new Turn started");
+    expect(sendHelpText).toContain("Messages are not queued");
+    expect(sendHelpText).toContain("--interrupt");
     expect(sendHelpText).not.toContain("wait or cancel before sending");
     for (const arguments_ of [
       ["enroll", "--help"],

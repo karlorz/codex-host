@@ -58,7 +58,7 @@ function setup(initial: DelegationThreadStatus = "running") {
       };
     }),
   };
-  const registry = new DelegationControlRegistry();
+  const registry = new DelegationControlRegistry({ quietMs: 0 });
   registry.register(api);
   registries.push(registry);
   return {
