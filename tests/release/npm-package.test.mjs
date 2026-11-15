@@ -241,7 +241,9 @@ childProcess.spawn = () => {
   child.stdout = new PassThrough();
   setTimeout(() => child.stdout.write(${JSON.stringify(launcherStdout)} + "rea"), 10);
   setTimeout(() => child.stdout.write("dy\\n"), 20);
-  setTimeout(() => child.emit("exit", 7, null), 80);
+  if (process.env.CODEXHOST_TEST_PLATFORM === "win32") {
+    setTimeout(() => child.emit("exit", 7, null), 80);
+  }
   return child;
 };
 syncBuiltinESMExports();

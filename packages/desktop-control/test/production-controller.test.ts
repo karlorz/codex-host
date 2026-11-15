@@ -135,7 +135,7 @@ describe("production Desktop Controller", () => {
         "--host-data",
         "/tmp/isolated-host",
       ]),
-    ).toMatchObject({ hostDataDirectory: "/tmp/isolated-host" });
+    ).toMatchObject({ hostDataDirectory: path.normalize("/tmp/isolated-host") });
     expect(() =>
       parseDesktopControllerArguments([
         "--renderer-cdp-endpoint",
@@ -874,7 +874,7 @@ describe("production Desktop Controller", () => {
       expect(matched?.overlayHookSource).toContain('"voiceEvidence":[]');
       expect(matched?.overlayHookSource).not.toContain("/Applications/ChatGPT.app");
       expect(matched?.overlayVoiceBootstrapSource).toContain('"isolatedQualification"');
-      expect(matched?.overlayVoiceBootstrapSource).toContain(scratchApp);
+      expect(matched?.overlayVoiceBootstrapSource).toContain(JSON.stringify(scratchApp));
     } finally {
       Object.defineProperty(process, "platform", platformDescriptor);
       await rm(overlayDir, { recursive: true, force: true });

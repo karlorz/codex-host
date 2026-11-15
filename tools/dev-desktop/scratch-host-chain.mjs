@@ -190,6 +190,14 @@ export function isolatedScratchHostChainEnvironment(input, inspect = {}) {
       throw new Error(`scratch Host chain ${name} is required`);
     }
   }
+  const requestedData = requiredAbsolute(input.dataDirectory, "dataDirectory");
+  const requestedDescriptor = requiredAbsolute(input.runtimeDescriptor, "runtimeDescriptor");
+  if (sameIdentity(requestedData, PRODUCTION_HOST_DATA)) {
+    throw new Error("scratch Host chain must not use the production Host data directory");
+  }
+  if (sameIdentity(requestedDescriptor, PRODUCTION_RUNTIME_DESCRIPTOR)) {
+    throw new Error("scratch Host chain must not use the production Desktop runtime descriptor");
+  }
   const files = Object.fromEntries(
     REQUIRED_FILES.map((name) => [name, canonicalExistingFile(input[name], name)]),
   );

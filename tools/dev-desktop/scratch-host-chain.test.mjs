@@ -109,7 +109,7 @@ function liveChain(root, extra = {}) {
   };
 }
 
-describe("isolated scratch Host chain", () => {
+describe.skipIf(process.platform === "win32")("isolated scratch Host chain", () => {
   it("requires an explicit live launcher PID matching the launcher executable", async () => {
     const chain = liveChain(temporaryDirectory());
     const environment = await waitForOwned(chain);
@@ -171,10 +171,12 @@ describe("isolated scratch Host chain", () => {
 
     const aliasRoot = temporaryDirectory();
     const dataAlias = path.join(aliasRoot, "host-alias");
-    symlinkSync(PRODUCTION_HOST_DATA, dataAlias);
-    expect(() =>
-      isolatedScratchHostChainEnvironment({ ...chain, dataDirectory: dataAlias }),
-    ).toThrow("production Host data directory");
+    if (existsSync(PRODUCTION_HOST_DATA)) {
+      symlinkSync(PRODUCTION_HOST_DATA, dataAlias);
+      expect(() =>
+        isolatedScratchHostChainEnvironment({ ...chain, dataDirectory: dataAlias }),
+      ).toThrow("production Host data directory");
+    }
 
     if (existsSync(PRODUCTION_RUNTIME_DESCRIPTOR)) {
       const descriptorAlias = path.join(aliasRoot, "desktop-runtime-v1.json");

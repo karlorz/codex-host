@@ -366,6 +366,7 @@ pub(super) fn wait_for_known_controller_exit(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn command_line_arguments(command: &str) -> Vec<String> {
     let mut arguments = Vec::new();
     let mut current = String::new();
