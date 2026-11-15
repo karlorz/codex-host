@@ -117,10 +117,10 @@ impl PackageEnvironment {
 
     fn disable(&mut self) -> Result<(), windows::core::Error> {
         if self.armed {
-            if let Err(error) = unsafe { self.settings.DisableDebugging(&self.package_full_name) } {
-                if !is_absent_debug_registration(&error) {
-                    return Err(error);
-                }
+            if let Err(error) = unsafe { self.settings.DisableDebugging(&self.package_full_name) }
+                && !is_absent_debug_registration(&error)
+            {
+                return Err(error);
             }
             self.armed = false;
         }
