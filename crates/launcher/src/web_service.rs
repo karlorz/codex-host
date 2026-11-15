@@ -329,6 +329,7 @@ pub(super) fn command_line_matches_web(command: &str, runtime: &Path, data: &Pat
     )
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn arguments_match_web(arguments: &[String], runtime: &Path, data: &Path) -> bool {
     let runtime = node_entrypoint_path(runtime);
     let runtime = runtime.to_string_lossy();
