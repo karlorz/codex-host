@@ -250,15 +250,15 @@ A fork tag is not shipped until both of these exist for that version:
 
 Numeric fork counters such as `0.13.3-0` and `0.13.3-1` are GitHub latest and npm `latest`. Named SemVer prereleases (`-rc.1`, `-beta.1`, `-test.1`, `-cpa.1`) stay on `next` / `test` and GitHub prerelease. `packages/repository-automation/src/release.mjs` treats a hyphen plus one or more digit groups (`0.13.3-0`, `0.13.3-1`) as latest, not as `next`. Do not `npm publish` `@codexhost/cli`. Local `npm run install:local` packs and installs tarballs without the registry.
 
-Fork head used for the `v0.18.0` sync is annotated tag `v0.17.4-8` at
-`2c5600a33bde7adfcb3a6ff377b396f34f2a6c61`. Recurl GitHub
-`/releases/latest` and the six platform packages after provenance; a `+` log
-line can still 404 until the staged version is visible. A fetched local tag
-`v0.18.0` is BytePioneer's annotated tag — do not push it to origin. Fork
-`v0.18.0-0` is published on origin and npm. The next unused counter on this
-held `0.18.0` line is `0.18.0-1`. Upstream `main` and GitHub latest currently
-hold `0.19.0`; this fork has not merged that release, so do not jump to
-`0.19.0-0`.
+Recurl GitHub `/releases/latest` and the six platform packages after
+provenance; a `+` log line can still 404 until the staged version is visible.
+A 409 `Cannot publish over previously staged version` with a still-404 version
+URL is an npm ghost stage ([npm/cli#9889](https://github.com/npm/cli/issues/9889)):
+do not republish that exact version, and do not move the tag. Use the next
+unused fork counter. A fetched local tag `v0.19.0` is BytePioneer's annotated
+tag — do not push it to origin. Fork `v0.18.0-0` and `v0.18.0-1` are tagged on
+origin; GitHub latest is `v0.18.0-1`. This fork has merged upstream `0.19.0`.
+The next unused counter is `0.19.0-0`.
 
 ## GitHub Actions secrets
 
@@ -292,15 +292,15 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.18.0-1` while this fork still holds `0.18.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.19.0-0` while this fork holds merged upstream `0.19.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
 
 ## Next unused counter
 
 ```bash
 git fetch upstream --tags --prune
 git fetch origin --tags --prune
-# example when upstream holds 0.18.0:
-git ls-remote --tags origin 'refs/tags/v0.18.0-*'
+# example when upstream holds 0.19.0:
+git ls-remote --tags origin 'refs/tags/v0.19.0-*'
 ```
 
-Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, and `v0.18.0-0`. Next unused on the held `0.18.0` line is `0.18.0-1`. Then `npm run release:prepare -- 0.18.0-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, and `v0.18.0-1`. Next unused after the merged `0.19.0` line is `0.19.0-0`. Then `npm run release:prepare -- 0.19.0-0` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
