@@ -737,20 +737,21 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "--host conflicts with the Thread reference",
         );
+      const range = parseDelegationTurnRange(parsed.options);
+      const timeoutMs =
+        command === "wait"
+          ? value(parsed, "--timeout-ms")
+            ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
+            : DEFAULT_WAIT_TIMEOUT_MS
+          : undefined;
       const caller = command === "read" ? (await connection()).callerThreadId : undefined;
       const body = {
         ...reference,
         ...(hostId ? { hostId } : {}),
         ...(caller ? { callerThreadId: normalizeThreadId(caller) } : {}),
         view,
-        ...parseDelegationTurnRange(parsed.options),
-        ...(command === "wait"
-          ? {
-              timeoutMs: value(parsed, "--timeout-ms")
-                ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
-                : DEFAULT_WAIT_TIMEOUT_MS,
-            }
-          : {}),
+        ...range,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
       const request = async (requestBody: Record<string, unknown>) =>
         requestRuntime({
@@ -846,6 +847,9 @@ export async function runDelegationCli(input: {
         ]).has(sort)
       )
         throw new DelegationControlError("INVALID_ARGUMENT", "--sort is invalid");
+      const limit = value(parsed, "--limit")
+        ? positiveInteger(value(parsed, "--limit"), "--limit", MAX_LIMIT)
+        : DEFAULT_LIMIT;
       const parentThread = value(parsed, "--parent");
       const client = value(parsed, "--client");
       const ref = value(parsed, "--ref");
@@ -862,9 +866,7 @@ export async function runDelegationCli(input: {
             ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
             ...(client ? { client } : {}),
             ...(ref ? { ref } : {}),
-            limit: value(parsed, "--limit")
-              ? positiveInteger(value(parsed, "--limit"), "--limit", MAX_LIMIT)
-              : DEFAULT_LIMIT,
+            limit,
             ...(value(parsed, "--cursor") ? { cursor: value(parsed, "--cursor") } : {}),
             sort,
           },
