@@ -257,11 +257,11 @@ A 409 `Cannot publish over previously staged version` with a still-404 version
 URL is an npm ghost stage ([npm/cli#9889](https://github.com/npm/cli/issues/9889)):
 do not republish that exact version, and do not move the tag. Use the next
 unused fork counter. A fetched local tag `v0.19.0` is BytePioneer's annotated
-tag — do not push it to origin. Fork `v0.19.0-0` is tagged on origin and is the
-current GitHub latest. This fork still holds merged upstream `0.19.0`. Upstream
-GitHub latest is `v0.20.0`; do not prepare `0.20.0-0` until that merge is
-explicitly authorized. The next unused counter on the held `0.19.0` line is
-`0.19.0-1`.
+tag — do not push it to origin. Fork `v0.19.0-0` and `v0.19.0-1` are tagged on
+origin; GitHub latest is `v0.19.0-1`. This fork still holds merged upstream
+`0.19.0`. Upstream GitHub latest is `v0.20.0`; do not prepare `0.20.0-0` until
+that merge is explicitly authorized. The next unused counter on the held
+`0.19.0` line is `0.19.0-2`.
 
 ## GitHub Actions secrets
 
@@ -295,7 +295,7 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.19.0-1` while this fork holds merged upstream `0.19.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.19.0-2` while this fork holds merged upstream `0.19.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
 
 ## Next unused counter
 
@@ -306,4 +306,4 @@ git fetch origin --tags --prune
 git ls-remote --tags origin 'refs/tags/v0.19.0-*'
 ```
 
-Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, and `v0.19.0-0`. Next unused on the held `0.19.0` line is `0.19.0-1`. Then `npm run release:prepare -- 0.19.0-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, `v0.19.0-0`, and `v0.19.0-1`. Next unused on the held `0.19.0` line is `0.19.0-2`. Then `npm run release:prepare -- 0.19.0-2` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
