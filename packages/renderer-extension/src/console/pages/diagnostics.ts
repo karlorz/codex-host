@@ -151,6 +151,8 @@ export function renderStartupDiagnostics(
       ),
     );
   } else {
+    const current =
+      overview.summary.state === "running" || overview.summary.state === "integration-unavailable";
     sections.push(
       h(
         document,
@@ -164,8 +166,12 @@ export function renderStartupDiagnostics(
           h(
             document,
             "span",
-            { className: "console-badge is-ok" },
-            latest.outcome === "attached" ? messages.outcomeAttached : messages.outcomeReady,
+            { className: current ? "console-badge is-ok" : "console-badge is-info" },
+            latest.outcome === "attached"
+              ? messages.outcomeAttached
+              : current
+                ? messages.outcomeReady
+                : messages.lastStartSucceeded,
           ),
         ),
         h(

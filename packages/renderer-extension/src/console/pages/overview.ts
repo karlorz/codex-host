@@ -44,6 +44,14 @@ function summaryView(
   if (state === "desktop-missing") {
     return { tone: "bad", icon: "unavailable", title: messages.missing, detail: detail ?? "" };
   }
+  if (overview.hostAvailable) {
+    return {
+      tone: "warn",
+      icon: "unavailable",
+      title: messages.desktopStopped,
+      detail: messages.desktopStoppedDetail,
+    };
+  }
   return { tone: "info", icon: "play", title: messages.stopped, detail: messages.stoppedDetail };
 }
 

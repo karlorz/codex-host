@@ -94,6 +94,31 @@ describe("overview startup diagnostics", () => {
     expect(ready).toContain("打开 Web");
   });
 
+  it("does not say the whole product is stopped when Host is up and Desktop is not", () => {
+    const state = new ConsoleState();
+    state.overview = overview();
+    state.overview.hostAvailable = true;
+    state.overview.summary.state = "stopped";
+    state.overview.inspect = {
+      desktop: {
+        version: "26.1106.51428",
+        build: "26605",
+        installRoot: "/Applications/ChatGPT.app",
+      },
+      desktopError: null,
+      runtime: { running: false },
+    };
+    const replaceChildren = vi.fn();
+    const context = {
+      content: { ownerDocument: {}, replaceChildren, querySelector: () => null },
+    } as unknown as RendererSettingsPageMountContext;
+    createOverviewPage(consoleMessages("zh-CN"), state, vi.fn(), "zh-CN").mount(context);
+    const initial = JSON.stringify(replaceChildren.mock.calls.at(-1));
+    expect(initial).toContain("Codex Desktop 未运行");
+    expect(initial).toContain("codexhost 服务仍在运行");
+    expect(initial).not.toContain("codexhost 未运行");
+  });
+
   it("does not present an abandoned starting record as a successful startup", () => {
     const value = overview();
     const latest = value.startup[0];
@@ -102,6 +127,16 @@ describe("overview startup diagnostics", () => {
     value.summary.state = "startup-failed";
     expect(render(value)).toContain("本次启动未完成");
     expect(render(value)).not.toContain("启动成功");
+  });
+
+  it("shows a historical last-start badge when Desktop is not currently running", () => {
+    const value = overview();
+    value.hostAvailable = true;
+    value.summary.state = "stopped";
+    const output = render(value);
+    expect(output).toContain("上次启动成功");
+    expect(output).toContain("console-badge is-info");
+    expect(output).not.toContain("console-badge is-ok");
   });
 
   it("shows only the latest successful start without timeline or duplicate report actions", () => {

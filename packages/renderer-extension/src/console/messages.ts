@@ -14,6 +14,11 @@ const ENGLISH = {
   missing: "Codex Desktop was not found",
   stopped: "codexhost is not running",
   stoppedDetail: "Start codexhost to use Codex Desktop with your Harnesses.",
+  desktopStopped: "Codex Desktop is not running",
+  desktopStoppedDetail:
+    "codexhost Host is running. Start Desktop to use Codex Desktop with your Harnesses.",
+  hostRunningDesktopStopped: "Host running · Desktop stopped",
+  lastStartSucceeded: "Last start succeeded",
   start: "Start codexhost",
   restart: "Restart codexhost",
   restartConfirm: "Restart now",
@@ -227,6 +232,11 @@ const CHINESE: ConsoleMessages = {
   missing: "未找到 Codex Desktop",
   stopped: "codexhost 未运行",
   stoppedDetail: "启动 codexhost 后即可在 Codex Desktop 中使用各个 Harness。",
+  desktopStopped: "Codex Desktop 未运行",
+  desktopStoppedDetail:
+    "codexhost 服务仍在运行。启动 Desktop 后即可在 Codex Desktop 中使用各个 Harness。",
+  hostRunningDesktopStopped: "服务运行中 · Desktop 未运行",
+  lastStartSucceeded: "上次启动成功",
   start: "启动 codexhost",
   restart: "重新启动 codexhost",
   restartConfirm: "立即重新启动",

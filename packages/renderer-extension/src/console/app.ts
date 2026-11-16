@@ -63,12 +63,13 @@ function statusCard(
   const render = (): void => {
     const overview = state.overview;
     const running = overview?.inspect?.runtime.running ?? false;
+    const hostAvailable = overview?.hostAvailable ?? false;
     const summary = overview?.summary.state;
     const tone = state.offline
       ? "bad"
       : summary === "running"
         ? "ok"
-        : summary === "integration-unavailable"
+        : summary === "integration-unavailable" || (hostAvailable && !running)
           ? "warn"
           : summary === "startup-failed" || summary === "desktop-missing"
             ? "bad"
@@ -92,7 +93,9 @@ function statusCard(
                 ? messages.starting
                 : running
                   ? messages.hostRunning
-                  : messages.hostStopped,
+                  : hostAvailable
+                    ? messages.hostRunningDesktopStopped
+                    : messages.hostStopped,
         ),
       ),
       h(
