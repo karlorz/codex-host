@@ -262,10 +262,11 @@ do not republish that exact version, and do not move the tag. Use the next
 unused fork counter. A fetched local tag `v0.19.0` is BytePioneer's annotated
 tag — do not push it to origin. Fork `v0.19.0-0`, `v0.19.0-1`, and `v0.19.0-2`
 are tagged on origin; GitHub latest is `v0.19.0-2`, with all four installers
-verified. At post-publish verification on 2026-11-17, the npm meta package is
-`0.19.0-2` on `latest`; the six platform packages were accepted by npm but still
-return 404. Treat npm as partially available until all six version and tarball URLs
-resolve; do not republish those versions. This fork still holds merged upstream
+verified. At post-publish verification on 2026-11-17, the npm meta package,
+`darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-arm64` are downloadable as
+`0.19.0-2` on `latest`. npm accepted `linux-arm64` and `win32-x64`, but their
+version and tarball URLs still return 404. Treat npm as partially available until
+both resolve; do not republish those versions. This fork still holds merged upstream
 `0.19.0`. Upstream GitHub latest is `v0.20.0`; do not prepare `0.20.0-0` until
 that merge is explicitly authorized. The next unused counter on the held
 `0.19.0` line is `0.19.0-3`.
