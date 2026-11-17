@@ -263,15 +263,21 @@ A 409 `Cannot publish over previously staged version` with a still-404 version
 URL is an npm ghost stage ([npm/cli#9889](https://github.com/npm/cli/issues/9889)):
 do not republish that exact version, and do not move the tag. Use the next
 unused fork counter. A fetched local tag `v0.19.0` is BytePioneer's annotated
-tag — do not push it to origin. Fork `v0.19.0-0`, `v0.19.0-1`, and `v0.19.0-2`
-are tagged on origin; GitHub latest is `v0.19.0-2`, with all four installers
-verified. At post-publish verification on 2026-11-17, the npm meta package,
-`darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-arm64` are downloadable as
-`0.19.0-2` on `latest`. npm accepted `linux-arm64` and `win32-x64`, but their
-version and tarball URLs still return 404. Treat npm as partially available until
-both resolve; do not republish those versions. This fork has merged released
-upstream `v0.20.0` at `deaf765fc072e94307d9889c78e1ba82e4d36f76`. The next
-unused fork counter is `0.20.0-0`.
+tag — do not push it to origin. Fork `v0.20.0-0` is tagged on origin at
+`7a9fe06be1100d571a57c26482fd470988122a7f`. GitHub latest is `v0.20.0-0`,
+with all four installer downloads verified. Its exact-commit
+[main push CI](https://github.com/karlorz/codex-host/actions/runs/44044538924)
+and [release workflow](https://github.com/karlorz/codex-host/actions/runs/44051912813)
+both succeeded.
+
+At post-publish verification on 2026-11-17, npm meta package
+`@karlorz/codexhost-cli@0.20.0-0` is downloadable on `latest`. npm accepted
+all six platform packages, but their exact version and tarball URLs still
+return 404. Treat npm as partially available until those packages resolve;
+do not republish those versions. Use the GitHub installers while platform
+package visibility is pending. This fork holds released upstream `v0.20.0`
+at `deaf765fc072e94307d9889c78e1ba82e4d36f76`. The next unused fork counter
+is `0.20.0-1`.
 
 ## GitHub Actions secrets
 
@@ -305,7 +311,7 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.20.0-0` while this fork holds merged upstream `0.20.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.20.0-1` while this fork holds merged upstream `0.20.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
 
 ## Next unused counter
 
@@ -316,4 +322,4 @@ git fetch origin --tags --prune
 git ls-remote --tags origin 'refs/tags/v0.20.0-*'
 ```
 
-Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, `v0.19.0-0`, `v0.19.0-1`, and `v0.19.0-2`. Next unused on the held `0.20.0` line is `0.20.0-0`. Then `npm run release:prepare -- 0.20.0-0` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, `v0.19.0-0`, `v0.19.0-1`, `v0.19.0-2`, and `v0.20.0-0`. Next unused on the held `0.20.0` line is `0.20.0-1`. Then `npm run release:prepare -- 0.20.0-1` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
