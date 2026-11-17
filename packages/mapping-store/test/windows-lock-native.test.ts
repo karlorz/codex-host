@@ -24,7 +24,7 @@ function traceIdentityQuery(query: string): string {
     ["$executablePath = $process.MainModule.FileName", "main-module"],
     ["if ($null -eq $startTime)", "direct-done"],
     ["$process = Get-CimInstance", "cim"],
-    ["[pscustomobject]@{ Path =", "json"],
+    ["[Console]::OutputEncoding =", "output"],
   ] as const;
   for (const [statement, stage] of stages) {
     if (!query.includes(statement)) throw new Error(`Missing identity query stage: ${stage}`);
@@ -60,7 +60,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
       const query = traceIdentityQuery(`${queryPrelude}${originalQuery}`);
       queryPrelude = "";
       // A file descriptor retains stage markers on both success and timeout;
-      // stdout remains the unmodified identity JSON consumed by Mapping Store.
+      // stdout remains the identity response consumed by Mapping Store.
       const diagnosticsPath = path.join(directory, "identity-query.stderr");
       const diagnostics = openSync(diagnosticsPath, "w");
       const startedAt = Date.now();
@@ -136,7 +136,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     if (result?.type !== "return") {
       throw new Error("Native identity lookup did not succeed", { cause: result?.value });
     }
-    expect(JSON.parse(String(result.value))).toMatchObject({ StartTime: expect.any(String) });
+    expect(Number.isFinite(Date.parse(String(result.value).split(/\r?\n/)[0] ?? ""))).toBe(true);
   }
 
   function prependQuery(script: string): void {
@@ -185,6 +185,22 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     });
     expectNativeIdentity();
     expect(kill).toHaveBeenCalledExactlyOnceWith(inaccessiblePid, 0);
+  });
+
+  it("returns a non-ASCII executable path from the native query without corruption", async () => {
+    const inaccessiblePid = 2_147_483_647;
+    vi.spyOn(process, "kill").mockReturnValue(true);
+    const executablePath = "C:\\測試\\café\\node.exe";
+    prependQuery(
+      "function Get-CimInstance { [pscustomobject]@{ " +
+        `ExecutablePath = '${executablePath}'; CreationDate = [DateTime]::UtcNow } }`,
+    );
+    await writeLock(new Date(0).toISOString(), inaccessiblePid);
+    await store.initialize();
+    expectNativeIdentity();
+    const result = vi.mocked(execFileSync).mock.results[0];
+    if (result?.type !== "return") throw new Error("Native identity lookup did not succeed");
+    expect(String(result.value).split(/\r?\n/)[1]).toBe(executablePath);
   });
 
   it("preserves a real live owner's lock", async () => {

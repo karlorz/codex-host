@@ -49,10 +49,12 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     return content;
   }
 
+  function nativeReply(executablePath: string | null, startedAt: string | null): string {
+    return `${startedAt ?? ""}\r\n${executablePath ?? ""}\r\n`;
+  }
+
   function reply(executablePath: string | null, startedAt: string | null): void {
-    vi.mocked(execFileSync).mockReturnValue(
-      JSON.stringify({ Path: executablePath, StartTime: startedAt }),
-    );
+    vi.mocked(execFileSync).mockReturnValue(nativeReply(executablePath, startedAt));
   }
 
   async function expectPreserved(content: string): Promise<void> {
@@ -74,10 +76,7 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     await writeLock();
     vi.mocked(execFileSync).mockImplementation((_file, args) => {
       const query = args?.at(-1) ?? "";
-      return JSON.stringify({
-        Path: null,
-        StartTime: query.includes("Get-CimInstance") ? reusedStart : null,
-      });
+      return nativeReply(null, query.includes("Get-CimInstance") ? reusedStart : null);
     });
     await expectRecovered();
     expect(execFileSync).toHaveBeenCalledWith(
@@ -115,10 +114,7 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
       await writeFile(lock, JSON.stringify(record));
       vi.mocked(execFileSync).mockReturnValue(
         platform === "win32"
-          ? JSON.stringify({
-              Path: process.execPath,
-              StartTime: new Date(performance.timeOrigin).toISOString(),
-            })
+          ? nativeReply(process.execPath, new Date(performance.timeOrigin).toISOString())
           : new Date(performance.timeOrigin).toString(),
       );
       await expect(contender.initialize()).rejects.toMatchObject({ code: "STORE_LOCKED" });
@@ -147,6 +143,17 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     await expectPreserved(await writeLock());
   });
 
+  it.each(["\n", "\r\n"])(
+    "preserves a Unicode Windows path with %j line endings",
+    async (newline) => {
+      const executablePath = "C:\\測試\\café\\node.exe";
+      vi.mocked(execFileSync).mockReturnValue(
+        `${recordedStart}${newline}${executablePath}${newline}`,
+      );
+      await expectPreserved(await writeLock({ executablePath }));
+    },
+  );
+
   it("recovers a known different executable even without a creation time", async () => {
     reply("C:\\Windows\\System32\\svchost.exe", null);
     await writeLock();
@@ -168,13 +175,16 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     );
   });
 
-  it.each(["", "not json", '{"StartTime":"invalid"}'])(
-    "preserves the lock for unavailable or malformed metadata %j",
-    async (output) => {
-      vi.mocked(execFileSync).mockReturnValue(output);
-      await expectPreserved(await writeLock());
-    },
-  );
+  it.each([
+    "",
+    "not an identity",
+    "invalid\r\n\r\n",
+    `${reusedStart}\r\n`,
+    `${reusedStart}\r\n${nodePath}\r\nextra\r\n`,
+  ])("preserves the lock for unavailable or malformed metadata %j", async (output) => {
+    vi.mocked(execFileSync).mockReturnValue(output);
+    await expectPreserved(await writeLock());
+  });
 
   it("preserves the lock when the metadata query times out", async () => {
     vi.mocked(execFileSync).mockImplementation(() => {
@@ -198,8 +208,8 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     vi.mocked(execFileSync).mockImplementation((_file, args) => {
       const query = args?.at(-1) ?? "";
       return query.includes(`ProcessId = ${contenderPid}`)
-        ? JSON.stringify({ Path: "C:\\codexhost\\bin\\codexhost.exe", StartTime: recordedStart })
-        : JSON.stringify({ Path: nodePath, StartTime: reusedStart });
+        ? nativeReply("C:\\codexhost\\bin\\codexhost.exe", recordedStart)
+        : nativeReply(nodePath, reusedStart);
     });
     const content = await writeLock();
     const lock = path.join(directory, "store.lock");
@@ -225,10 +235,10 @@ describe("Windows Mapping Store lock identity (simulated OS replies)", () => {
     });
     vi.mocked(execFileSync).mockReturnValue(
       platform === "win32"
-        ? JSON.stringify({
-            Path: "C:\\codexhost\\bin\\codexhost.exe",
-            StartTime: new Date(performance.timeOrigin).toISOString(),
-          })
+        ? nativeReply(
+            "C:\\codexhost\\bin\\codexhost.exe",
+            new Date(performance.timeOrigin).toISOString(),
+          )
         : new Date(performance.timeOrigin).toString(),
     );
     const content = await writeLock();

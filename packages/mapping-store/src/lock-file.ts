@@ -99,7 +99,8 @@ function processIdentity(pid: number): ProcessIdentity | null {
       return { executablePath: null, startedAt: Number.isFinite(startedAt) ? startedAt : null };
     }
     // Read ordinary owners without CIM cold-start latency. Protected processes
-    // can still expose CreationDate through CIM; serialize UTC explicitly.
+    // can still expose CreationDate through CIM. Two UTF-8 lines avoid loading
+    // PowerShell's JSON module; Windows executable paths cannot contain newlines.
     const query = [
       "$ErrorActionPreference = 'Stop'",
       "$startTime = $null",
@@ -114,10 +115,12 @@ function processIdentity(pid: number): ProcessIdentity | null {
         "if ($null -ne $process) { " +
         "$executablePath = $process.ExecutablePath; $startTime = $process.CreationDate " +
         "} } catch {} }",
-      "[pscustomobject]@{ Path = $executablePath; " +
-        "StartTime = $(if ($null -ne $startTime) { " +
+      "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
+      "$startValue = if ($null -ne $startTime) { " +
         "$startTime.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture) " +
-        "} else { $null }) } | ConvertTo-Json -Compress",
+        "} else { '' }",
+      "[Console]::Out.WriteLine($startValue)",
+      "[Console]::Out.WriteLine([string]$executablePath)",
     ].join("; ");
     const result = execFileSync(
       "powershell.exe",
@@ -128,11 +131,12 @@ function processIdentity(pid: number): ProcessIdentity | null {
         windowsHide: true,
         timeout: 5_000,
       },
-    ).trim();
-    if (!result) return { executablePath: null, startedAt: null };
-    const parsed = JSON.parse(result) as { Path?: unknown; StartTime?: unknown };
-    const executablePath = typeof parsed.Path === "string" ? parsed.Path : null;
-    const startedAt = typeof parsed.StartTime === "string" ? Date.parse(parsed.StartTime) : NaN;
+    ).split(/\r?\n/);
+    if (result.length !== 3 || result[2] !== "") {
+      return { executablePath: null, startedAt: null };
+    }
+    const executablePath = result[1] || null;
+    const startedAt = Date.parse(result[0] ?? "");
     return { executablePath, startedAt: Number.isFinite(startedAt) ? startedAt : null };
   } catch {
     // If process metadata cannot be queried, preserve the live-lock failure mode.
