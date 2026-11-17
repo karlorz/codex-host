@@ -189,7 +189,7 @@ async function externalWatchFixture(options: { externalSteerTimeoutMs?: number }
   const [parent, child] = fixture.adapter.sessions;
   if (!api || !parent || !child) throw new Error("Missing external watch fixture");
   const send = vi.spyOn(api, "send");
-  const service = new DelegationWatchService(api, { pollIntervalMs: 10 });
+  const service = new DelegationWatchService(api, { pollIntervalMs: 10, quietMs: 0 });
   await service.watch({ threadId: childId, notifyThreadId: parentId, timeoutMs: 60_000 });
   return { fixture, parent, parentTurnId, child, send, service };
 }
