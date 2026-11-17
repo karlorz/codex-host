@@ -26,14 +26,16 @@ candidate. A scratch Desktop may run in parallel with production; it must not
 replace `/Applications/ChatGPT.app` or share that user profile. Agents still
 must not quit production.
 
-Retained named Work and Chat alert pins are the source constants
-`CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION` in
-`packages/renderer-extension/src/renderer-voice-profiles.ts`. Shipping a
-codexhost tag does not re-pin or qualify a newer Desktop. A matching pin is a
-release alert recovery, not live voice acceptance. The current hashed profile
-and reviewed activation registry also live under `packages/renderer-extension`;
-the accepted production paths below must survive packaging independently of
-those named-profile alerts.
+Compat Daily derives monitoring baselines from validated reviewed macOS voice
+evidence, with the retained named Work/Chat profiles as fallback. Chat advances
+independently; Work requires accepted Codex and Grok evidence on the same Desktop
+version and build. The source qualification loader validates evidence and its
+implementation fingerprint before comparison. Invalid or stale evidence fails
+the check without mutating issues. Named profile constants and exact assets in
+`packages/renderer-extension/src/renderer-voice-profiles.ts` remain historical
+runtime identities. Shipping a codexhost tag does not qualify a newer Desktop.
+A matching monitoring baseline clears release drift; it does not establish a new
+live test. Accepted production activation survives builds and releases.
 
 ## Daily driver
 
@@ -69,8 +71,8 @@ runtime acceptance for unrelated submission behavior remains independent of voic
 numeric-chunk native Remote Control discovery path remains unqualified.
 Windows Store uses a separate pin in
 [windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
-Open `compat-broken` pin-drift issues ([#37](https://github.com/karlorz/codex-host/issues/37),
-[#38](https://github.com/karlorz/codex-host/issues/38)) are live alerts, not a
+Open `compat-broken` pin-drift issues ([#43](https://github.com/karlorz/codex-host/issues/43),
+[#44](https://github.com/karlorz/codex-host/issues/44)) are live alerts, not a
 queue to install the public feed. Upstream `v0.18.0` Desktop 26.1106 support is
 the 24/25-slot draft Model memo layout, not a Live Voice qualification. A
 newer public Desktop opens a new issue per surface and closes the previous
@@ -115,13 +117,16 @@ host launcher or production Desktop.
 ## Compat Daily
 
 `npm run compat:daily` and `.github/workflows/compat-daily.yml` compare the
-public macOS feed to the pins. They do not download ChatGPT.app, query the
+public macOS feed to validated monitoring baselines. The accepted Chat and
+Work baseline is **26.1106.51428 build 26605**, while retained named profiles stay
+at **26.1027.61615**. They do not download ChatGPT.app, query the
 per-installation updater, or test microphone/conversation behavior. Local runs
 print JSON and do not open issues. On non-PR default-branch runs, pin-drift
 findings open or comment `compat-broken` issues; operational errors skip issue
 updates. Each surface keeps one open issue. A later Sparkle version opens a
 new issue and closes the previous tracker as superseded. The same Sparkle
-version comments on the existing issue. Matching pins add a recovery comment
+version refreshes the existing issue title/body when acceptance advances, or
+comments on it when the baseline is unchanged. Matching baselines add a recovery comment
 but leave issues open for live acceptance review.
 
 Microphone-release, interruption/mute, and spontaneous-close checks stay

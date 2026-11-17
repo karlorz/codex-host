@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * macOS ChatGPT/Codex Desktop pin check. Fetches the public Sparkle appcast
- * and compares it to Renderer voice pins. Does not download the .app zip.
+ * and compares it to validated voice monitoring baselines. Does not download the .app zip.
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const APPCAST_URL = "https://persistent.oaistatic.com/codex-app-prod/appcast.xml";
 
@@ -102,73 +102,134 @@ function isNewer(latest, pin) {
   return false;
 }
 
-export function evaluate(pins, latest) {
-  const latestParts = versionParts(latest.version);
-  const workParts = versionParts(pins.workVersion);
-  const chatParts = versionParts(pins.chatVersion);
-  const findings = [];
-  const scope = `The public macOS release feed advertises ${latest.version} build ${latest.build}. Desktop's per-installation updater may offer a different version. This check does not test native voice behavior or installation-specific update availability.`;
-  if (isNewer(latestParts, workParts)) {
-    findings.push({
-      surface: "work-voice",
-      title: `compat-daily/work-voice: pin ${pins.workVersion} behind desktop ${latest.version}`,
-      detail: `Work/gateway voice is pinned to ${pins.workVersion} (${pins.workInitial}${pins.overlayAsset ? `, overlay ${pins.overlayAsset}` : ""}). ${scope} Work/gateway voice requires qualification for this public release.`,
-    });
+/** Takes only qualification records already validated against the current source graph. */
+export function monitoringBaselines(pins, qualification) {
+  const baselines = {
+    work: { version: pins.workVersion, source: "named-profile" },
+    chat: { version: pins.chatVersion, source: "named-profile" },
+  };
+  const reviewed = qualification.reviewedEvidence.filter(
+    (record) => record.platform === "darwin" && record.policy === "reviewed",
+  );
+  const candidates = reviewed.filter(
+    (record) =>
+      record.path === "chat" ||
+      (record.path === "work-codex" &&
+        reviewed.some(
+          (other) =>
+            other.path === "work-grok" &&
+            other.desktopVersion === record.desktopVersion &&
+            other.desktopBuild === record.desktopBuild,
+        )),
+  );
+  for (const record of candidates) {
+    const surface = record.path === "chat" ? "chat" : "work";
+    const current = baselines[surface];
+    const newer = isNewer(versionParts(record.desktopVersion), versionParts(current.version));
+    const sameVersion = record.desktopVersion === current.version;
+    const newerBuild =
+      sameVersion &&
+      /^\d+$/u.test(record.desktopBuild) &&
+      (!current.build || BigInt(record.desktopBuild) > BigInt(current.build));
+    if (!newer && !newerBuild) continue;
+    baselines[surface] = {
+      version: record.desktopVersion,
+      build: record.desktopBuild,
+      source: "reviewed-evidence",
+      paths: surface === "chat" ? ["chat"] : ["work-codex", "work-grok"],
+      implementationRevision: qualification.implementationRevision,
+      evidence: "packages/renderer-extension/voice-reviewed-evidence.json",
+    };
   }
-  if (isNewer(latestParts, chatParts)) {
+  return baselines;
+}
+
+export function evaluate(
+  pins,
+  latest,
+  baselines = monitoringBaselines(pins, { reviewedEvidence: [] }),
+) {
+  const latestParts = versionParts(latest.version);
+  const findings = [];
+  const scope = `The public macOS release feed advertises ${latest.version} build ${latest.build}. Desktop's per-installation updater may offer a different version. This check does not test native voice behavior or installation-specific update availability. Existing accepted voice activation is preserved; this alert does not revoke acceptance.`;
+  for (const [key, label, namedVersion] of [
+    ["work", "Work/Codex and Work/Grok", pins.workVersion],
+    ["chat", "ChatGPT Chat", pins.chatVersion],
+  ]) {
+    const baseline = baselines[key];
+    if (!isNewer(latestParts, versionParts(baseline.version))) continue;
+    const origin =
+      baseline.source === "reviewed-evidence"
+        ? `reviewed accepted evidence (${baseline.paths.join(", ")}; implementation ${baseline.implementationRevision}; ${baseline.evidence})`
+        : "the retained named profile";
     findings.push({
-      surface: "chat-voice",
-      title: `compat-daily/chat-voice: pin ${pins.chatVersion} behind desktop ${latest.version}`,
-      detail: `ChatGPT Chat voice is pinned to ${pins.chatVersion} (${pins.chatInitial}, ${pins.chatStart}). ${scope} Native Chat start/prewarm requires qualification for this public release.`,
+      surface: `${key}-voice`,
+      title: `compat-daily/${key}-voice: pin ${baseline.version} behind desktop ${latest.version}`,
+      detail: `${label} monitoring baseline is ${baseline.version}${baseline.build ? ` build ${baseline.build}` : ""}, from ${origin}. The retained named-profile version is ${namedVersion}; its asset mappings remain unchanged. ${scope} Voice on ${label} requires qualification for this public release.`,
     });
   }
   return {
     feed: { url: APPCAST_URL, installationAvailability: "not-checked" },
     latest,
     pins,
+    baselines,
     findings,
   };
 }
 
-/**
- * Exact title: comment in place. Same pin, newer Sparkle: open a new issue
- * and close these previous trackers. One open issue remains per surface.
- */
-export function livePinIssue(finding, issues, pins) {
-  if (!finding?.surface || typeof finding.title !== "string") return undefined;
-  const pin = finding.surface === "chat-voice" ? pins?.chatVersion : pins?.workVersion;
-  if (typeof pin !== "string") return undefined;
-  const prefix = `compat-daily/${finding.surface}: pin ${pin} behind desktop `;
-  const matches = issues.filter(
-    (issue) =>
-      !issue.pull_request && typeof issue.title === "string" && issue.title.startsWith(prefix),
-  );
-  const previous = matches
-    .filter((issue) => issue.title !== finding.title)
-    .slice()
-    .sort((left, right) => left.number - right.number)
-    .map((issue) => ({ number: issue.number, title: issue.title }));
-  const exact = matches.find((issue) => issue.title === finding.title);
-  if (exact) {
-    return { number: exact.number, title: exact.title, kind: "exact", previous };
-  }
-  if (previous.length === 0) return undefined;
-  return { kind: "supersede", previous };
+function trackerTitle(title) {
+  return typeof title === "string"
+    ? /^compat-daily\/(chat-voice|work-voice): pin (\d+\.\d+\.\d+) behind desktop (\d+\.\d+\.\d+)$/u.exec(
+        title,
+      )
+    : undefined;
 }
 
-/** Matching pins clear version drift, independently of live voice acceptance. */
+/** Refresh a changed baseline in place; supersede trackers when the feed advances. */
+export function livePinIssue(finding, issues) {
+  const target = trackerTitle(finding?.title);
+  if (!target || target[1] !== finding.surface) return undefined;
+  const matches = issues
+    .filter((issue) => !issue.pull_request && trackerTitle(issue.title)?.[1] === finding.surface)
+    .sort((left, right) => left.number - right.number);
+  const live =
+    matches.find((issue) => issue.title === finding.title) ??
+    matches.find((issue) => trackerTitle(issue.title)[3] === target[3]);
+  const previous = matches
+    .filter((issue) => issue !== live)
+    .map((issue) => ({ number: issue.number, title: issue.title }));
+  if (live) {
+    return {
+      number: live.number,
+      title: live.title,
+      kind: live.title === finding.title ? "exact" : "refresh",
+      previous,
+    };
+  }
+  return previous.length > 0 ? { kind: "supersede", previous } : undefined;
+}
+
+/** Matching monitoring baselines clear version drift, independently of new live testing. */
 export function recoveredPinIssues(report, issues) {
   return issues.flatMap((issue) => {
-    const match = /^compat-daily\/(chat-voice|work-voice): pin \S+ behind desktop (\S+)$/u.exec(
-      issue.title,
-    );
+    const match = trackerTitle(issue.title);
     if (!match || issue.pull_request) return [];
     const surface = match[1];
-    const pin = surface === "chat-voice" ? report.pins.chatVersion : report.pins.workVersion;
-    return pin === report.latest.version || pin === match[2]
+    const key = surface === "chat-voice" ? "chat" : "work";
+    const pin = report.baselines?.[key]?.version ?? report.pins[`${key}Version`];
+    return pin === report.latest.version || pin === match[3]
       ? [{ number: issue.number, surface, version: pin }]
       : [];
   });
+}
+
+export async function loadMonitoringBaselines(root = ROOT, pins) {
+  const namedPins = pins ?? (await loadPinsFromRepo(root));
+  const { loadCurrentSourceVoiceIdentity } = await import(
+    pathToFileURL(path.join(root, "scripts/release/voice-release-artifacts.mjs")).href
+  );
+  const { qualification } = await loadCurrentSourceVoiceIdentity(root);
+  return monitoringBaselines(namedPins, qualification);
 }
 
 export async function loadPinsFromRepo(root = ROOT) {
@@ -187,8 +248,9 @@ export async function fetchAppcast(fetchImpl = fetch, url = APPCAST_URL) {
 
 async function main() {
   const pins = await loadPinsFromRepo();
+  const baselines = await loadMonitoringBaselines(ROOT, pins);
   const latest = await fetchAppcast();
-  const report = evaluate(pins, latest);
+  const report = evaluate(pins, latest, baselines);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (report.findings.length > 0) process.exitCode = 1;
 }

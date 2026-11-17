@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +18,8 @@ import {
   evaluate,
   livePinIssue,
   loadPinsFromRepo,
+  loadMonitoringBaselines,
+  monitoringBaselines,
   parseAppcast,
   readPins,
   recoveredPinIssues,
@@ -74,13 +86,16 @@ describe("compat-daily pins", () => {
       kind: "supersede",
       previous: [{ number: 25, title: olderSparkle.title }],
     });
-    assert.equal(
-      livePinIssue(
-        finding,
-        [{ number: 1, title: "compat-daily/work-voice: pin 26.9.1 behind desktop 26.1016.62342" }],
-        pins,
-      ),
-      undefined,
+    assert.deepEqual(
+      livePinIssue(finding, [
+        { number: 1, title: "compat-daily/work-voice: pin 26.9.1 behind desktop 26.1016.62342" },
+      ]),
+      {
+        number: 1,
+        title: "compat-daily/work-voice: pin 26.9.1 behind desktop 26.1016.62342",
+        kind: "refresh",
+        previous: [],
+      },
     );
     assert.equal(
       livePinIssue(finding, [{ number: 2, title: olderSparkle.title, pull_request: {} }], pins),
@@ -364,14 +379,21 @@ it("runs drift and recovery workflow steps in separate scopes", async () => {
   );
   assert.match(created[0].body, /checked-sha/u);
   assert.match(created[0].body, /refs\/heads\/stable/u);
-  await run("Comment on matching voice pins", "workflow_dispatch", "refs/heads/stable", "success");
-  assert.equal(comments.length, 1);
-  assert.equal(comments[0].issue_number, 4);
-  assert.match(comments[0].body, /does not verify microphone/);
-  assert.match(comments[0].body, /checked-sha/u);
-  assert.match(comments[0].body, /refs\/heads\/stable/u);
-  await run("Comment on matching voice pins");
-  assert.equal(comments.length, 1);
+  const recovery = await workflowFixture(report, [issue]);
+  await recovery.run(
+    "Comment on matching voice pins",
+    "workflow_dispatch",
+    "refs/heads/stable",
+    "success",
+  );
+  assert.equal(recovery.comments.length, 1);
+  assert.equal(recovery.comments[0].issue_number, 4);
+  assert.match(recovery.comments[0].body, /does not verify microphone/);
+  assert.match(recovery.comments[0].body, /checked-sha/u);
+  assert.match(recovery.comments[0].body, /refs\/heads\/stable/u);
+  await recovery.run("Comment on matching voice pins");
+  assert.equal(recovery.comments.length, 1);
+  assert.equal(comments.length, 1); // Supersession comment from the drift step.
 
   const duplicate = await workflowFixture(report, [{ title: report.findings[0].title, number: 9 }]);
   await duplicate.run("Open or update issues on pin drift");
@@ -421,9 +443,12 @@ it("closes leftover same-pin issues when the exact tracker already exists", asyn
   const { run, created, comments, updated } = await workflowFixture(report, issues);
   await run("Open or update issues on pin drift");
   assert.equal(created.length, 0);
-  assert.equal(updated.length, 1);
-  assert.equal(updated[0].issue_number, 25);
-  assert.equal(updated[0].state, "closed");
+  assert.equal(updated.length, 3);
+  assert.equal(updated[0].issue_number, 9);
+  assert.equal(updated[0].title, report.findings[0].title);
+  assert.equal(updated[1].issue_number, 25);
+  assert.equal(updated[1].state, "closed");
+  assert.equal(updated[2].issue_number, 10);
   assert.equal(comments.length, 3);
   assert.match(comments[0].body, /pin drift re-failed/u);
   assert.match(comments[1].body, /Superseded by #9/u);
@@ -520,4 +545,157 @@ it("tracks the independently qualified 26.1027 Work and native Chat pins", async
       { number: 15, surface: "chat-voice", version: "26.1027.61615" },
     ],
   );
+});
+
+const acceptedVersion = "26.1106.51428";
+function reviewed(path, overrides = {}) {
+  return {
+    path,
+    platform: "darwin",
+    policy: "reviewed",
+    desktopVersion: acceptedVersion,
+    desktopBuild: "26605",
+    ...overrides,
+  };
+}
+function qualification(records) {
+  return { implementationRevision: "validated-revision", reviewedEvidence: records };
+}
+
+it("advances independent baselines from validated macOS evidence and preserves named pins", () => {
+  const pins = readPins(files);
+  const baselines = monitoringBaselines(
+    pins,
+    qualification([
+      reviewed("chat"),
+      reviewed("work-codex"),
+      reviewed("work-grok"),
+      reviewed("chat", { platform: "win32", desktopVersion: "99.1.1" }),
+      reviewed("chat", { policy: "legacy", desktopVersion: "99.1.1" }),
+    ]),
+  );
+  assert.equal(baselines.chat.version, acceptedVersion);
+  assert.equal(baselines.work.version, acceptedVersion);
+  assert.equal(baselines.work.build, "26605");
+  assert.deepEqual(baselines.work.paths, ["work-codex", "work-grok"]);
+  assert.equal(baselines.work.source, "reviewed-evidence");
+  const report = evaluate(pins, { version: "26.1111.21308", build: "27194" }, baselines);
+  assert.equal(report.pins.workVersion, "26.1016.51333");
+  assert.equal(report.findings.length, 2);
+  assert.match(report.findings[0].detail, /Existing accepted voice activation is preserved/u);
+  assert.match(report.findings[0].detail, /retained named-profile version is 26.1016.51333/u);
+  assert.deepEqual(
+    evaluate(pins, { version: acceptedVersion, build: "26605" }, baselines).findings,
+    [],
+  );
+  assert.deepEqual(
+    recoveredPinIssues(report, [
+      {
+        number: 4,
+        title: `compat-daily/chat-voice: pin 26.1027.61615 behind desktop ${acceptedVersion}`,
+      },
+    ]),
+    [{ number: 4, surface: "chat-voice", version: acceptedVersion }],
+  );
+});
+
+it("requires the same accepted version and build for both Work paths", () => {
+  const pins = readPins(files);
+  for (const records of [
+    [reviewed("work-codex")],
+    [reviewed("work-grok")],
+    [reviewed("work-codex"), reviewed("work-grok", { desktopBuild: "26606" })],
+    [reviewed("work-codex"), reviewed("work-grok", { desktopVersion: "26.1107.1" })],
+  ]) {
+    const baselines = monitoringBaselines(pins, qualification([reviewed("chat"), ...records]));
+    assert.equal(baselines.work.version, pins.workVersion);
+    assert.equal(baselines.work.source, "named-profile");
+    assert.equal(baselines.chat.version, acceptedVersion);
+  }
+  const baselines = monitoringBaselines(
+    pins,
+    qualification([
+      reviewed("work-codex"),
+      reviewed("work-grok"),
+      reviewed("work-codex", { desktopVersion: "26.1111.21308" }),
+      reviewed("chat", { desktopVersion: "26.9.1" }),
+    ]),
+  );
+  assert.equal(baselines.work.version, acceptedVersion);
+  assert.equal(baselines.chat.version, pins.chatVersion);
+});
+
+it("refreshes same-feed trackers after acceptance advances without opening duplicates", async () => {
+  const pins = readPins(files);
+  const latest = { version: "26.1111.21308", build: "27194" };
+  const old = evaluate(pins, latest);
+  const baselines = monitoringBaselines(
+    pins,
+    qualification([reviewed("chat"), reviewed("work-codex"), reviewed("work-grok")]),
+  );
+  const report = evaluate(pins, latest, baselines);
+  const issues = old.findings.map((finding, index) => ({
+    number: 43 + index,
+    title: finding.title,
+  }));
+  const { run, created, updated } = await workflowFixture(report, issues);
+  await run("Open or update issues on pin drift");
+  assert.equal(created.length, 0);
+  assert.equal(updated.length, 2);
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(updated[index].issue_number, 43 + index);
+    assert.equal(updated[index].title, report.findings[index].title);
+    assert.match(updated[index].body, /reviewed accepted evidence/u);
+    assert.match(updated[index].body, /checked-sha/u);
+    assert.equal(updated[index].state, undefined);
+  }
+});
+
+it("loads accepted monitoring baselines from the validated current source", async () => {
+  const pins = await loadPinsFromRepo();
+  const baselines = await loadMonitoringBaselines(undefined, pins);
+  for (const surface of ["work", "chat"]) {
+    assert.equal(baselines[surface].version, acceptedVersion);
+    assert.equal(baselines[surface].build, "26605");
+    assert.equal(baselines[surface].source, "reviewed-evidence");
+  }
+  assert.equal(pins.chatVersion, "26.1027.61615");
+  assert.equal(pins.workVersion, "26.1027.61615");
+});
+
+it("rejects stale reviewed evidence and an unreviewed source graph instead of falling back", async () => {
+  const repository = fileURLToPath(new URL("../..", import.meta.url));
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "compat-evidence-")));
+  try {
+    const relative = "packages/renderer-extension";
+    mkdirSync(path.join(root, "scripts/release"), { recursive: true });
+    copyFileSync(
+      path.join(repository, "scripts/release/voice-release-artifacts.mjs"),
+      path.join(root, "scripts/release/voice-release-artifacts.mjs"),
+    );
+    for (const name of ["src", "scripts", "voice-reviewed-evidence.json"]) {
+      cpSync(path.join(repository, relative, name), path.join(root, relative, name), {
+        recursive: true,
+      });
+    }
+    symlinkSync(path.join(repository, "node_modules"), path.join(root, "node_modules"), "dir");
+    const evidencePath = path.join(root, relative, "voice-reviewed-evidence.json");
+    const original = readFileSync(evidencePath, "utf8");
+    const evidence = JSON.parse(original);
+    evidence[0].implementationRevision = "stale-revision";
+    writeFileSync(evidencePath, JSON.stringify(evidence));
+    await assert.rejects(
+      loadMonitoringBaselines(root),
+      /matching scoped compatibility review|not qualified/u,
+    );
+    writeFileSync(evidencePath, original);
+    const source = path.join(root, relative, "src/renderer-native-chat-voice.ts");
+    writeFileSync(source, readFileSync(source, "utf8") + "\n// simulated source change\n");
+    await assert.rejects(
+      loadMonitoringBaselines(root),
+      /does not match current implementation source graph/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

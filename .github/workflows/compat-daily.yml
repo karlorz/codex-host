@@ -1,8 +1,8 @@
 name: Compat Daily
 
-# Compare the public macOS release feed to Renderer voice pins.
+# Compare the public macOS release feed to validated voice monitoring baselines.
 # This does not check installation-specific update offers or live voice behavior.
-# Opens one GitHub issue per surface when a pin is behind. A newer Sparkle
+# Opens one GitHub issue per surface when a baseline is behind. A newer Sparkle
 # version opens a new issue and closes the previous tracker as superseded.
 # Does not download the .app.
 
@@ -13,42 +13,34 @@ on:
   push:
     branches: [main]
     paths:
+      - package.json
+      - package-lock.json
+      - .node-version
       - tools/compat-daily/**
       - .github/workflows/compat-daily.yml
-      - packages/renderer-extension/src/renderer-client-owned-voice.ts
+      - packages/renderer-extension/src/**
       - crates/platform/src/asar_metadata.rs
       - crates/platform/src/installation.rs
-      - packages/renderer-extension/src/renderer-voice-assets.ts
-      - packages/renderer-extension/src/renderer-voice-profiles.ts
-      - packages/renderer-extension/src/renderer-voice-evidence.ts
-      - packages/renderer-extension/src/renderer-voice-discovery.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice-assets.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice-runtime.ts
-      - packages/renderer-extension/src/renderer-hashed-native-chat-voice.ts
-      - packages/renderer-extension/src/renderer-hashed-overlay-voice.ts
-      - packages/renderer-extension/src/renderer-hashed-webpack-voice.ts
-      - packages/renderer-extension/src/renderer-voice-start-capability.ts
+      - packages/renderer-extension/voice-reviewed-evidence.json
+      - packages/renderer-extension/scripts/voice-qualification-artifact.mjs
+      - packages/renderer-extension/scripts/voice-implementation-identity.mjs
+      - scripts/release/voice-release-artifacts.mjs
       - packages/renderer-extension/scripts/build.mjs
       - tools/voice-discovery/**
   pull_request:
     paths:
+      - package.json
+      - package-lock.json
+      - .node-version
       - tools/compat-daily/**
       - .github/workflows/compat-daily.yml
-      - packages/renderer-extension/src/renderer-client-owned-voice.ts
+      - packages/renderer-extension/src/**
       - crates/platform/src/asar_metadata.rs
       - crates/platform/src/installation.rs
-      - packages/renderer-extension/src/renderer-voice-assets.ts
-      - packages/renderer-extension/src/renderer-voice-profiles.ts
-      - packages/renderer-extension/src/renderer-voice-evidence.ts
-      - packages/renderer-extension/src/renderer-voice-discovery.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice-assets.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice.ts
-      - packages/renderer-extension/src/renderer-native-chat-voice-runtime.ts
-      - packages/renderer-extension/src/renderer-hashed-native-chat-voice.ts
-      - packages/renderer-extension/src/renderer-hashed-overlay-voice.ts
-      - packages/renderer-extension/src/renderer-hashed-webpack-voice.ts
-      - packages/renderer-extension/src/renderer-voice-start-capability.ts
+      - packages/renderer-extension/voice-reviewed-evidence.json
+      - packages/renderer-extension/scripts/voice-qualification-artifact.mjs
+      - packages/renderer-extension/scripts/voice-implementation-identity.mjs
+      - scripts/release/voice-release-artifacts.mjs
       - packages/renderer-extension/scripts/build.mjs
       - tools/voice-discovery/**
 
@@ -59,7 +51,7 @@ jobs:
   pins:
     name: macOS voice release pins
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -70,6 +62,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
+          cache: npm
+
+      - name: Set up npm
+        run: npm install --global --prefer-offline npm@11.8.0
+
+      - name: Install source qualification dependencies
+        run: npm ci --prefer-offline
 
       - name: Unit-test pin parser
         run: node --test tools/compat-daily/run.test.mjs
@@ -123,7 +122,7 @@ jobs:
                   repo,
                   issue_number: issue.number,
                   body: [
-                    `Superseded by #${successorNumber}. macOS Sparkle latest is now \`${report.latest?.version ?? 'unknown'}\` (this issue tracked \`${issue.title}\`). The ${surface} pin is unchanged. A newer public Desktop opens a new issue; one remains open per surface.`,
+                    `Superseded by #${successorNumber}. macOS Sparkle latest is now \`${report.latest?.version ?? 'unknown'}\` (this issue tracked \`${issue.title}\`). The ${surface} tracker is replaced by the current monitoring baseline and public release target. A newer public Desktop opens a new issue; one remains open per surface.`,
                     '',
                     `- Checked commit: \`${context.sha}\` (\`${context.ref}\`)`,
                     `- Run: ${runUrl}`,
@@ -138,7 +137,7 @@ jobs:
               }
             };
             for (const finding of findings) {
-              const live = livePinIssue(finding, open, report.pins);
+              const live = livePinIssue(finding, open);
               const previous = Array.isArray(live?.previous) ? live.previous : [];
               const body = [
                 finding.detail,
@@ -163,7 +162,14 @@ jobs:
                   labels: ['compat-broken', 'bug'],
                   body,
                 });
-              } else if (live.kind === 'exact') {
+              } else if (live.kind === 'exact' || live.kind === 'refresh') {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: live.number,
+                  title: finding.title,
+                  body,
+                });
                 await github.rest.issues.createComment({
                   owner,
                   repo,
@@ -209,7 +215,7 @@ jobs:
               if (comments.some(comment => comment.user?.type === 'Bot' && comment.body?.includes(marker))) continue;
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issue.number,
-                body: `${marker}\nThe macOS ${issue.surface} pin is now ${issue.version}, matching this issue's tracked Desktop target or the current macOS Sparkle release. Current macOS Sparkle: ${report.latest.version}. A newer Sparkle version opens a new issue and closes this one as superseded. This check does not verify microphone capture, connected audio or conversation lifecycle; the issue remains open for acceptance review.\n\nChecked commit: \`${context.sha}\` (\`${context.ref}\`)\nRun: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+                body: `${marker}\nThe macOS ${issue.surface} monitoring baseline is now ${issue.version}, matching this issue's tracked Desktop target or the current macOS Sparkle release. Current macOS Sparkle: ${report.latest.version}. A newer Sparkle version opens a new issue and closes this one as superseded. This check does not verify microphone capture, connected audio or conversation lifecycle; the issue remains open for acceptance review.\n\nChecked commit: \`${context.sha}\` (\`${context.ref}\`)\nRun: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
               });
             }
 

@@ -1,13 +1,13 @@
 # Compat daily
 
-Compares the public macOS ChatGPT/Codex Desktop Sparkle appcast to Renderer voice pins. It does not download ChatGPT.app. Sparkle is not a Windows MSIX release feed. A separate daily Windows job checks bounded ASAR metadata, registered/portable MSIX discovery, platform profile selection and Controller bootstrap against fixtures. It does not claim to monitor the latest Windows Store release or verify a live voice call.
+Compares the public macOS ChatGPT/Codex Desktop Sparkle appcast to validated voice monitoring baselines. It does not download ChatGPT.app. Sparkle is not a Windows MSIX release feed. A separate daily Windows job checks bounded ASAR metadata, registered/portable MSIX discovery, platform profile selection and Controller bootstrap against fixtures. It does not claim to monitor the latest Windows Store release or verify a live voice call.
 
 ```bash
 npm run compat:daily:test
 npm run compat:daily
 ```
 
-GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). Path filters include the audited voice profile owner, evidence/discovery modules, hashed adapters and `tools/voice-discovery/**`. macOS pin drift keeps one open `compat-broken` issue per surface (work-voice, chat-voice). The same pin with a newer Sparkle version opens a new issue and closes the previous tracker as superseded. The same Sparkle version comments on the existing issue. The Windows job adds runtime/profile/discovery/evidence contract tests; it still does not claim an attended call.
+GitHub: `.github/workflows/compat-daily.yml` (daily 07:17 UTC, `workflow_dispatch`, and path-filtered push/PR). Path filters include Renderer sources, reviewed evidence, qualification/source-identity helpers and `tools/voice-discovery/**`. The macOS job installs dependencies to validate current source evidence with the packaging loader. macOS pin drift keeps one open `compat-broken` issue per surface (work-voice, chat-voice). A newer Sparkle version opens a new issue and closes the previous tracker as superseded. With the same Sparkle target, newly accepted evidence refreshes the existing issue title and body; unchanged baselines add a comment and refresh the body. The Windows job adds runtime/profile/discovery/evidence contract tests; it still does not claim an attended call.
 
 The macOS feed is the static public release feed at
 `https://persistent.oaistatic.com/codex-app-prod/appcast.xml`. Desktop's production
@@ -17,21 +17,28 @@ therefore be newer than the update offered to a particular Mac. This job does no
 query that installation-specific offer, download or install an application, or
 verify native voice behavior. Issue bodies label that scope explicitly.
 
-The local command prints JSON containing `feed`, `latest`, `pins` and `findings`.
+The local command prints JSON containing `feed`, `latest`, `pins`, `baselines` and `findings`.
 `feed.installationAvailability` is `not-checked`; optional release metadata includes
 publication date, architecture, minimum OS and phased-rollout interval. It exits
 with status 1 when macOS Sparkle latest is numerically newer than either surface's
-pin. Equal or older feed versions produce no drift findings. Version comparison
-uses three numeric components; malformed versions are operational errors. This
-release alert does not evaluate every retained profile or change runtime eligibility.
+monitoring baseline. Equal or older feed versions produce no drift findings. Version comparison
+uses three numeric components; malformed versions are operational errors. `pins` preserves the retained named-profile versions and asset identities.
+`baselines` selects the newest reviewed macOS Chat evidence and the newest exact
+Desktop version/build shared by reviewed Work/Codex and Work/Grok evidence, with
+named-profile fallback. The reviewed registry is validated against the current
+source graph using the same qualification loader as packaging; invalid or stale
+evidence is an operational error, never a silent fallback. Evidence records keep
+their original attended speech and compatibility-review provenance. The baseline
+includes its source, build, paths and implementation revision.
+This release alert does not change runtime eligibility or accepted activation.
 Fetch, parse and pin-loading errors also fail the command, printing JSON with
 `error` and an empty `findings` array plus the diagnostic on stderr. Successful
-reports retain `feed`, `latest`, `pins` and `findings`. Running locally does not create issues.
+reports retain `feed`, `latest`, `pins`, `baselines` and `findings`. Running locally does not create issues.
 The workflow creates or comments on issues only on non-PR runs of the repository's
 default branch, and skips all issue updates for operational errors. Reports include
 the checked commit and ref. Other branches still run checks without publishing issue
 status. A separate recovery step adds one deduplicated bot comment when a
-voice pin matches an open issue’s tracked Desktop target or Sparkle latest. It
+voice monitoring baseline matches an open issue’s tracked Desktop target or Sparkle latest. It
 leaves the issue open for live acceptance. A newer Sparkle version opens a new
 issue and closes the previous tracker as superseded.
 No command here updates pins or enables a Desktop build.
@@ -47,7 +54,7 @@ for backup, merge authorization, fork patch preservation and origin-only pushes.
 Keep this tool, its npm scripts and the workflow when resolving upstream changes.
 
 1. Run `npm run compat:daily` on the candidate source tree. Record the current
-   Work and Chat pins separately from the latest appcast version/build. The
+   Work and Chat monitoring baselines and retained pins separately from the latest appcast version/build. The
    report reads the working tree, which can differ from committed fork `main`.
 2. Inspect only the needed assets from the exact Desktop build being qualified.
    Audit native exports, call ownership, lifecycle and CSP against the
@@ -56,9 +63,12 @@ Keep this tool, its npm scripts and the workflow when resolving upstream changes
    not establish microphone/conversation acceptance.
 3. Update only the qualified surface's version and exact asset/export mappings
    in `packages/renderer-extension/src/renderer-voice-profiles.ts`, along with
-   its guards, focused regression coverage and qualification notes. Compat Daily
-   reads `VOICE_PROFILE_PINS` / Chat and Work constants from that owner. Preserve
-   independent Chat pins when Work advances. Candidate analysis for an unfamiliar
+   its guards, focused regression coverage and qualification notes. Record reviewed
+   activation in `voice-reviewed-evidence.json` with its attended provenance and
+   scoped compatibility review where needed. Compat Daily reads the named
+   `VOICE_PROFILE_PINS` and the validated reviewed evidence separately. Do not
+   rewrite historical asset mappings merely to advance an alert baseline. Preserve
+   independent Chat acceptance when Work advances. Candidate analysis for an unfamiliar
    build is `npm run voice:discovery`; it does not activate a profile. Historical
    native Instant Connect notes live in
    [cpa-live-voice-desktop-hook-history.md](../../docs/operations/cpa-live-voice-desktop-hook-history.md#existing-and-new-chatgpt-conversations-native-instant-connect).
