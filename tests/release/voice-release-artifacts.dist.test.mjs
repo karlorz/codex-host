@@ -24,7 +24,7 @@ describe("voice dist artifacts", () => {
     expect(identity.pins).toEqual(voiceProfilePins);
     expect(distPins).toEqual(identity.pins);
     expect(distQualification).toEqual(identity.qualification);
-    expect(distQualification.reviewedEvidence).toEqual([]);
+    expect(distQualification.reviewedEvidence).toEqual(identity.qualification.reviewedEvidence);
     expect(distQualification.implementationRevision).toBe(
       identity.qualification.implementationRevision,
     );

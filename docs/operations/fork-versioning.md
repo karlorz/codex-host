@@ -16,8 +16,11 @@ An upstream merge cannot by itself qualify Desktop voice. Recheck the live
 appcast and exact source pins at each sync. Shipping a fork tag does not
 re-pin or qualify a newer Desktop.
 
-Work and Chat remain pinned to **26.1027.61615**. Keep that daily driver;
-do not install or re-pin a newer Sparkle Desktop. Windows Store daily driver
+The accepted macOS daily driver is **26.1106.51428**, build **26605**, with
+reviewed Chat, Work/Codex and Work/Grok activation. Preserve those accepted
+paths across fork builds; a version bump or incomplete later run does not
+revoke acceptance. The retained named profile is **26.1027.61615**. Do not
+replace the daily driver with an unqualified newer Sparkle Desktop. Windows Store daily driver
 is product **26.1106.51428** (MSIX **26.1106.6628.0**); see
 [windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
 Public Sparkle latest is

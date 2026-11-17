@@ -20,7 +20,88 @@ Production Host with no `--codex-home` uses the default user Codex home. The wor
 
 ## Support and evidence
 
-Support claims come from scoped evidence, not from the existence of profile constants. macOS attended cells remain revision-scoped and unreviewed. Windows delivery acceptance is automated build/launch/shortcut smoke; attended Windows Chat/Codex/Grok speech is deferred at Karl's request and stays UNVERIFIED. `reviewedEvidence` stays empty.
+Reviewed observations are stored in
+`packages/renderer-extension/voice-reviewed-evidence.json`, outside the voice
+implementation source graph. Renderer builds and release validation compose
+`voice-qualification.json` from that data and the generated implementation
+revision. Every record must use the reviewed policy and pass the current
+evidence evaluator, including revision, profile, connection, attended speech and
+cleanup checks. Editing evidence data does not change the implementation revision;
+editing the evaluator, runtime or profile ownership still does. Release validation
+compares staged evidence with this independently loaded source data. The registry records reviewed activation separately from the original attended
+observations. Compatibility carry-forward records retain their original tested
+revision and require an exact scoped review for the target revision.
+
+The macOS acceptance baseline includes completed Chat existing/new/leave-return,
+Work/Codex, and Work/Grok speech, End Voice and microphone-release checks on
+Desktop 26.1106.51428. Preserve those observations with their tested revisions.
+A package version change or a later incomplete test run does not erase them.
+Promotion to another implementation revision requires a scoped compatibility
+review of the executed path; request additional attended checks only for a
+specific behavior that changed or remains unverified. Acceptance evidence and
+production activation remain separate records.
+
+Accepted Chat and Work activation must persist across builds and releases.
+Do not clear accepted evidence or disable a working accepted path without an
+explicit user instruction. A package version bump, missing later test results,
+or an incomplete scratch run does not revoke acceptance. Renderer builds and
+installer/npm staging reject an artifact that drops any of the three accepted
+macOS 26.1106.51428 paths. Carry compatible records forward with their original
+provenance and fix demonstrated regressions without resetting other paths.
+
+## Reviewed macOS activation
+
+On 2026-11-17 Karl reported the installed full build passed after a normal
+restart. The preceding read-only check confirmed the normal launcher supplied
+the Host data directory, the temporary attachment had exited, both documents
+had all three reviewed gates enabled, and the Chat hook was active with an
+enabled voice button. This is an aggregate user-reported installed-build pass;
+the detailed earlier per-path observations remain preserved below. It does not
+add fresh internal media-track or gateway-hangup measurements.
+
+The registry activates Chat, Work/Codex and Work/Grok for macOS Desktop
+**26.1106.51428**, native build **26605**, on implementation
+**0a2ee1b441686523**. Original attended Chat and Work/Grok results use
+**5f84eb365e1b6736**; Work/Codex uses **f6f9c208ad38f922**. These are preserved
+acceptance results, not new attended speech on 0a2ee1. Chat acceptance includes
+existing conversations, new-draft navigation, leave/return, two-way speech,
+End Voice and microphone release. Work acceptance includes selected-Harness
+preservation, two-way speech, End Voice and microphone release; Grok also
+completed a same-thread task.
+
+The compatibility review compared the preserved 5f voice module slices and
+companion bundles against current source. The supported Darwin Chat graph,
+selection/navigation, Work capability and gateway paths remain compatible;
+later fallback branches add Windows isolated candidates. The earlier Codex
+attended result remains explicitly scoped to f6; its separate compiled bundle
+is not retained here. This review does not assert fresh audio, internal media
+track cleanup or new gateway hangup observations on the target revision.
+
+Managed macOS startup identifies the native archive using Info.plist
+`ElectronAsarIntegrity`:
+`sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a`.
+The tested scratch and installed native `app.asar` are byte-identical, with full
+archive SHA-256
+`3695c17edcab8d66c1e5f2faa03e07826a59a39bf78b369ec87854547d4843c1`.
+These digests describe different hash domains of the same native artifact.
+Runtime activation requires the managed identity, build, platform, profile and
+implementation to match; mismatches remain disabled.
+
+Managed local launch passes the Host data directory to the Desktop Controller
+as `--host-data`, including the default `~/.codexhost` and explicit isolated
+locations. The Controller uses that directory's authenticated client channel
+for the voice-only Renderer capability. Remote SSH-managed launches do not
+inherit a local voice Host. A configured gateway without that capability cannot
+be treated as a ready Work route. Updating qualification metadata takes effect
+at Controller startup; an already-running Controller retains its startup
+snapshot. A temporary, verified voice-only attachment can apply the reviewed
+configuration and Host binding without restarting Desktop or Host; it must end
+with that owned Controller and leave calls untouched.
+
+Support claims come from scoped evidence. Windows delivery acceptance is
+build/launch/shortcut smoke; attended Windows Chat/Codex/Grok speech remains
+UNVERIFIED. The detailed table below records historical observations before
+this reviewed activation; its empty-registry statements describe those runs.
 
 | Platform | Desktop identity | ChatGPT Chat | Work/Codex | Work/Grok |
 | --- | --- | --- | --- | --- |
@@ -85,7 +166,7 @@ LIST_A **9 files 250** is the same set with `renderer-cpa-live-voice-config.test
 
 ## Staged voice artifacts vs live freeze
 
-`npm run test:typescript` does not build the Renderer and does not read live `packages/renderer-extension/dist`. Unit packaging tests in `tests/release/voice-release-artifacts.test.mjs` use temporary fixtures and independently derived current-source pins. The strict built-artifact file `tests/release/voice-release-artifacts.dist.test.mjs` requires `loadCurrentSourceVoiceIdentity` to succeed against a current bake; it has no freeze-mismatch pass. Linux CI builds the Renderer once in the voice-discovery step, then runs that dist file through `tests/vitest.voice-dist.config.js`. The shared `tests/vitest.config.js` excludes `tests/release/**/*.dist.test.mjs` even when the file is passed on the CLI. `npm run test:voice-dist-artifacts` is the local equivalent (`build:renderer` then the dedicated config) and is not what CI runs. macOS/Windows-only `workflow_dispatch` does not run this Linux artifact gate. A frozen local dist whose baked revision does not match the source graph is not a release pass. Source implementation revision **0a2ee1b441686523** is baked in `packages/renderer-extension/src/renderer-voice-implementation-revision.generated.ts`. Live loaded dist remains **5f84eb365e1b6736** (`production.js` sha256 `606a9f449c78cb053178f83e9844f4b8b6e09732c77b59e71f39a6d80d543883`). `.codexhost/voice-staging-20261115/` is **7b522c3c714d6b43** and is not current source. `reviewedEvidence` stays empty. `prepare-payload` / `prepare-npm` were not run.
+`npm run test:typescript` does not build the Renderer and does not read live `packages/renderer-extension/dist`. Unit packaging tests in `tests/release/voice-release-artifacts.test.mjs` use temporary fixtures and independently derived current-source pins. The strict built-artifact file `tests/release/voice-release-artifacts.dist.test.mjs` requires `loadCurrentSourceVoiceIdentity` to succeed against a current bake; it has no freeze-mismatch pass. Linux CI builds the Renderer once in the voice-discovery step, then runs that dist file through `tests/vitest.voice-dist.config.js`. The shared `tests/vitest.config.js` excludes `tests/release/**/*.dist.test.mjs` even when the file is passed on the CLI. `npm run test:voice-dist-artifacts` is the local equivalent (`build:renderer` then the dedicated config) and is not what CI runs. macOS/Windows-only `workflow_dispatch` does not run this Linux artifact gate. A frozen local dist whose baked revision does not match the source graph is not a release pass. Source implementation revision **0a2ee1b441686523** is baked in `packages/renderer-extension/src/renderer-voice-implementation-revision.generated.ts`. The workspace root dist remains frozen at **5f84eb365e1b6736** (`production.js` sha256 `606a9f449c78cb053178f83e9844f4b8b6e09732c77b59e71f39a6d80d543883`). The installed Renderer uses **0a2ee1b441686523**. `.codexhost/voice-staging-20261115/` is **7b522c3c714d6b43** and is not current source. The reviewed registry now carries the scoped macOS activation above. `prepare-payload` / `prepare-npm` were not run.
 
 ## Invariants
 

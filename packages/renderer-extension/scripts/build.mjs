@@ -6,6 +6,10 @@ import { build } from "esbuild";
 
 import { tailwindEsbuildPlugin } from "./tailwind-esbuild-plugin.mjs";
 import { writeVoiceImplementationRevision } from "./voice-implementation-identity.mjs";
+import {
+  loadVoiceQualificationArtifact,
+  requireAcceptedVoiceActivations,
+} from "./voice-qualification-artifact.mjs";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
 await writeVoiceImplementationRevision(packageRoot);
@@ -47,12 +51,17 @@ for (const { entry, format, outfile } of entries) {
 }
 
 const profilesUrl = pathToFileURL(path.join(packageRoot, "dist/voice-profiles.js")).href;
-const { voiceProfilePins, voiceQualificationArtifact } = await import(profilesUrl);
-await writeFile(
-  path.join(packageRoot, "dist/voice-profile-pins.json"),
-  `${JSON.stringify(voiceProfilePins, null, 2)}\n`,
+const profiles = await import(profilesUrl);
+const evaluator = await import(
+  pathToFileURL(path.join(packageRoot, "dist/voice-evidence.js")).href
 );
 await writeFile(
+  path.join(packageRoot, "dist/voice-profile-pins.json"),
+  `${JSON.stringify(profiles.voiceProfilePins, null, 2)}\n`,
+);
+const qualification = await loadVoiceQualificationArtifact(packageRoot, profiles, evaluator);
+requireAcceptedVoiceActivations(qualification);
+await writeFile(
   path.join(packageRoot, "dist/voice-qualification.json"),
-  `${JSON.stringify(voiceQualificationArtifact(), null, 2)}\n`,
+  `${JSON.stringify(qualification, null, 2)}\n`,
 );

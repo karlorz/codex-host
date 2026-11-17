@@ -26,22 +26,30 @@ candidate. A scratch Desktop may run in parallel with production; it must not
 replace `/Applications/ChatGPT.app` or share that user profile. Agents still
 must not quit production.
 
-Work and Chat pins are the source constants
+Retained named Work and Chat alert pins are the source constants
 `CLIENT_OWNED_VOICE_VERSION` and `NATIVE_CHAT_VOICE_VERSION` in
 `packages/renderer-extension/src/renderer-voice-profiles.ts`. Shipping a
 codexhost tag does not re-pin or qualify a newer Desktop. A matching pin is a
-release alert recovery, not live voice acceptance.
+release alert recovery, not live voice acceptance. The current hashed profile
+and reviewed activation registry also live under `packages/renderer-extension`;
+the accepted production paths below must survive packaging independently of
+those named-profile alerts.
 
 ## Daily driver
 
-The retained named Work/Chat daily-driver pin is `/Applications/ChatGPT.app` at
-**26.1027.61615**. macOS **26.1106.51428** hashed Chat has prior attended evidence
-scoped to commit `2ddfb791`; that is not a pass for a later voice runtime refactor
-and does not qualify Work or Windows. The Controller permits Renderer installation on macOS
-**26.1106.51428** build **26605**: its isolated signed-out startup supports
+The accepted daily driver is `/Applications/ChatGPT.app` at
+**26.1106.51428**, build **26605**. Chat, Work/Codex and Work/Grok have reviewed
+activation on implementation **0a2ee1b441686523**, preserving their original
+attended evidence. Karl reported the installed full build passed after a normal
+restart on 2026-11-17. Preserve this activation across builds and releases;
+package version changes and incomplete later runs do not revoke acceptance.
+The detailed provenance is in the [voice procedure](cpa-live-voice-desktop-hook.md#reviewed-macos-activation).
+The retained named Work/Chat profile remains **26.1027.61615**.
+The Controller supports Renderer installation on the accepted hashed build:
+its isolated signed-out startup supports
 `Runtime.enable`, `Debugger.enable`, the loaded-module catalog and production
-Renderer bundle evaluation without the Windows Store splash hang. This does not
-qualify signed-in Composer/routing behavior or Work/Chat voice. Voice retains its
+Renderer bundle evaluation without the Windows Store splash hang. Those startup
+observations are separate from the attended acceptance above. Voice retains its
 exact asset/version gates. Avatar-overlay voice-hook CDP is installed once on
 this build so compact Voice Chat Work calls can use the configured gateway
 without a 500ms overlay `Runtime.enable` race. Current-document overlay
@@ -50,13 +58,13 @@ the full overlay hook IIFE during Voice start. Other
 **26.1106.*** builds and **26.1103.*** remain skipped; the Windows Store skip is
 unchanged.
 
-Signed-in inspection of **26.1106.51428** reached a visible Agent control and a
+An earlier signed-in inspection of **26.1106.51428** reached a visible Agent control and a
 ready local RPC route, then encountered recurring `Runtime.enable` timeouts and
 a busy Renderer. A focused regression reproduces recursion when submission
 preparation and steering independently wrap the native registry's `forHost`.
 The source uses shared hook ownership to preserve both wrappers across refreshes;
 timed-out CDP connections close before accepting further commands. Signed-in
-runtime acceptance of this patch remains required. A transient Controller
+runtime acceptance for unrelated submission behavior remains independent of voice. A transient Controller
 `installed` status does not establish external submission readiness, and the
 numeric-chunk native Remote Control discovery path remains unqualified.
 Windows Store uses a separate pin in
@@ -118,11 +126,9 @@ but leave issues open for live acceptance review.
 
 Microphone-release, interruption/mute, and spontaneous-close checks stay
 opportunistic dogfood on [#4](https://github.com/karlorz/codex-host/issues/4);
-they are not a release gate. Grok stays ◐ and Cursor
-stays unverified (`?`) on the README Live voice chat row; those Harnesses use
-the generic external path (Host → configured gateway) on this daily driver.
-Installed Start-button acceptance is still required. A matching pin does not
-establish that work.
+they are not a release gate. Grok's accepted voice path uses Host → configured
+gateway. Cursor remains unverified; Grok acceptance does not qualify every
+external Harness. A matching alert pin does not establish attended acceptance.
 
 ## Work that keeps the daily driver open
 

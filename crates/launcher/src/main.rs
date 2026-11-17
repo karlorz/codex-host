@@ -121,6 +121,20 @@ fn managed_desktop_data_directory(
     }
 }
 
+fn controller_host_data_directory(
+    environment: &[(OsString, OsString)],
+    default_directory: Option<PathBuf>,
+    remote_ssh_managed: Option<OsString>,
+) -> Option<PathBuf> {
+    let directory = environment
+        .iter()
+        .find(|(name, _)| name == DATA_DIRECTORY_ENV)
+        .map(|(_, value)| PathBuf::from(value))
+        .or(default_directory);
+    managed_desktop_data_directory(directory.map(PathBuf::into_os_string), remote_ssh_managed)
+        .and_then(|directory| std::path::absolute(directory).ok())
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 #[derive(Debug)]
 struct UnmanagedDesktopConflict;
@@ -610,6 +624,13 @@ fn desktop_controller_command(
         .arg(control.attachment_port.to_string())
         .arg("--attachment-nonce")
         .arg(&control.nonce);
+    if let Some(data) = controller_host_data_directory(
+        environment,
+        startup_record::data_directory(),
+        env::var_os(REMOTE_SSH_MANAGED_ENV),
+    ) {
+        command.arg("--host-data").arg(data);
+    }
     for (name, value) in environment {
         if matches!(
             name.to_str(),
@@ -2056,9 +2077,57 @@ mod tests {
     }
 
     #[test]
+    fn controller_voice_host_uses_local_default_or_custom_data_but_not_remote_data() {
+        let default = std::env::temp_dir().join("codexhost-default");
+        let custom = std::env::temp_dir().join("codexhost-isolated");
+        let environment = [(
+            OsString::from(super::DATA_DIRECTORY_ENV),
+            custom.clone().into_os_string(),
+        )];
+        assert_eq!(
+            super::controller_host_data_directory(&[], Some(default.clone()), None),
+            Some(default.clone())
+        );
+        assert_eq!(
+            super::controller_host_data_directory(&environment, Some(default.clone()), None),
+            Some(custom)
+        );
+        assert_eq!(
+            super::controller_host_data_directory(
+                &[(
+                    OsString::from(super::DATA_DIRECTORY_ENV),
+                    OsString::from("relative-host")
+                )],
+                Some(default.clone()),
+                None
+            ),
+            Some(
+                std::env::current_dir()
+                    .expect("working directory")
+                    .join("relative-host")
+            )
+        );
+        assert_eq!(
+            super::controller_host_data_directory(
+                &environment,
+                Some(default),
+                Some(OsString::from("1"))
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn production_controller_uses_private_node_and_loopback_renderer_cdp() {
         let options = resolved_options();
-        let command = controller_command(&options, &[]);
+        let data = std::env::temp_dir().join("codexhost-controller-test");
+        let command = controller_command(
+            &options,
+            &[(
+                OsString::from(super::DATA_DIRECTORY_ENV),
+                data.clone().into_os_string(),
+            )],
+        );
         assert_eq!(
             command_env(&command, "CODEXHOST_DESKTOP_VERSION"),
             Some(OsStr::new("26.1021.31345"))
@@ -2089,6 +2158,8 @@ mod tests {
                 "43124",
                 "--attachment-nonce",
                 "0123456789abcdef0123456789abcdef",
+                "--host-data",
+                data.to_str().expect("test data path"),
             ]
         );
 

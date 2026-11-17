@@ -1,0 +1,151 @@
+[
+  {
+    "profileKey": "chat:darwin:26.1106.51428",
+    "platform": "darwin",
+    "desktopVersion": "26.1106.51428",
+    "path": "chat",
+    "implementationRevision": "0a2ee1b441686523",
+    "testedImplementationRevision": "5f84eb365e1b6736",
+    "profileDigest": "257e2cb6360c49f7",
+    "policy": "reviewed",
+    "desktopBuild": "26605",
+    "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+    "stages": {
+      "structural": true,
+      "activation": true,
+      "connection": true,
+      "identity": true,
+      "speech": true,
+      "cleanup": true
+    },
+    "startAcknowledged": true,
+    "connected": true,
+    "conversationMatched": true,
+    "harnessMatched": true,
+    "speech": {
+      "attended": true,
+      "bothDirections": true,
+      "witness": "operator",
+      "run": "macos-26.1106-chat-2026-11-14-5f84eb365e1b6736",
+      "implementationRevision": "5f84eb365e1b6736"
+    },
+    "cleanup": {
+      "ended": true,
+      "microphoneReleased": true
+    },
+    "compatibilityReview": {
+      "path": "chat",
+      "platform": "darwin",
+      "desktopVersion": "26.1106.51428",
+      "desktopBuild": "26605",
+      "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+      "implementationRevision": "0a2ee1b441686523",
+      "testedImplementationRevision": "5f84eb365e1b6736",
+      "reviewedAt": "2026-11-17",
+      "reference": "docs/operations/cpa-live-voice-desktop-hook.md#reviewed-macos-activation",
+      "basis": "The preserved Chat graph, navigation, selection and speech path are unchanged on the already-supported Darwin profile; later adapter fallbacks select Windows isolated candidates.",
+      "nativeArchiveSha256": "3695c17edcab8d66c1e5f2faa03e07826a59a39bf78b369ec87854547d4843c1",
+      "nativeIdentityDigestKind": "ElectronAsarIntegrity"
+    }
+  },
+  {
+    "profileKey": "work:darwin:26.1106.51428",
+    "platform": "darwin",
+    "desktopVersion": "26.1106.51428",
+    "path": "work-codex",
+    "implementationRevision": "0a2ee1b441686523",
+    "testedImplementationRevision": "f6f9c208ad38f922",
+    "profileDigest": "585c26fefb43da96",
+    "policy": "reviewed",
+    "desktopBuild": "26605",
+    "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+    "stages": {
+      "structural": true,
+      "activation": true,
+      "connection": true,
+      "identity": true,
+      "speech": true,
+      "cleanup": true
+    },
+    "startAcknowledged": true,
+    "connected": true,
+    "conversationMatched": true,
+    "harnessMatched": true,
+    "speech": {
+      "attended": true,
+      "bothDirections": true,
+      "witness": "operator",
+      "run": "macos-26.1106-work-codex-2026-11-14-f6f9c208ad38f922",
+      "implementationRevision": "f6f9c208ad38f922"
+    },
+    "cleanup": {
+      "ended": true,
+      "microphoneReleased": true
+    },
+    "compatibilityReview": {
+      "path": "work-codex",
+      "platform": "darwin",
+      "desktopVersion": "26.1106.51428",
+      "desktopBuild": "26605",
+      "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+      "implementationRevision": "0a2ee1b441686523",
+      "testedImplementationRevision": "f6f9c208ad38f922",
+      "reviewedAt": "2026-11-17",
+      "reference": "docs/operations/cpa-live-voice-desktop-hook.md#reviewed-macos-activation",
+      "basis": "Retain the attended Codex gateway, selected-Harness, End and microphone-release result. The preserved Work gateway and capability path is unchanged on the supported Darwin profile; later changes add Windows isolated qualification.",
+      "nativeArchiveSha256": "3695c17edcab8d66c1e5f2faa03e07826a59a39bf78b369ec87854547d4843c1",
+      "nativeIdentityDigestKind": "ElectronAsarIntegrity"
+    },
+    "gatewayOwned": true
+  },
+  {
+    "profileKey": "work:darwin:26.1106.51428",
+    "platform": "darwin",
+    "desktopVersion": "26.1106.51428",
+    "path": "work-grok",
+    "implementationRevision": "0a2ee1b441686523",
+    "testedImplementationRevision": "5f84eb365e1b6736",
+    "profileDigest": "585c26fefb43da96",
+    "policy": "reviewed",
+    "desktopBuild": "26605",
+    "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+    "stages": {
+      "structural": true,
+      "activation": true,
+      "connection": true,
+      "identity": true,
+      "speech": true,
+      "cleanup": true
+    },
+    "startAcknowledged": true,
+    "connected": true,
+    "conversationMatched": true,
+    "harnessMatched": true,
+    "speech": {
+      "attended": true,
+      "bothDirections": true,
+      "witness": "operator",
+      "run": "macos-26.1106-work-grok-2026-11-14-5f84eb365e1b6736",
+      "implementationRevision": "5f84eb365e1b6736"
+    },
+    "cleanup": {
+      "ended": true,
+      "microphoneReleased": true
+    },
+    "compatibilityReview": {
+      "path": "work-grok",
+      "platform": "darwin",
+      "desktopVersion": "26.1106.51428",
+      "desktopBuild": "26605",
+      "asarDigest": "sha256:f50357bec2aa563f5a510ae7d1a343ca245040aae074fa79c8a22b6d39c7df0a",
+      "implementationRevision": "0a2ee1b441686523",
+      "testedImplementationRevision": "5f84eb365e1b6736",
+      "reviewedAt": "2026-11-17",
+      "reference": "docs/operations/cpa-live-voice-desktop-hook.md#reviewed-macos-activation",
+      "basis": "Retain attended Grok selection, two-way speech, same-thread tool task, End and microphone release. The preserved Darwin Work capability, native existing-call attachment and gateway path are unchanged; later changes add Windows isolated qualification.",
+      "nativeArchiveSha256": "3695c17edcab8d66c1e5f2faa03e07826a59a39bf78b369ec87854547d4843c1",
+      "nativeIdentityDigestKind": "ElectronAsarIntegrity"
+    },
+    "gatewayOwned": true
+  }
+]

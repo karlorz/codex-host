@@ -4,6 +4,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { computeVoiceImplementationIdentity } from "../../packages/renderer-extension/scripts/voice-implementation-identity.mjs";
+import {
+  loadVoiceQualificationArtifact,
+  requireAcceptedVoiceActivations,
+} from "../../packages/renderer-extension/scripts/voice-qualification-artifact.mjs";
 
 export const VOICE_PROFILE_PINS_RELATIVE = "app/voice-profile-pins.json";
 export const VOICE_QUALIFICATION_RELATIVE = "app/voice-qualification.json";
@@ -95,10 +99,17 @@ export async function loadCurrentSourceVoiceIdentity(repositoryRoot) {
   const { build } = await import("esbuild");
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-voice-identity-"));
   const outfile = path.join(directory, "voice-profiles.mjs");
+  const packageRoot = path.join(repositoryRoot, "packages", "renderer-extension");
   try {
     await build({
-      absWorkingDir: path.join(repositoryRoot, "packages", "renderer-extension"),
-      entryPoints: ["src/renderer-voice-profiles.ts"],
+      absWorkingDir: packageRoot,
+      stdin: {
+        contents: [
+          'export { voiceProfilePins, voiceQualificationArtifact } from "./src/renderer-voice-profiles.ts";',
+          'export { isVoiceEvidenceRecord, evaluateVoiceEvidence } from "./src/renderer-voice-evidence.ts";',
+        ].join("\n"),
+        resolveDir: packageRoot,
+      },
       bundle: true,
       platform: "neutral",
       format: "esm",
@@ -106,10 +117,8 @@ export async function loadCurrentSourceVoiceIdentity(repositoryRoot) {
       logLevel: "silent",
     });
     const module_ = await import(pathToFileURL(outfile).href);
-    const qualification = module_.voiceQualificationArtifact();
-    const implementationRevision = await computeVoiceImplementationIdentity(
-      path.join(repositoryRoot, "packages", "renderer-extension"),
-    );
+    const qualification = await loadVoiceQualificationArtifact(packageRoot, module_, module_);
+    const implementationRevision = await computeVoiceImplementationIdentity(packageRoot);
     if (qualification.implementationRevision !== implementationRevision) {
       throw new Error(
         "baked voice implementation revision does not match current implementation source graph",
@@ -197,4 +206,10 @@ export async function stageAndValidateVoiceReleaseArtifacts({
     repositoryRoot,
     sourceIdentity,
   });
+  const qualification = await readStagedVoiceFile(
+    appDir,
+    "voice-qualification.json",
+    parseVoiceQualification,
+  );
+  requireAcceptedVoiceActivations(qualification.parsed);
 }
