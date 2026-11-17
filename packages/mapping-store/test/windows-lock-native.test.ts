@@ -1,11 +1,12 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import type * as ChildProcessModule from "node:child_process";
 import { once } from "node:events";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MappingStore } from "../src/index.js";
 
@@ -14,10 +15,22 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
 });
 
-function isTimeoutError(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && "code" in error && error.code === "ETIMEDOUT"
-  );
+function traceIdentityQuery(query: string): string {
+  const marker = (stage: string) =>
+    `[Console]::Error.WriteLine('identity-stage ${stage} ' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())`;
+  const stages = [
+    ["$process = [Diagnostics.Process]::GetProcessById(", "get-process"],
+    ["$startTime = $process.StartTime", "start-time"],
+    ["$executablePath = $process.MainModule.FileName", "main-module"],
+    ["if ($null -eq $startTime)", "direct-done"],
+    ["$process = Get-CimInstance", "cim"],
+    ["[pscustomobject]@{ Path =", "json"],
+  ] as const;
+  for (const [statement, stage] of stages) {
+    if (!query.includes(statement)) throw new Error(`Missing identity query stage: ${stage}`);
+    query = query.replace(statement, `${marker(stage)}; ${statement}`);
+  }
+  return `${marker("script-start")}; ${query}; ${marker("script-done")}`;
 }
 
 async function nativeExecFileSync(): Promise<typeof execFileSync> {
@@ -32,21 +45,54 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   let owner: ChildProcess;
   let store: MappingStore;
   let processStartedAt: string;
-
-  beforeAll(async () => {
-    const execFile = await nativeExecFileSync();
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "1"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-      timeout: 30_000,
-    });
-  });
+  let queryPrelude: string;
 
   beforeEach(async () => {
     vi.mocked(execFileSync).mockReset();
-    vi.mocked(execFileSync).mockImplementation(await nativeExecFileSync());
     directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-windows-native-lock-"));
+    queryPrelude = "";
+    const execFile = await nativeExecFileSync();
+    vi.mocked(execFileSync).mockImplementation((file, args, options) => {
+      const originalQuery = Array.isArray(args) ? args.at(-1) : undefined;
+      if (!Array.isArray(args) || typeof originalQuery !== "string") {
+        throw new Error("Missing native identity query arguments");
+      }
+      const query = traceIdentityQuery(`${queryPrelude}${originalQuery}`);
+      queryPrelude = "";
+      // A file descriptor retains stage markers on both success and timeout;
+      // stdout remains the unmodified identity JSON consumed by Mapping Store.
+      const diagnosticsPath = path.join(directory, "identity-query.stderr");
+      const diagnostics = openSync(diagnosticsPath, "w");
+      const startedAt = Date.now();
+      let failure: unknown;
+      try {
+        return execFile(file, [...args.slice(0, -1), query], {
+          ...options,
+          stdio: ["ignore", "pipe", diagnostics],
+        });
+      } catch (error) {
+        failure = error;
+        throw error;
+      } finally {
+        closeSync(diagnostics);
+        const stages = readFileSync(diagnosticsPath, "utf8")
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("identity-stage "))
+          .map((line) => {
+            const [, stage, time] = line.split(" ");
+            return { stage, elapsedMs: Number(time) - startedAt };
+          });
+        const timing = {
+          elapsedMs: Date.now() - startedAt,
+          stages,
+          ...(failure && typeof failure === "object" && "code" in failure
+            ? { errorCode: failure.code }
+            : {}),
+        };
+        console.info("[windows-lock-query]", JSON.stringify(timing));
+        if (failure instanceof Error) Object.assign(failure, { identityQueryTiming: timing });
+      }
+    });
     owner = spawn(
       process.execPath,
       [
@@ -84,23 +130,22 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     return content;
   }
 
-  async function prependQuery(script: string): Promise<void> {
-    const execFile = await nativeExecFileSync();
-    vi.mocked(execFileSync).mockImplementationOnce((file, args, options) => {
-      if (!Array.isArray(args)) throw new Error("Missing native query arguments");
-      const queryArgs = [...args.slice(0, -1), `${script}; ${args.at(-1)}`];
-      try {
-        return execFile(file, queryArgs, options);
-      } catch (error) {
-        if (!isTimeoutError(error)) throw error;
-        return execFile(file, queryArgs, options);
-      }
-    });
+  function expectNativeIdentity(): void {
+    expect(execFileSync).toHaveBeenCalledOnce();
+    const result = vi.mocked(execFileSync).mock.results[0];
+    if (result?.type !== "return") {
+      throw new Error("Native identity lookup did not succeed", { cause: result?.value });
+    }
+    expect(JSON.parse(String(result.value))).toMatchObject({ StartTime: expect.any(String) });
+  }
+
+  function prependQuery(script: string): void {
+    queryPrelude = `${script}; `;
   }
 
   it("recovers a stale lock with the same PID and executable but a different creation time", async () => {
     // Ordinary owners must be identifiable even when the CIM service is unavailable.
-    await prependQuery("function Get-CimInstance { throw 'CIM unavailable' }");
+    prependQuery("function Get-CimInstance { throw 'CIM unavailable' }");
     await writeLock(new Date(0).toISOString());
     try {
       await store.initialize();
@@ -118,6 +163,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     expect(JSON.parse(await readFile(path.join(directory, "store.lock"), "utf8"))).toMatchObject({
       pid: process.pid,
     });
+    expectNativeIdentity();
     // Reclaiming the lock must not stop the unrelated process that reused the PID.
     if (owner.pid === undefined) throw new Error("Missing fixture process PID");
     expect(process.kill(owner.pid, 0)).toBe(true);
@@ -128,7 +174,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     // with a live probe and CIM reply while executing the real PowerShell fallback.
     const inaccessiblePid = 2_147_483_647;
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
-    await prependQuery(
+    prependQuery(
       "function Get-CimInstance { [pscustomobject]@{ " +
         "ExecutablePath = $null; CreationDate = [DateTime]::UtcNow } }",
     );
@@ -137,6 +183,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     expect(JSON.parse(await readFile(path.join(directory, "store.lock"), "utf8"))).toMatchObject({
       pid: process.pid,
     });
+    expectNativeIdentity();
     expect(kill).toHaveBeenCalledExactlyOnceWith(inaccessiblePid, 0);
   });
 
@@ -144,11 +191,30 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
     const content = await writeLock(processStartedAt);
     await expect(store.initialize()).rejects.toMatchObject({ code: "STORE_LOCKED" });
     expect(await readFile(path.join(directory, "store.lock"), "utf8")).toBe(content);
+    expectNativeIdentity();
+  });
+
+  it("preserves the live owner's lock when the native query times out", async () => {
+    prependQuery("Start-Sleep -Seconds 6");
+    const content = await writeLock(processStartedAt);
+    await expect(store.initialize()).rejects.toMatchObject({ code: "STORE_LOCKED" });
+    expect(await readFile(path.join(directory, "store.lock"), "utf8")).toBe(content);
+    expect(execFileSync).toHaveBeenCalledOnce();
+    expect(vi.mocked(execFileSync).mock.results[0]).toMatchObject({
+      type: "throw",
+      value: {
+        code: "ETIMEDOUT",
+        identityQueryTiming: { stages: [{ stage: "script-start", elapsedMs: expect.any(Number) }] },
+      },
+    });
+    if (owner.pid === undefined) throw new Error("Missing fixture process PID");
+    expect(process.kill(owner.pid, 0)).toBe(true);
   });
 
   it("preserves a legacy lock without the process creation time", async () => {
     const content = await writeLock(undefined);
     await expect(store.initialize()).rejects.toMatchObject({ code: "STORE_LOCKED" });
     expect(await readFile(path.join(directory, "store.lock"), "utf8")).toBe(content);
+    expectNativeIdentity();
   });
 });
