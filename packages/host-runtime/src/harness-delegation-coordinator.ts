@@ -142,6 +142,7 @@ export class HarnessDelegationCoordinator {
     text: string,
     turnId: string,
   ) => Promise<void>;
+  readonly #steerExternalTurn: (thread: ExternalThread, text: string) => Promise<string>;
   readonly #notifyThreadStarted: (thread: JsonObject) => Promise<void>;
   readonly #notifyTreeChanged: (threadId: string) => void;
   readonly #inspectOfficial: (input: HarnessInspectInput) => Promise<HarnessInspectResult>;
@@ -174,6 +175,7 @@ export class HarnessDelegationCoordinator {
       restoredState?: HarnessSessionState;
     }): ExternalThread;
     startExternalTurn(thread: ExternalThread, text: string, turnId: string): Promise<void>;
+    steerExternalTurn(thread: ExternalThread, text: string): Promise<string>;
     notifyThreadStarted(thread: JsonObject): Promise<void>;
     notifyTreeChanged(threadId: string): void;
     inspectOfficial(input: HarnessInspectInput): Promise<HarnessInspectResult>;
@@ -196,6 +198,7 @@ export class HarnessDelegationCoordinator {
     this.#repository = input.repository;
     this.#registerExternalThread = input.registerExternalThread;
     this.#startExternalTurn = input.startExternalTurn;
+    this.#steerExternalTurn = input.steerExternalTurn;
     this.#notifyThreadStarted = input.notifyThreadStarted;
     this.#notifyTreeChanged = input.notifyTreeChanged;
     this.#inspectOfficial = input.inspectOfficial;
@@ -484,7 +487,11 @@ export class HarnessDelegationCoordinator {
       });
     }
     if (this.#externalThreadBusy(thread) || thread.activeTurnId) {
-      throw threadBusyError(input.threadId);
+      if (!input.steer) {
+        throw threadBusyError(input.threadId);
+      }
+      const turnId = await this.#steerExternalTurn(thread, input.message);
+      return this.#turnResult(thread.id, turnId, thread.harnessId);
     }
     const turnId = hostTurnIdSchema.parse(randomUUID());
     try {

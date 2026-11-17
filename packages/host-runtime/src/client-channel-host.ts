@@ -6,6 +6,8 @@ import {
   REALTIME_CALL_METHOD,
   VOICE_GATEWAY_STATUS_METHOD,
   VOICE_SETTINGS_METHOD,
+  THREAD_ARCHIVE_CONFIRM_METHOD,
+  threadArchiveConfirmParamsSchema,
   clientThreadSnapshotSchema,
   threadTitleInputSchema,
   clientProjectlessWorkspaceSchema,
@@ -184,6 +186,12 @@ export class ClientChannelHost {
             ? 30_000
             : 10_000;
       return this.#host.submit(method, params, timeoutMs);
+    }
+    if (method === THREAD_ARCHIVE_CONFIRM_METHOD) {
+      const confirm = threadArchiveConfirmParamsSchema.safeParse(params);
+      if (!confirm.success)
+        return { error: { code: -32602, message: "Invalid archive confirmation params" } };
+      return this.#host.submit(method, confirm.data, undefined);
     }
     if (method === "codexhost/thread/title/generate") {
       const title = threadTitleInputSchema.safeParse(params);

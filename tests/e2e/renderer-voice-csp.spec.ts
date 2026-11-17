@@ -10,21 +10,23 @@ const { outputFiles } = await build({
   stdin: {
     contents: `
       import { rememberVoiceProductExperience, wrapClientOwnedVoiceFetch } from "./packages/renderer-extension/src/renderer-client-owned-voice.ts";
+      import { DIRECT_VOICE_HOST_GLOBAL } from "./packages/renderer-extension/src/renderer-voice-gateway-wrap.ts";
       rememberVoiceProductExperience({ productExperience: "work" });
       globalThis.cspViolations = [];
+      globalThis.hostRequests = [];
       addEventListener("securitypolicyviolation", (event) => {
         globalThis.cspViolations.push(event.violatedDirective);
       });
-      let reply;
       const bridge = {
-        subscribe(type, listener) { reply = listener; return () => {}; },
-        dispatchMessage(type, message) {
-          queueMicrotask(() => reply({ hostId: "local", message: {
-            id: message.request.id,
-            result: { status: 201, body: "fixture-answer", headers: { "content-type": "application/sdp" } },
-          } }));
-        },
+        subscribe() { throw new Error("Unexpected native bridge subscription"); },
+        dispatchMessage() { throw new Error("Unexpected native bridge request"); },
       };
+      Reflect.set(globalThis, DIRECT_VOICE_HOST_GLOBAL, {
+        async request(method, params) {
+          globalThis.hostRequests.push({ method, operation: params.operation });
+          return { status: 201, body: "fixture-answer", headers: { "content-type": "application/sdp" } };
+        },
+      });
       const client = { fetch() { throw new Error("Unexpected direct request"); } };
       wrapClientOwnedVoiceFetch(client, bridge, () => true, async () => new Error("gateway failure"));
       document.querySelector("button").addEventListener("click", async () => {
@@ -108,6 +110,9 @@ for (const injection of ["script", "debugger"] as const) {
     // schema construction happened in a debugger's privileged context.
     await page.getByRole("button", { name: "Start voice" }).click();
     await expect(page.locator("output")).toHaveText("201:fixture-answer");
+    expect(await page.evaluate(() => Reflect.get(globalThis, "hostRequests"))).toEqual([
+      { method: "codexhost/realtime/call", operation: "create" },
+    ]);
     // Flush the queued securitypolicyviolation task before inspecting it.
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(await page.evaluate(() => Reflect.get(globalThis, "cspViolations"))).toEqual([]);

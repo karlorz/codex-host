@@ -23,11 +23,12 @@ revoke acceptance. The retained named profile is **26.1027.61615**. Do not
 replace the daily driver with an unqualified newer Sparkle Desktop. Windows Store daily driver
 is product **26.1106.51428** (MSIX **26.1106.6628.0**); see
 [windows-desktop-pin-daily-driver.md](windows-desktop-pin-daily-driver.md).
-Public Sparkle latest is
-**26.1106.51428** build **26605**. Compat Daily reports that feed as pin-drift
-on [#37](https://github.com/karlorz/codex-host/issues/37) /
-[#38](https://github.com/karlorz/codex-host/issues/38). Those issues track
-that Sparkle snapshot; later public Desktop versions open a new pair and
+Public Sparkle latest checked on 2026-11-17 is
+**26.1111.21308** build **27194**. Compat Daily reports drift from the retained
+26.1027 named-profile pins. The accepted 26.1106 Chat and Work paths retain their
+reviewed activation. [#37](https://github.com/karlorz/codex-host/issues/37) /
+[#38](https://github.com/karlorz/codex-host/issues/38) track the earlier
+26.1106 Sparkle snapshot; later public Desktop versions open a new pair and
 close the previous trackers as superseded. They are alerts, not a
 qualification queue. Upstream `v0.18.0` #811 only accepts 24- and 25-slot
 scoped-draft Model memo layouts on Desktop 26.1106; taking that Host/Renderer
@@ -84,7 +85,8 @@ Before an upstream sync:
    `main` with `origin/main`; reconcile unexpected divergence before continuing.
    Record the fork and upstream OIDs used for this sync.
 2. Create a uniquely named `sync/upstream-YYYY-MM-DD` branch from fork `main`,
-   then merge the recorded `upstream/main` OID there. Never reset or replace fork
+   then merge the recorded upstream OID there (the released tag commit when
+   targeting a specific release). Never reset or replace fork
    `main` with upstream. A conflict-free merge still needs behavioral verification.
 3. Resolve conflicts and inspect overlapping changes by responsibility. Do not
    apply a blanket choice of either side. Preserve the contracts below, or use
@@ -222,6 +224,7 @@ Fork versions stay on the **upstream version that is currently held**, plus a nu
 | `0.17.4` | `v0.17.4-0` | `v0.17.4-1`, `v0.17.4-2`, … |
 | `0.18.0` | `v0.18.0-0` | `v0.18.0-1`, `v0.18.0-2`, … |
 | `0.19.0` | `v0.19.0-0` | `v0.19.0-1`, `v0.19.0-2`, … |
+| `0.20.0` | `v0.20.0-0` | `v0.20.0-1`, `v0.20.0-2`, … |
 
 - Read upstream from `upstream/main` `package.json` and the upstream GitHub latest release. If they disagree, stop and report; do not guess.
 - First fork of an upstream version is `X.Y.Z-0`. Later fork-only releases while that upstream version is still held are `X.Y.Z-1`, `X.Y.Z-2`, …. The shipped `0.13.2` tags already use that single-counter form.
@@ -266,10 +269,9 @@ verified. At post-publish verification on 2026-11-17, the npm meta package,
 `darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-arm64` are downloadable as
 `0.19.0-2` on `latest`. npm accepted `linux-arm64` and `win32-x64`, but their
 version and tarball URLs still return 404. Treat npm as partially available until
-both resolve; do not republish those versions. This fork still holds merged upstream
-`0.19.0`. Upstream GitHub latest is `v0.20.0`; do not prepare `0.20.0-0` until
-that merge is explicitly authorized. The next unused counter on the held
-`0.19.0` line is `0.19.0-3`.
+both resolve; do not republish those versions. This fork has merged released
+upstream `v0.20.0` at `deaf765fc072e94307d9889c78e1ba82e4d36f76`. The next
+unused fork counter is `0.20.0-0`.
 
 ## GitHub Actions secrets
 
@@ -303,15 +305,15 @@ gh secret set FORK_SYNC_TOKEN -R karlorz/codex-host
 - Never publish `@codexhost/*` from this checkout.
 - Do not move, delete, or re-push an existing tag unless the operator explicitly requested that rewrite.
 - Create GitHub Releases and pull requests with `-R karlorz/codex-host`. Default `gh` in this checkout resolves to BytePioneer-AI/codex-host. `gh pr create` without `-R` opened the wrong-repo PR #547 and must abort. `gh release create --notes-from-tag` does not work with `--repo`; write the tag annotation to a notes file instead.
-- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.19.0-3` while this fork holds merged upstream `0.19.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
+- After the lock is on `origin/main`, later fork releases use the next unused counter on `main` (`npm run release:prepare -- 0.20.0-0` while this fork holds merged upstream `0.20.0`). Merge of an identity-lock or sync PR is not a release. Remap README / zh / ko / Installation `codexhost web` examples to `@karlorz/codexhost-cli` and `karlorz/codex-host`; never publish `@codexhost/*`.
 
 ## Next unused counter
 
 ```bash
 git fetch upstream --tags --prune
 git fetch origin --tags --prune
-# example when this fork holds 0.19.0:
-git ls-remote --tags origin 'refs/tags/v0.19.0-*'
+# example when this fork holds 0.20.0:
+git ls-remote --tags origin 'refs/tags/v0.20.0-*'
 ```
 
-Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, `v0.19.0-0`, `v0.19.0-1`, and `v0.19.0-2`. Next unused on the held `0.19.0` line is `0.19.0-3`. Then `npm run release:prepare -- 0.19.0-3` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.
+Annotated tags include `v0.13.2-0` through `v0.13.2-3`, `v0.13.3-0`, `v0.17.3-0`, `v0.17.4-0` through `v0.17.4-8`, `v0.18.0-0`, `v0.18.0-1`, `v0.19.0-0`, `v0.19.0-1`, and `v0.19.0-2`. Next unused on the held `0.20.0` line is `0.20.0-0`. Then `npm run release:prepare -- 0.20.0-0` on `main`, push the four version files, wait for that SHA's `main` push CI, then push the annotated tag.

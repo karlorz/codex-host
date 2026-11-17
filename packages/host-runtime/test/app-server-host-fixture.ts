@@ -295,6 +295,7 @@ export function createFixture(
     webOpener?: AppServerHostOptions["webOpener"];
     accountControl?: CodexAccountControl;
     officialRuntimeScope?: OfficialRuntimeScope;
+    externalSteerTimeoutMs?: number;
     onDelegationApi?: (
       api: DelegationControlRegistration,
       extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
@@ -390,6 +391,9 @@ export function createFixture(
       : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
+    ...(options.externalSteerTimeoutMs !== undefined
+      ? { externalSteerTimeoutMs: options.externalSteerTimeoutMs }
+      : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),
     ...(options.onCreateRequestRoute ? { onCreateRequestRoute: options.onCreateRequestRoute } : {}),
     ...(options.enrollment ? { enrollment: options.enrollment } : {}),
