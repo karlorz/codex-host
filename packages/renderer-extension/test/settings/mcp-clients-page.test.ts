@@ -19,6 +19,9 @@ class FakeElement {
   title = "";
   type = "";
   value = "";
+  id = "";
+  htmlFor = "";
+  hidden = false;
   disabled = false;
   parent: FakeElement | undefined;
   readonly #listeners = new Map<string, () => void>();
@@ -133,6 +136,59 @@ describe("MCP clients settings page", () => {
         "No MCP clients. Add muse or grok-bot here before connecting OAuth.",
       ),
     );
+    scope.dispose();
+  });
+
+  it("lays out labeled fields and reveals workspace and direct-url rows on demand", async () => {
+    const page = createMcpClientsSettingsPage(rendererSettingsMessages("en"), () => ({
+      listClients: vi.fn().mockResolvedValue({ clients: [] }),
+      createClient: vi.fn(),
+      updateClient: vi.fn(),
+      revokeClient: vi.fn(),
+    }));
+    const document = new FakeDocument();
+    const content = document.createElement("main");
+    const scope = new RendererSettingsPageScope();
+    page.mount({
+      content: content as unknown as HTMLElement,
+      signal: scope.signal,
+      runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
+    });
+    const form = descendants(content).find((element) => element.tagName === "form");
+    assert(form);
+    expect(form.className).toBe("settings-mcp-clients-form");
+    expect(visibleText(form)).toContain("Client name");
+    expect(visibleText(form)).toContain("Thread access");
+    expect(visibleText(form)).toContain("Add client");
+    const workspaces = descendants(form).find((element) => element.tagName === "textarea");
+    const directUrl = descendants(form).find(
+      (element) => element.getAttribute("aria-label") === "Direct MCP URL",
+    );
+    const access = descendants(form).find(
+      (element) =>
+        element.tagName === "select" && element.getAttribute("aria-label") === "Thread access",
+    );
+    const connection = descendants(form).find(
+      (element) =>
+        element.tagName === "select" && element.getAttribute("aria-label") === "Connection",
+    );
+    assert(workspaces?.parent);
+    assert(directUrl?.parent);
+    assert(access);
+    assert(connection);
+    expect(workspaces.parent.className).toContain("settings-mcp-clients-field--wide");
+    expect(workspaces.parent.hidden).toBe(true);
+    expect(directUrl.parent.hidden).toBe(true);
+    access.value = "selected-workspaces";
+    access.dispatch("change");
+    expect(workspaces.parent.hidden).toBe(false);
+    expect(visibleText(workspaces.parent)).toContain(
+      "One absolute path per line. Symlinks are resolved. Unresolved paths are denied.",
+    );
+    connection.value = "direct";
+    connection.dispatch("change");
+    expect(directUrl.parent.hidden).toBe(false);
+    expect(visibleText(directUrl.parent)).toContain("Host does not open a listener.");
     scope.dispose();
   });
 });

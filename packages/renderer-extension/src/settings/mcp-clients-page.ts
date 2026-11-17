@@ -8,7 +8,7 @@ import type {
 import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext } from "./core.js";
 import { createRendererSettingsIcon } from "./icons.js";
 import type { RendererSettingsMessages } from "./localization.js";
-import { createHelpTooltip } from "./preference-ui.js";
+import { createHelpTooltip, preferenceId } from "./preference-ui.js";
 import type { RendererExternalClientsClient } from "../renderer-external-clients-client.js";
 import { RendererExternalClientsUnavailableError } from "../renderer-external-clients-client.js";
 
@@ -50,6 +50,36 @@ function option(document: Document, label: string, value: string): HTMLOptionEle
   node.value = value;
   node.textContent = label;
   return node as HTMLOptionElement;
+}
+
+function labeledField(
+  document: Document,
+  input: {
+    label: string;
+    control: HTMLElement;
+    hint?: string;
+    wide?: boolean;
+  },
+): HTMLElement {
+  const field = document.createElement("div");
+  field.className = input.wide
+    ? "settings-mcp-clients-field settings-mcp-clients-field--wide"
+    : "settings-mcp-clients-field";
+  const controlId = input.control.id || preferenceId("mcp-client");
+  input.control.id = controlId;
+  const label = document.createElement("label");
+  label.htmlFor = controlId;
+  label.textContent = input.label;
+  field.append(label, input.control);
+  if (input.hint) {
+    const hint = document.createElement("p");
+    hint.className = "settings-mcp-clients-hint";
+    hint.id = preferenceId("mcp-client-hint");
+    hint.textContent = input.hint;
+    input.control.setAttribute("aria-describedby", hint.id);
+    field.append(hint);
+  }
+  return field;
 }
 
 export function createMcpClientsSettingsPage(
@@ -95,10 +125,12 @@ export function createMcpClientsSettingsPage(
       };
 
       const form = document.createElement("form");
-      form.className = "settings-enrollment-copy";
+      form.className = "settings-mcp-clients-form";
+      form.setAttribute("aria-label", copy.add);
       const nameInput = document.createElement("input") as HTMLInputElement;
       nameInput.type = "text";
       nameInput.required = true;
+      nameInput.autocomplete = "off";
       nameInput.placeholder = copy.name;
       nameInput.setAttribute("aria-label", copy.name);
       const accessSelect = document.createElement("select");
@@ -109,7 +141,6 @@ export function createMcpClientsSettingsPage(
       );
       const workspaces = document.createElement("textarea");
       workspaces.rows = 3;
-      workspaces.placeholder = copy.workspacesHint;
       workspaces.setAttribute("aria-label", copy.workspaces);
       const connectionSelect = document.createElement("select");
       connectionSelect.setAttribute("aria-label", copy.connection);
@@ -126,25 +157,46 @@ export function createMcpClientsSettingsPage(
       );
       const directUrlInput = document.createElement("input") as HTMLInputElement;
       directUrlInput.type = "url";
-      directUrlInput.placeholder = copy.directUrlHint;
       directUrlInput.setAttribute("aria-label", copy.directUrl);
       const oauthInput = document.createElement("input") as HTMLInputElement;
       oauthInput.type = "text";
-      oauthInput.placeholder = copy.oauthClientId;
+      oauthInput.autocomplete = "off";
       oauthInput.setAttribute("aria-label", copy.oauthClientId);
       const add = document.createElement("button");
       add.type = "submit";
       add.className = "settings-command-button";
       add.textContent = copy.add;
+      const workspacesField = labeledField(document, {
+        label: copy.workspaces,
+        control: workspaces,
+        hint: copy.workspacesHint,
+        wide: true,
+      });
+      const directUrlField = labeledField(document, {
+        label: copy.directUrl,
+        control: directUrlInput,
+        hint: copy.directUrlHint,
+        wide: true,
+      });
+      const actions = document.createElement("div");
+      actions.className = "settings-mcp-clients-actions";
+      actions.append(add);
+      const syncOptionalFields = (): void => {
+        workspacesField.hidden = accessSelect.value !== "selected-workspaces";
+        directUrlField.hidden = connectionSelect.value !== "direct";
+      };
+      accessSelect.addEventListener("change", syncOptionalFields);
+      connectionSelect.addEventListener("change", syncOptionalFields);
+      syncOptionalFields();
       form.append(
-        nameInput,
-        accessSelect,
-        workspaces,
-        connectionSelect,
-        grantSelect,
-        directUrlInput,
-        oauthInput,
-        add,
+        labeledField(document, { label: copy.name, control: nameInput }),
+        labeledField(document, { label: copy.access, control: accessSelect }),
+        workspacesField,
+        labeledField(document, { label: copy.connection, control: connectionSelect }),
+        labeledField(document, { label: copy.grant, control: grantSelect }),
+        directUrlField,
+        labeledField(document, { label: copy.oauthClientId, control: oauthInput }),
+        actions,
       );
 
       const tableWrap = document.createElement("div");
