@@ -91,9 +91,11 @@ function includesExternalRecord(
   query: DecodedThreadListRequest,
   byId: ReadonlyMap<string, StoredThreadSummaryV1>,
   sectionId: string | null,
-  runtime?: ExternalThreadListRuntimeState | null,
+  runtimeFor?: (threadId: string) => ExternalThreadListRuntimeState | null,
 ): boolean {
-  if (record.state !== "ready" || !record.nativeSessionRef) return false;
+  if (record.state !== "ready" || !record.nativeSessionRef) {
+    if (runtimeFor?.(record.hostThreadId)?.hasSubmittedTurn !== true) return false;
+  }
   // Rollback retains old records for historical links, but only rebound children
   // belong to the parent's current Native Session (including nested children).
   let current = record;
@@ -121,10 +123,9 @@ function includesExternalRecord(
     return false;
   // Scoped discovery is Desktop's Subagent topology; settled loop runs are not model-delegated children.
   if (
-    runtime !== undefined &&
     scoped &&
     record.subagent?.origin === "scheduled" &&
-    runtime?.running !== true
+    runtimeFor?.(record.hostThreadId)?.running !== true
   )
     return false;
   if (query.parentThreadId !== null && record.subagent?.parentHostThreadId !== query.parentThreadId)
@@ -139,6 +140,12 @@ function includesExternalRecord(
     if (record.hostThreadId === query.ancestorThreadId || parentId !== query.ancestorThreadId)
       return false;
   }
+  if (
+    query.attachedToThreadId !== null
+      ? record.attachedToThreadId !== query.attachedToThreadId
+      : record.attachedToThreadId !== undefined && !query.includeAttachedThreads
+  )
+    return false;
   if (record.archived !== query.archived) return false;
   if (query.projectId !== undefined && (record.projectId ?? null) !== query.projectId) return false;
   if (query.cwd !== null && !query.cwd.includes(record.cwd)) return false;
@@ -213,22 +220,20 @@ export interface ExternalThreadListInput {
   placementOf?(threadId: string): StoredSectionPlacementV1 | undefined;
 }
 
-/** Visibility without row projection. Runtime is read only for scoped scheduled-loop filtering. */
+/** Filter metadata without reading native history; submitted runtime work is also visible. */
 export function filterExternalThreadListRecords(
-  input: Pick<ExternalThreadListInput, "records" | "query" | "placementOf"> & {
+  input: Pick<ExternalThreadListInput, "records" | "query" | "placementOf" | "runtimeFor"> & {
     runtimeFor?(threadId: string): ExternalThreadListRuntimeState | null;
   },
 ): StoredThreadSummaryV1[] {
   const byId = new Map(input.records.map((record) => [record.hostThreadId, record]));
-  const scoped = input.query.parentThreadId !== null || input.query.ancestorThreadId !== null;
-  const needsRuntime = scoped && input.runtimeFor !== undefined;
   return input.records.filter((record) =>
     includesExternalRecord(
       record,
       input.query,
       byId,
       input.placementOf?.(record.hostThreadId)?.section.id ?? null,
-      needsRuntime ? (input.runtimeFor?.(record.hostThreadId) ?? null) : undefined,
+      input.runtimeFor,
     ),
   );
 }

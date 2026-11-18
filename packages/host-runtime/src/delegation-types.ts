@@ -316,10 +316,15 @@ export type ThreadWatchOutcome =
 export interface ThreadWatchResult {
   threadId: string;
   notifyThreadId: string;
-  /** `alreadyTerminal` means no watch was registered and no notification will be sent. */
-  state: "watching" | "alreadyTerminal";
+  /**
+   * `alreadyTerminal` and `alreadyNeedsInput` mean no watch was registered and
+   * no notification will be sent.
+   */
+  state: "watching" | "alreadyTerminal" | "alreadyNeedsInput";
   status: DelegationThreadStatus;
   timeoutMs: number;
+  /** Present for `alreadyNeedsInput`, so the caller can answer without re-reading. */
+  pendingQuestions?: DelegationPendingQuestion[];
 }
 
 export interface ThreadWatchEntry {

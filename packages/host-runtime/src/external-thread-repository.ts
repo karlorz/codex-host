@@ -34,6 +34,7 @@ import {
   type NativeTurnRef,
 } from "@codexhost/shared-contracts";
 import { firstUserMessagePreview } from "./external-thread-preview.js";
+import { ownTurns } from "./external-thread-side-chat.js";
 import {
   lookupExternalSubagent,
   materializeExternalSubagent,
@@ -587,7 +588,10 @@ export class ExternalThreadRepository {
   ): Promise<AlignedExternalSnapshot> {
     const turns = await projectExternalSnapshot(this.store, record, snapshot, previous);
     return {
-      record: await this.updatePreview(record, turns, previous !== undefined),
+      record:
+        record.attachedToThreadId && record.preview
+          ? record
+          : await this.updatePreview(record, ownTurns(record, turns), previous !== undefined),
       turns,
     };
   }
@@ -604,6 +608,8 @@ export function createExternalThreadRecordInput(input: {
   historyMode: "legacy" | "paginated";
   projectlessWorkspace?: CreateProvisionalThreadInput["projectlessWorkspace"];
   forkSource?: CreateProvisionalThreadInput["forkSource"];
+  attachedToThreadId?: CreateProvisionalThreadInput["attachedToThreadId"];
+  inheritedTurnCount?: CreateProvisionalThreadInput["inheritedTurnCount"];
   importSourceRef?: CreateProvisionalThreadInput["importSourceRef"];
   subagent?: CreateProvisionalThreadInput["subagent"];
 }): CreateProvisionalThreadInput {
@@ -618,6 +624,10 @@ export function createExternalThreadRecordInput(input: {
     historyMode: input.historyMode,
     ...(input.projectlessWorkspace ? { projectlessWorkspace: input.projectlessWorkspace } : {}),
     ...(input.forkSource ? { forkSource: input.forkSource } : {}),
+    ...(input.attachedToThreadId ? { attachedToThreadId: input.attachedToThreadId } : {}),
+    ...(input.inheritedTurnCount !== undefined
+      ? { inheritedTurnCount: input.inheritedTurnCount }
+      : {}),
     ...(input.importSourceRef ? { importSourceRef: input.importSourceRef } : {}),
     ...(input.subagent ? { subagent: input.subagent } : {}),
   };
@@ -664,7 +674,10 @@ export function externalThreadValue(input: {
   }
   const createdAt = nativeStart ?? Math.floor(Date.parse(record.createdAt) / 1_000);
   const updatedAt = nativeEnd ?? Math.floor(Date.parse(record.updatedAt) / 1_000);
-  const previewText = record.preview ?? firstUserMessagePreview(input.turns) ?? "";
+  const previewText =
+    record.preview ??
+    (record.attachedToThreadId ? undefined : firstUserMessagePreview(input.turns)) ??
+    "";
   return {
     id: record.hostThreadId,
     sessionId: input.sessionId,
@@ -711,7 +724,8 @@ export function externalThreadValue(input: {
           sha: record.gitInfo.sha ?? null,
         }
       : null,
-    forkedFromId: record.forkSource?.hostThreadId ?? null,
+    forkedFromId: record.forkSource?.hostThreadId ?? record.attachedToThreadId ?? null,
+    ...(record.attachedToThreadId ? { attachedToThreadId: record.attachedToThreadId } : {}),
     ...(record.importSourceRef &&
     record.nativeSessionRef &&
     record.importSourceRef.nativeSessionId !== record.nativeSessionRef.nativeSessionId

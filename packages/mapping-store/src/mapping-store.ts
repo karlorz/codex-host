@@ -611,6 +611,10 @@ export class MappingStore {
         historyMode: input.historyMode,
         ...(input.projectlessWorkspace ? { projectlessWorkspace: input.projectlessWorkspace } : {}),
         ...(input.forkSource ? { forkSource: input.forkSource } : {}),
+        ...(input.attachedToThreadId ? { attachedToThreadId: input.attachedToThreadId } : {}),
+        ...(input.inheritedTurnCount !== undefined
+          ? { inheritedTurnCount: input.inheritedTurnCount }
+          : {}),
         ...(input.subagent ? { subagent: input.subagent } : {}),
         turnMappings: [],
         createdAt: timestamp,

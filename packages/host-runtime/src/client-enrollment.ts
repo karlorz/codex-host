@@ -69,6 +69,7 @@ export type EnrollmentRequestAction =
   | { type: "watch"; threadId: string; notifyThreadId: string }
   | { type: "watches" }
   | { type: "send"; threadId: string }
+  | { type: "answer"; threadId: string }
   | { type: "cancel"; threadId: string }
   | { type: "list" }
   | { type: "delegate" }
@@ -375,6 +376,7 @@ export function authorizeEnrollment(
       }
       return;
     case "send":
+    case "answer":
       if (!entryAllows(record, action.threadId, "send")) {
         throw enrollmentError(
           "UNAUTHORIZED_TARGET",

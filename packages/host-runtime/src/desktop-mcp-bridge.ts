@@ -297,7 +297,7 @@ export async function createDesktopMcpBridge(options: {
     let body: Record<string, unknown> | undefined;
     if (request.method === "POST") {
       try {
-        body = await jsonBody(request);
+        body = await jsonBody(request, MAX_MCP_REQUEST_BYTES);
       } catch {
         response.writeHead(400).end();
         return;

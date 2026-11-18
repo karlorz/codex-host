@@ -56,6 +56,7 @@ interface Watch extends PersistedWatch {
 interface ObservedWatch {
   outcome: ThreadWatchOutcome;
   turnId?: string;
+  interactionId?: string;
   turnIndex?: number;
   turnStatus?: DelegationThreadStatus;
   restartNote?: string;
@@ -69,6 +70,7 @@ function persisted(watch: Watch): PersistedWatch {
     state,
     outcome,
     turnId,
+    interactionId,
     reason,
     registeredAt,
     timeoutMs,
@@ -90,6 +92,7 @@ function persisted(watch: Watch): PersistedWatch {
     deadline,
     ...(outcome ? { outcome } : {}),
     ...(turnId ? { turnId } : {}),
+    ...(interactionId ? { interactionId } : {}),
     ...(reason ? { reason } : {}),
     ...(deliveryDeadline !== undefined ? { deliveryDeadline } : {}),
     ...(delivering ? { delivering } : {}),
@@ -136,6 +139,12 @@ function duration(milliseconds: number): string {
 
 function noticeNote(watch: Watch): string | undefined {
   switch (watch.outcome) {
+    case "needsInput": {
+      const request = watch.interactionId
+        ? `, request ${watch.interactionId}${watch.turnId ? `, Turn ${watch.turnId}` : ""}`
+        : "";
+      return `Waiting for an answer${request}. Read the current Question with 'codexhost thread read ${watch.threadId}' and answer it with 'codexhost thread answer <thread> --interaction <id> --answers-file <file>'.`;
+    }
     case "timedOut":
       return `Not stopped after ${duration(watch.timeoutMs)}; run 'codexhost thread watch' again to keep waiting.`;
     case "unreadable":
@@ -239,6 +248,22 @@ export class DelegationWatchService {
       timeoutMs: input.timeoutMs,
     };
     if (terminal(target.status)) return { ...result, state: "alreadyTerminal" };
+    if (target.pendingQuestions?.length) {
+      for (const watch of [...this.#watches]) {
+        if (
+          watch.state === "watching" &&
+          watch.threadId === input.threadId &&
+          watch.notifyThreadId === input.notifyThreadId
+        )
+          this.#remove(watch);
+      }
+      await this.#writes;
+      return {
+        ...result,
+        state: "alreadyNeedsInput",
+        pendingQuestions: target.pendingQuestions,
+      };
+    }
     const existing = this.#watches.find(
       (watch) =>
         watch.state === "watching" &&
@@ -429,11 +454,12 @@ export class DelegationWatchService {
         generation !== watch.observationGeneration
       )
         continue;
-      const { outcome, turnId, turnIndex, turnStatus, restartNote } = observed;
+      const { outcome, turnId, interactionId, turnIndex, turnStatus, restartNote } = observed;
       if (restartNote) watch.restartNote = restartNote;
       watch.state = "pendingDelivery";
       watch.outcome = outcome;
       if (turnId) watch.turnId = turnId;
+      if (interactionId) watch.interactionId = interactionId;
       if (turnIndex !== undefined) watch.turnIndex = turnIndex;
       if (turnStatus) watch.turnStatus = turnStatus;
       watch.deliveryDeadline = Date.now() + DELIVERY_WINDOW_MS;
@@ -464,6 +490,14 @@ export class DelegationWatchService {
         delete watch.quietUntil;
         delete watch.quietTurnId;
         delete watch.unreadableSince;
+        const pending = snapshot.pendingQuestions?.[0];
+        if (pending) {
+          return {
+            outcome: "needsInput",
+            interactionId: pending.interactionId,
+            turnId: pending.turnId,
+          };
+        }
         return Date.now() >= watch.deadline ? { outcome: "timedOut" } : undefined;
       }
       if (terminal(snapshot.status)) {
@@ -587,6 +621,9 @@ export class DelegationWatchService {
           outcome: watch.outcome ?? "notFound",
           deepLink: threadLink(watch.threadId),
           ...(watch.turnId ? { turnId: watch.turnId } : {}),
+          ...(watch.outcome === "needsInput" && watch.interactionId
+            ? { interactionId: watch.interactionId }
+            : {}),
           ...(watch.harnessId ? { harnessId: watch.harnessId } : {}),
           ...(watch.refs?.length ? { refs: watch.refs } : {}),
           ...(watch.restartNote ? { note: watch.restartNote } : {}),

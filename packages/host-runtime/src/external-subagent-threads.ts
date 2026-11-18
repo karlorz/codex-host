@@ -11,6 +11,7 @@ import { hostThreadIdSchema, type NativeSessionRef } from "@codexhost/shared-con
 
 import type { ExternalThreadStore } from "./external-thread-repository.js";
 import { presentExternalVoiceTurn } from "./external-voice-presentation.js";
+import { withoutInjectedText } from "./external-thread-side-chat.js";
 
 function childCreateRequest(
   parent: Pick<StoredThreadRecordV1, "hostThreadId" | "harnessId">,
@@ -239,11 +240,14 @@ export async function projectExternalSnapshot(
         return { ...entry, item: { ...entry.item, subagents } };
       }),
     );
+    const injected = record.injectedTurnPrefixes?.find(
+      ({ hostTurnId }) => hostTurnId === mapping.hostTurnId,
+    );
     const projected = projectHistoricalTurn({
       threadId: record.hostThreadId,
       turnId: mapping.hostTurnId,
       cwd: record.cwd,
-      snapshot: { ...turn, items },
+      snapshot: { ...turn, input: withoutInjectedText(turn.input, injected), items },
     });
     turns.push(mapping.realtimeInline ? presentExternalVoiceTurn(projected) : projected);
   }

@@ -296,7 +296,10 @@ export function createFixture(
     webOpener?: AppServerHostOptions["webOpener"];
     accountControl?: CodexAccountControl;
     officialRuntimeScope?: OfficialRuntimeScope;
-    onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
+    onDelegationApi?: AppServerHostOptions["onDelegationApi"];
+    enrollment?: AppServerHostOptions["enrollment"];
+    createExternalVoiceCall?: AppServerHostOptions["createExternalVoiceCall"];
+    externalSteerTimeoutMs?: AppServerHostOptions["externalSteerTimeoutMs"];
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
@@ -384,6 +387,13 @@ export function createFixture(
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),
+    ...(options.enrollment ? { enrollment: options.enrollment } : {}),
+    ...(options.createExternalVoiceCall
+      ? { createExternalVoiceCall: options.createExternalVoiceCall }
+      : {}),
+    ...(options.externalSteerTimeoutMs !== undefined
+      ? { externalSteerTimeoutMs: options.externalSteerTimeoutMs }
+      : {}),
     ...(options.onCreateRequestRoute ? { onCreateRequestRoute: options.onCreateRequestRoute } : {}),
   });
   const running = host.run();
