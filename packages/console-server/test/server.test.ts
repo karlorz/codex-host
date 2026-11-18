@@ -9,6 +9,7 @@ import type { ConsoleHarnesses } from "../src/harnesses.js";
 import { HostUnavailableError, type ConsoleHostClient } from "../src/host-client.js";
 import type { InspectDocument } from "../src/installation.js";
 import { consolePaths } from "../src/paths.js";
+import { stopConsole } from "../src/open.js";
 import { startConsoleServer, type RunningConsoleServer } from "../src/server.js";
 import { ConsoleUpdateError, type ConsoleUpdates } from "../src/updates.js";
 
@@ -576,6 +577,21 @@ describe("console server", () => {
     expect(await stopped.json()).toEqual({ stopped: true });
     expect(service.mock.calls[2]?.[1][0]).toBe("stop");
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("lets Console-initiated stop finish after the real stop helper sees stopping health", async () => {
+    const started = await start({
+      service: async (_command, args, environment) => {
+        if (args[0] !== "stop") return;
+        const begun = Date.now();
+        await expect(stopConsole(environment)).resolves.toBe(true);
+        expect(Date.now() - begun).toBeLessThan(2_000);
+      },
+    });
+    const stopped = await fetch(`${started.base}/api/stop`, { method: "POST", headers: CHANGE });
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toEqual({ stopped: true });
+    await vi.waitFor(() => expect(started.onExit).toHaveBeenCalledOnce());
   });
 
   it("does not claim a partial or failed stop succeeded", async () => {

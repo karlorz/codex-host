@@ -336,14 +336,17 @@ fn stop_all(options: &Options) -> Result<(), Box<dyn Error>> {
     if !failures.is_empty() {
         return Err(failures.join("\n").into());
     }
-    println!(
-        "{}",
-        if running {
-            "codexhost services stopped"
-        } else {
-            "No codexhost services are running"
-        }
-    );
+    let leftovers = crate::unmanaged::leftover_lines();
+    if running {
+        println!("codexhost services stopped");
+    } else if leftovers.is_empty() {
+        println!("No codexhost services are running");
+    } else {
+        println!("No managed codexhost services are running");
+    }
+    for line in leftovers {
+        println!("{line}");
+    }
     Ok(())
 }
 
@@ -378,7 +381,11 @@ pub fn run(action: &str, arguments: &[String]) -> Result<(), Box<dyn Error>> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
+        println!("{}", crate::console::status_line());
         println!("Autostart: {}", crate::autostart::status_line());
+        for line in crate::unmanaged::status_lines() {
+            println!("{line}");
+        }
         return Ok(());
     }
     let mut node = None;

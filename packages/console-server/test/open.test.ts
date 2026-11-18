@@ -15,11 +15,12 @@ it("opens the overview containing diagnostics", () => {
 });
 
 describe("console stop", () => {
-  it.each(["console", "foreign", "free"])(
+  it.each(["console", "stopping", "foreign", "free"])(
     "reports stopping a %s endpoint without starting services",
     async (kind) => {
       const home = await mkdtemp(path.join(os.tmpdir(), "console-stop-"));
       const requests: string[] = [];
+      const live = kind === "console" || kind === "stopping";
       const server = createServer((request, response) => {
         requests.push(`${request.method} ${request.url}`);
         response.setHeader("content-type", "application/json");
@@ -30,7 +31,12 @@ describe("console stop", () => {
         } else {
           response.end(
             JSON.stringify({
-              service: kind === "console" ? "codexhost-console" : "other",
+              service:
+                kind === "console"
+                  ? "codexhost-console"
+                  : kind === "stopping"
+                    ? "codexhost-console-stopping"
+                    : "other",
               appDirectory: home,
               pid: process.pid,
             }),
@@ -60,17 +66,50 @@ describe("console stop", () => {
             (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr }),
           );
         });
-        expect(result).toEqual({ code: kind === "console" ? 0 : 3, stdout: "", stderr: "" });
+        expect(result).toEqual({ code: live ? 0 : 3, stdout: "", stderr: "" });
         expect(requests.filter((request) => request === "POST /api/shutdown")).toHaveLength(
-          kind === "console" ? 1 : 0,
+          live ? 1 : 0,
         );
-        if (kind === "console") expect(server.listening).toBe(false);
+        if (live) expect(server.listening).toBe(false);
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         await rm(home, { recursive: true, force: true });
       }
     },
   );
+
+  it("treats a ready console that becomes stopping as handshake success", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "console-stop-handshake-"));
+    let stopping = false;
+    const server = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/api/shutdown") {
+        expect(request.headers["x-codexhost-console"]).toBe("1");
+        stopping = true;
+        response.end("{}");
+        return;
+      }
+      response.end(
+        JSON.stringify({
+          service: stopping ? "codexhost-console-stopping" : "codexhost-console",
+          appDirectory: home,
+          pid: process.pid,
+        }),
+      );
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    const started = Date.now();
+    try {
+      await expect(stopConsole({ CODEXHOST_CONSOLE_PORT: String(port) })).resolves.toBe(true);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(server.listening).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 
   it("uses the existing port validation", async () => {
     await expect(stopConsole({ CODEXHOST_CONSOLE_PORT: "invalid" })).rejects.toThrow(

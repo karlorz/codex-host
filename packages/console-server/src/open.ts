@@ -8,10 +8,30 @@ import { CONSOLE_REQUEST_HEADER } from "./request-guard.js";
 import { CONSOLE_PORT_ENV, consolePort, dataDirectory } from "./paths.js";
 import { CONSOLE_SERVICE } from "./server.js";
 
+export const CONSOLE_STOPPING_SERVICE = `${CONSOLE_SERVICE}-stopping`;
+
 export type ConsoleProbe =
-  | { kind: "console"; appDirectory: string; pid: number; buildId: string | null }
+  | {
+      kind: "console";
+      stopping: boolean;
+      appDirectory: string;
+      pid: number;
+      buildId: string | null;
+    }
   | { kind: "free" }
   | { kind: "foreign" };
+
+function isConsoleService(service: unknown): service is string {
+  return service === CONSOLE_SERVICE || service === CONSOLE_STOPPING_SERVICE;
+}
+
+function terminateConsole(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
 
 function refused(error: unknown): boolean {
   let current: unknown = error;
@@ -30,12 +50,13 @@ export async function probeConsole(port: number): Promise<ConsoleProbe> {
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     if (
       response.ok &&
-      body?.service === CONSOLE_SERVICE &&
+      isConsoleService(body?.service) &&
       typeof body.appDirectory === "string" &&
       typeof body.pid === "number"
     ) {
       return {
         kind: "console",
+        stopping: body.service === CONSOLE_STOPPING_SERVICE,
         appDirectory: body.appDirectory,
         pid: body.pid,
         buildId: typeof body.buildId === "string" ? body.buildId : null,
@@ -70,12 +91,32 @@ async function requestShutdown(port: number): Promise<void> {
   if (!response.ok) throw new Error(`console shutdown failed: HTTP ${response.status}`);
 }
 
+async function waitUntilConsoleGone(port: number, pid: number): Promise<ConsoleProbe> {
+  let probe = await waitFor(port, (next) => next.kind !== "console", 5_000);
+  if (probe.kind !== "console") return probe;
+  terminateConsole(pid);
+  probe = await waitFor(port, (next) => next.kind !== "console", 5_000);
+  if (probe.kind === "console") throw new Error(`codexhost console did not stop on port ${port}`);
+  return probe;
+}
+
 export async function stopConsole(environment: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   const port = consolePort(environment);
-  if ((await probeConsole(port)).kind !== "console") return false;
+  const first = await probeConsole(port);
+  if (first.kind !== "console") return false;
+  // A leftover already in stopping is stuck; escalate. A ready Console that
+  // becomes stopping after /api/shutdown is the in-process stop handshake:
+  // the server still has to deliver its result before it exits.
+  if (first.stopping) {
+    await requestShutdown(port).catch(() => undefined);
+    await waitUntilConsoleGone(port, first.pid);
+    return true;
+  }
   await requestShutdown(port);
-  const probe = await waitFor(port, (next) => next.kind !== "console", 5_000);
-  if (probe.kind === "console") throw new Error(`codexhost console did not stop on port ${port}`);
+  const probe = await waitFor(port, (next) => next.kind !== "console" || next.stopping, 5_000);
+  if (probe.kind === "console" && !probe.stopping) {
+    await waitUntilConsoleGone(port, first.pid);
+  }
   return true;
 }
 
@@ -138,14 +179,14 @@ export async function ensureConsole(
   const port = consolePort(environment);
 
   let probe = await probeConsole(port);
-  // Another installation, or this installation after an update, replaces the console.
+  // Another installation, a stopping console, or this installation after an update, replaces it.
   const ownBuildId = await consoleBuildId(options.entryPath, environment);
   if (
     probe.kind === "console" &&
-    (probe.appDirectory !== options.appDirectory || probe.buildId !== ownBuildId)
+    (probe.stopping || probe.appDirectory !== options.appDirectory || probe.buildId !== ownBuildId)
   ) {
     await requestShutdown(port).catch(() => undefined);
-    probe = await waitFor(port, (next) => next.kind !== "console", 5_000);
+    probe = await waitUntilConsoleGone(port, probe.pid);
   }
   if (probe.kind === "foreign") {
     throw new Error(
@@ -154,8 +195,8 @@ export async function ensureConsole(
   }
   if (probe.kind === "free") {
     startDetachedServer(options.entryPath, environment);
-    probe = await waitFor(port, (next) => next.kind === "console", 10_000);
-    if (probe.kind !== "console") {
+    probe = await waitFor(port, (next) => next.kind === "console" && !next.stopping, 10_000);
+    if (probe.kind !== "console" || probe.stopping) {
       throw new Error(`codexhost console did not start on port ${port}`);
     }
   }

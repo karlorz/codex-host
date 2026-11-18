@@ -72,7 +72,7 @@ Threads live **inside** Host Runtime. Stopping a process instance interrupts Tur
 | `codexhost` / `codexhost launch` | Console + managed Desktop + Host/Web ensure |
 | `codexhost web` | Host ensure, then Web ensure, open browser |
 | `codexhost stop` | Managed GUI, Web, Host, remote, Broker, Console |
-| `codexhost status` | Host/Web records + autostart line |
+| `codexhost status` | Host/Web records, Console health, product autostart, unmanaged enroll LaunchAgents |
 | `codexhost autostart on\|off` | Product login item only |
 | `codexhost enroll relay-link` | Foreground link process; no product supervisor |
 | `npm stop` | Command-line match across worktrees (`tools/dev-desktop/stop.mjs`) |

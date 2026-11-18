@@ -8,6 +8,8 @@
 use std::env;
 use std::error::Error;
 use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -25,6 +27,10 @@ pub const CONSOLE_ENV: &str = "CODEXHOST_CONSOLE";
 const LAUNCHER_EXECUTABLE_ENV: &str = "CODEXHOST_LAUNCHER_EXECUTABLE";
 const INSPECT_SCHEMA_VERSION: u8 = 1;
 const CONSOLE_URL_PREFIX: &str = "codexhost console: ";
+const DEFAULT_CONSOLE_PORT: u16 = 4399;
+const CONSOLE_PORT_ENV: &str = "CODEXHOST_CONSOLE_PORT";
+const CONSOLE_SERVICE: &str = "codexhost-console";
+const CONSOLE_STOPPING_SERVICE: &str = "codexhost-console-stopping";
 const CONTROLLER_STATUS_FILE: &str = "desktop-controller-v1.json";
 const INTEGRATION_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const PERSISTENT_INTEGRATION_FAILURE_MS: u64 = 60_000;
@@ -385,6 +391,54 @@ pub fn inspect_json(
         "desktopError": desktop_error,
         "runtime": runtime_json(),
     }))
+}
+
+fn console_port() -> u16 {
+    match env::var(CONSOLE_PORT_ENV) {
+        Ok(value) if !value.is_empty() => value
+            .parse()
+            .ok()
+            .filter(|port| (1024..=65535).contains(port))
+            .unwrap_or(DEFAULT_CONSOLE_PORT),
+        _ => DEFAULT_CONSOLE_PORT,
+    }
+}
+
+fn console_health_service(port: u16) -> Option<String> {
+    let address = format!("127.0.0.1:{port}").parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(1_500)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1_500)))
+        .ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(1_500)))
+        .ok()?;
+    write!(
+        stream,
+        "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .ok()?;
+    let mut body = String::new();
+    stream.read_to_string(&mut body).ok()?;
+    let json = body.split("\r\n\r\n").nth(1)?;
+    serde_json::from_str::<Value>(json)
+        .ok()?
+        .get("service")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// Loopback Console liveness for `codexhost status`.
+pub fn status_line() -> String {
+    let port = console_port();
+    match console_health_service(port).as_deref() {
+        Some(CONSOLE_SERVICE) => format!("Console: running; http://127.0.0.1:{port}/"),
+        Some(CONSOLE_STOPPING_SERVICE) => {
+            format!("Console: stopping; http://127.0.0.1:{port}/")
+        }
+        Some(_) => format!("Console: port {port} in use by another program"),
+        None => "Console: stopped".into(),
+    }
 }
 
 pub fn stop(command: &ConsoleCommand) -> Result<bool, Box<dyn Error>> {

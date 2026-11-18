@@ -46,13 +46,15 @@ Repo mention is an incident line only (`docs/architecture/enrolled-mcp-relay.md:
 | KeepAlive | absent (`crates/platform/src/autostart.rs:150-153`; tests assert no KeepAlive) | true |
 | `launchctl` | write/delete plist only; next login (`autostart_macos.rs:43`) | bootstrap/bootout |
 | `codexhost stop` | must not modify (`spec.md:74`) | not in stop_all at all |
-| `codexhost status` Autostart line | this plist only | hidden |
+| `codexhost status` | Autostart line for this plist | separate unmanaged Enroll lines |
 
 Broker LaunchAgents use prefix `ai.bytepioneer.codexhost.` + suffix `-broker` (`crates/launcher/src/native_harness_broker.rs`). The enroll label matches neither, so broker stop skips it.
 
 ## Relationship to Threads
 
 Enrollment issues `enrollment_id`, `thread_id`, and token (`client-enrollment.md:25-31`). That Thread survives process death. The link process stamps `callerThreadId` on read/wait/send (`client-enrollment-relay-link.ts` `stampLegacyEnrollmentBody`). Stopping Host interrupts dispatch; it does not revoke Muse or delete the enrollment store.
+
+`codexhost status` lists `com.codexhost.enroll-*.plist` as unmanaged. `codexhost stop` prints leftover lines for those labels and does not unload KeepAlive.
 
 ## Depth
 

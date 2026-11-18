@@ -487,8 +487,8 @@ export function startConsoleServer(options: ConsoleServerOptions): Promise<Runni
     }
     if (route === "POST /api/shutdown") {
       sendJson(response, 200, { ok: true });
-      // stop_all waits for Console to stop answering health probes. Keep the
-      // initiating request alive to report its real result before this process exits.
+      // In-process stop acknowledges shutdown with stopping health so the
+      // launcher can return while this request still reports its result.
       if (stopping) shutdownRequested = true;
       else setImmediate(exit);
       return;

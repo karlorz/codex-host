@@ -27,7 +27,7 @@ Success with no matching records prints `No codexhost services are running` (`se
 
 ### `codexhost status`
 
-Host running/version from `shared-host-ready.json`, Web from `web-service-ready.json`, Autostart line. Does not list Console, enroll, Broker, or unmatched PIDs (`services.rs:350-381`).
+Host running/version from `shared-host-ready.json`, Web from `web-service-ready.json`, Console health, product Autostart, and unmanaged `com.codexhost.enroll-*.plist` labels (`services.rs:350-388`). Broker and unmatched PIDs stay off this listing.
 
 ## Stop sequence
 
@@ -41,17 +41,13 @@ sequenceDiagram
   CLI->>GUI: stop_managed (descriptor + control port)
   CLI->>Web: write web-service.stop if owner() Some
   CLI->>Host: node host-runtime --stop if current_runtime Some
-  CLI->>Con: console-server stop (health must be codexhost-console)
+  CLI->>Con: console-server stop (ready or leftover stopping)
   Note over Web,Host: a surviving Web Node can host ensure after this
 ```
 
 ## Console stop seam
 
-`stopConsole` returns false unless health `service === "codexhost-console"` (`packages/console-server/src/open.ts:73-75`).
-
-While Console UI `POST /api/stop` is in flight, `/api/shutdown` sets `shutdownRequested` and health becomes `codexhost-console-stopping` (`packages/console-server/src/server.ts:363-365,488-493`). `probeConsole` classifies that as **foreign**, so a later CLI stop reports Console absent.
-
-**Observed 2026-11-18:** PID 57135 listened on `:4399` with health `codexhost-console-stopping`; `console-server.mjs stop` exited 3; SIGTERM released the port.
+Live Console health is `codexhost-console` or `codexhost-console-stopping`. A ready Console that becomes stopping after `/api/shutdown` is handshake success: the in-process Stop request still has to send its result before the process exits. A leftover already in stopping is stuck; stop SIGTERMs the health pid if the port still answers. `ensure` replaces a stopping Console instead of reusing it.
 
 ## Why Web/Host return after stop
 

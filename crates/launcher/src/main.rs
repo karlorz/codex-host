@@ -17,6 +17,7 @@ mod service_update;
 mod services;
 mod startup_record;
 mod system_proxy_environment;
+mod unmanaged;
 mod web_service;
 
 use std::env;
