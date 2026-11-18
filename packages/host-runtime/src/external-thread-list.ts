@@ -11,6 +11,7 @@ import { externalThreadValue } from "./external-thread-repository.js";
 
 export interface ExternalThreadListRuntimeState {
   running: boolean;
+  hasSubmittedTurn?: boolean;
 }
 
 export interface ThreadListEntry {

@@ -23,7 +23,6 @@ import type { OfficialRuntimeScope } from "../src/codex-runtime/official-runtime
 import type { OfficialAppServerConnection } from "../src/official-app-server-connection.js";
 import type { HostUpdateCoordinator } from "../src/update-coordinator.js";
 import type { HostConsoleOpener } from "../src/console-opener.js";
-import type { EnrollmentAuthority } from "../src/client-enrollment-authority.js";
 
 export class FakeOfficialProcess extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -103,12 +102,14 @@ export class JsonLineCollector {
     });
   }
 
-  waitFor(predicate: (message: JsonObject) => boolean): Promise<JsonObject> {
+  waitFor(
+    predicate: (message: JsonObject) => boolean,
+    timeoutMs = process.platform === "win32" ? 10_000 : 2_000,
+  ): Promise<JsonObject> {
     const existing = this.messages.find(predicate);
     if (existing) return Promise.resolve(existing);
     // Host responses can require Mapping Store fsync/rename operations.
     // Allow for Windows disk latency, as in tests/vitest.config.js.
-    const timeoutMs = process.platform === "win32" ? 10_000 : 2_000;
     return new Promise<JsonObject>((resolve, reject) => {
       const waiter = {
         predicate,
@@ -128,7 +129,7 @@ export function method(message: JsonObject, value: string): boolean {
   return message.method === value;
 }
 
-export function requestId(message: JsonObject, id: string | number): boolean {
+export function requestId(message: JsonObject, id: number): boolean {
   return message.id === id;
 }
 
@@ -295,16 +296,10 @@ export function createFixture(
     webOpener?: AppServerHostOptions["webOpener"];
     accountControl?: CodexAccountControl;
     officialRuntimeScope?: OfficialRuntimeScope;
-    externalSteerTimeoutMs?: number;
-    onDelegationApi?: (
-      api: DelegationControlRegistration,
-      extras?: { createEnrollmentThread: (clientId: string) => Promise<string> },
-    ) => (() => void) | undefined;
+    onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
-    createExternalVoiceCall?: AppServerHostOptions["createExternalVoiceCall"];
-    enrollment?: EnrollmentAuthority;
   } = {},
 ) {
   const adapter =
@@ -386,17 +381,10 @@ export function createFixture(
     ...(options.webOpener ? { webOpener: options.webOpener } : {}),
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.usageStatistics ? { usageStatistics: options.usageStatistics } : {}),
-    ...(options.createExternalVoiceCall
-      ? { createExternalVoiceCall: options.createExternalVoiceCall }
-      : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
-    ...(options.externalSteerTimeoutMs !== undefined
-      ? { externalSteerTimeoutMs: options.externalSteerTimeoutMs }
-      : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),
     ...(options.onCreateRequestRoute ? { onCreateRequestRoute: options.onCreateRequestRoute } : {}),
-    ...(options.enrollment ? { enrollment: options.enrollment } : {}),
   });
   const running = host.run();
   void running.then(

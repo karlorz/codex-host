@@ -369,7 +369,7 @@ export interface DelegationControlApi {
   /** Optional for older control registrations that do not support debug exports. */
   exportThread?(input: ThreadExportInput): Promise<ThreadExportResult>;
   wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }>;
-  answer?(input: ThreadAnswerInput): Promise<ThreadAnswerResult>;
+  answer(input: ThreadAnswerInput): Promise<ThreadAnswerResult>;
   list(input: ThreadListInput): Promise<DelegationThreadListResult>;
 }
 
