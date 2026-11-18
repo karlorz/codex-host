@@ -323,11 +323,22 @@ export function installNativeChatVoiceHook(
         modules.initial.SPn(boundScope) as {
           getState(): {
             isVoiceModeActive?: boolean;
+            hasConnectedOnce?: boolean;
+            hasVoiceSessionStarted?: boolean;
             server?: { connectionState?: unknown };
           };
         }
       ).getState();
-      return state.isVoiceModeActive === true && state.server?.connectionState !== "connected";
+      if (state.isVoiceModeActive !== true) return false;
+      const connection = state.server?.connectionState;
+      if (
+        connection === "connected" ||
+        connection === "reconnecting" ||
+        connection === "signalReconnecting"
+      )
+        return false;
+      if (state.hasConnectedOnce === true || state.hasVoiceSessionStarted === true) return false;
+      return true;
     } catch {
       return false;
     }

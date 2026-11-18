@@ -345,6 +345,7 @@ function installFixture() {
   let active = false;
   let connected = true;
   let sessionStarted = true;
+  let connectionState: unknown = "connected";
   let serverId: unknown = "a7e3282d-f457-4586-9b28-921411364f6b";
   const listeners = new Set<() => void>();
   const unsubscribe = vi.fn();
@@ -426,7 +427,7 @@ function installFixture() {
         hasConnectedOnce: connected,
         hasVoiceSessionStarted: sessionStarted,
         earlyServerThreadId: serverId,
-        server: { connectionState: connected ? "connected" : null },
+        server: { connectionState },
         isWorkMode: false,
         conversationId: f.props.conversationId,
       }),
@@ -506,6 +507,11 @@ function installFixture() {
     },
     setConnected: (value: boolean) => {
       connected = value;
+      connectionState = value ? "connected" : null;
+      for (const listener of listeners) listener();
+    },
+    setConnectionState: (value: unknown) => {
+      connectionState = value;
       for (const listener of listeners) listener();
     },
     setActive: (value: boolean) => {
@@ -1793,6 +1799,7 @@ describe("native Chat voice lifecycle installation", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(hook.status).toBe("active");
     expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+    f.setSessionStarted(false);
     f.setConnected(false);
     f.setActive(true);
     expect(hook.activeCall).toBe(true);
@@ -1852,6 +1859,7 @@ describe("native Chat voice lifecycle installation", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(hook.status).toBe("active");
       expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+      f.setSessionStarted(false);
       f.setConnected(false);
       f.setActive(true);
       f.setVisible(false);
@@ -1863,6 +1871,67 @@ describe("native Chat voice lifecycle installation", () => {
       hook.dispose();
     }
   });
+
+  it.each(["reconnecting", "signalReconnecting"] as const)(
+    "keeps hashed Chat voice while Instant Connect reconnects with a hidden composer: %s",
+    async (connection) => {
+      vi.useFakeTimers();
+      const f = installFixture();
+      Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        desktopPlatform: "darwin",
+      });
+      attachReviewedVoiceEvidence(f.target.__codexhostCpaLiveVoiceHookV1, ["chat"]);
+      f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+      const initializeVoiceSession = vi.fn(async () => ({
+        getVoiceNuxMode: vi.fn(async () => "none"),
+        dispatchVoiceCommand: vi.fn(),
+        clearSessionCreate: vi.fn(),
+        startVoiceWithIntroduction: vi.fn().mockResolvedValue(true),
+      }));
+      const require = Object.assign(
+        (id: string) => {
+          if (id === "j9r7") return { initializeVoiceSession };
+          if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+          if (id === "OWtl") return { u: f.shared.Qst };
+          if (id === "Oj9r") return { GD: f.initial.MOr };
+          if (id === "Sd8U") return { PR: f.initial.CDr };
+          if (id === "bgok") return { MH: f.initial.SPn };
+          if (id === "cY1t") return { Iy: f.initial.aT, Re: initializeVoiceSession };
+          if (id === "zd8w") return { createElement: f.createElement };
+          if (id === "CE87") return { createRoot: f.createRoot };
+          throw new Error(id);
+        },
+        { m: {}, c: {} },
+      );
+      f.importModule.mockImplementation(async (url) => {
+        if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+          return { __webpack_require__: Object.assign(require, { e: vi.fn(async () => {}) }) };
+        if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+          return { __webpack_modules__: {} };
+        if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+          return { __webpack_modules__: {} };
+        throw new Error(url);
+      });
+      const end = { click: vi.fn() };
+      Object.assign(f.target.document, {
+        querySelector: (selector: string) => (String(selector).includes("End Voice") ? end : null),
+      });
+      const hook = installNativeChatVoiceHook(f);
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        f.setActive(true);
+        f.setConnectionState(connection);
+        f.setVisible(false);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(end.click).not.toHaveBeenCalled();
+        expect(hook.activeCall).toBe(true);
+        expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+      } finally {
+        hook.dispose();
+      }
+    },
+  );
 
   it("replaces an inactive native hook and keeps an active call", () => {
     const dispose = vi.fn();
@@ -2091,6 +2160,29 @@ describe("native Chat voice lifecycle installation", () => {
     expect(f.unmount).toHaveBeenCalledOnce();
     expect(f.browserEnabled()).toBe(false);
   });
+
+  it.each(["reconnecting", "signalReconnecting"] as const)(
+    "keeps an established Chat call while Instant Connect reconnects with a hidden composer: %s",
+    async (connection) => {
+      vi.useFakeTimers();
+      const f = installFixture();
+      const end = { click: vi.fn() };
+      Object.assign(f.target.document, {
+        querySelector: (selector: string) => (String(selector).includes("End Voice") ? end : null),
+      });
+      const hook = installNativeChatVoiceHook(f);
+      await vi.advanceTimersByTimeAsync(0);
+      f.setActive(true);
+      f.setConnectionState(connection);
+      f.setVisible(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(end.click).not.toHaveBeenCalled();
+      expect(hook.activeCall).toBe(true);
+      expect(f.unmount).not.toHaveBeenCalled();
+      expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+      hook.dispose();
+    },
+  );
 
   it("retains native runtime while voice hides the composer, then restores it when returning to Work", async () => {
     vi.useFakeTimers();
