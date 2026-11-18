@@ -16,7 +16,9 @@ import { connectControllerVoiceHost } from "../src/controller-voice-host.js";
 import type { ControllerVoiceHost } from "../src/controller-voice-host.js";
 
 vi.mock("../src/controller-voice-host.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/controller-voice-host.js")>();
+  const actual = (await importOriginal()) as {
+    connectControllerVoiceHost: typeof connectControllerVoiceHost;
+  };
   return {
     ...actual,
     connectControllerVoiceHost: vi.fn(actual.connectControllerVoiceHost),
