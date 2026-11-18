@@ -129,7 +129,7 @@ export function method(message: JsonObject, value: string): boolean {
   return message.method === value;
 }
 
-export function requestId(message: JsonObject, id: number): boolean {
+export function requestId(message: JsonObject, id: string | number): boolean {
   return message.id === id;
 }
 

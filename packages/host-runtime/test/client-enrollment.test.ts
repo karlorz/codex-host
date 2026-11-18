@@ -110,6 +110,7 @@ function controlApi(overrides: Partial<DelegationControlApi> = {}): DelegationCo
       nextCursor: null,
     })),
     wait: vi.fn(),
+    answer: vi.fn(),
     list: vi.fn(async () => ({
       threads: [
         {

@@ -84,6 +84,7 @@ function controlApi(overrides: Partial<DelegationControlApi> = {}): DelegationCo
     cancel: vi.fn(),
     read: vi.fn(),
     wait: vi.fn(),
+    answer: vi.fn(),
     list: vi.fn(),
     ...overrides,
   };

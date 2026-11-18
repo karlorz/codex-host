@@ -39,6 +39,8 @@ import {
   type ThreadCancelResult,
   type ThreadListInput,
   type ThreadReadInput,
+  type ThreadAnswerInput,
+  type ThreadAnswerResult,
   type ThreadSendInput,
   type ThreadSendResult,
   type ThreadWaitInput,
@@ -632,6 +634,12 @@ export class HarnessDelegationCoordinator {
         ]
       : thread.turns;
     return { thread, turns, busy: this.#externalThreadBusy(thread) };
+  }
+
+  async answer(input: ThreadAnswerInput): Promise<ThreadAnswerResult> {
+    throw new DelegationControlError("QUESTION_NOT_PENDING", "Question is no longer pending", {
+      threadId: input.threadId,
+    });
   }
 
   async wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }> {
