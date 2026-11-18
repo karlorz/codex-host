@@ -28,6 +28,7 @@
 | [`architecture/host-client-channel.md`](architecture/host-client-channel.md) | GUI、Web 与 App 共享原生 Codex／外部 Harness 的生命周期、认证通道、事件驱动快照、交互仲裁及恢复边界。 |
 | [OpenSpec：状态刷新与轮询优化](../openspec/changes/reduce-redundant-state-polling/proposal.md) | Web 目录与组织状态分别校验，远程设置页和 Console 按可见性降频；查看方案、实现进度与验收边界时阅读。 |
 | [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 共享 Host 的官方 Codex 与外部 Thread 所有权、存储边界、启动发现及生命周期；不提供旧 standalone 迁移。 |
+| [`architecture/instance-lifecycle/01-topology.md`](architecture/instance-lifecycle/01-topology.md) | Process instance vs Thread: `codexhost stop` / `web`, Console, product autostart, operator enroll KeepAlive; start here when stop reports idle while processes remain. |
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
 | [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | CLI 与 HTTP/MCP 委派创建独立 Git worktree 的目录、HEAD 基线、返回字段、状态校验与失败保留边界。 |
@@ -35,7 +36,7 @@
 | [`architecture/web-thread-tree.md`](architecture/web-thread-tree.md) | Web 侧栏会话树：委派关系决定的显示父 Thread、Host 树接口、祖先补齐、归档级联、排序与置顶规则；修改侧栏层级或委派显示时阅读。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/client-enrollment.md`](architecture/client-enrollment.md) | Allowlisted collaborator enrollment (not same-Mac `:4398` MCP). `--enrolled-client` / `CODEXHOST_ENROLL_CLIENT` identity, machine pairing, Path 2 command for tailnet peers, Settings/console list and revoke. |
-| [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Outbound MCP hop at `https://codexhost.karldigi.dev/mcp`. Legacy four-tool Muse grant during staging; full eleven-tool catalog after Console client + consent. Mac `enroll relay-link` carries operational client identity. |
+| [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Outbound MCP hop at `https://codexhost.karldigi.dev/mcp` (sg01 binary from `v0.20.0-0-2`). Live Muse stays four-tool. Grok Bot newbie connector `codexhost` is connected with the eleven-tool catalog. Mac `enroll relay-link` carries operational client identity. |
 | [`architecture/external-clients.md`](architecture/external-clients.md) | Shared Muse/Grok Bot MCP dispatch: Console Add client, All Threads or Selected workspaces, public-relay/local/direct, loopback `:4398`, events. Same-user CLI auto-auth, named client registry, Thread refs, debug export. |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |

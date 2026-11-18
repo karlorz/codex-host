@@ -261,9 +261,21 @@ Cloudflare Origin CA for `codexhost.karldigi.dev` is issued in the **karldigi.de
 
 ## Live path
 
-The four-tool hop is deployed on sg01. Mac `enroll relay-link` connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place. Fork prod `v0.17.4-7` is GitHub latest and npm `@karlorz/codexhost-cli@latest`. Next unused fork tag is `0.17.4-8`.
+The hop on sg01 runs enrolled-mcp-relay plus `@codexhost/shared-contracts` from checkout `fb8145cc` (`v0.20.0-0-2`). systemd `codexhost-relay.service` MainPID `1206375` started 2026-11-17 19:00:18 CST. Desktop on karlmac-mini is `0.20.0-0`; the live `enroll relay-link` process is that app binary. Mac connects out to `100.118.12.90:4401`. Hop MCP is loopback `127.0.0.1:4400`; Caddy is the public path. Public OAuth, Origin CA, and the Caddy site are in place. Fork GitHub latest is `v0.20.0-0`. Next unused fork tag is `0.20.0-1`. The hop process is still excluded from Desktop and npm payloads.
 
-Muse adds the custom connector from a Muse chat (`custom-connector-setup`). Settings Connected then lists Codex Host for `https://codexhost.karldigi.dev/mcp`. A connected Muse chat sees `tools/list` of the four tools; `enroll_status` reports `clientId=muse`, `pairing=machine`, `link=online`, and `runtime=reachable` while the Mac link is up.
+Existing Muse OAuth clients have no `dispatchGrant` and no `operationalClient`, so Muse `tools/list` remains the four tools (`enroll_status`, `thread_read`, `thread_wait`, `thread_send`). Grok Bot is a separate operational client: Host record `grok-bot` is public-relay + full-dispatch. Hop OAuth client `clientName=Grok` is bound to `operationalClient=grok-bot` with `dispatchGrant=full-dispatch`. On grok.com/bot newbie, Connect Apps Custom lists connector `codexhost` as Connected for `https://codexhost.karldigi.dev/mcp`. A newbie chat listing that connector's tools returned the eleven-tool catalog (`harness_list`, `harness_inspect`, `delegate_start`, `thread_read`, `thread_wait`, `thread_list`, `thread_send`, `thread_cancel`, `thread_watch`, `thread_watches`, `events_poll`). `delegate_start` live acceptance is not claimed.
+
+Muse adds the custom connector from a Muse chat (`custom-connector-setup`). Settings Connected then lists Codex Host for `https://codexhost.karldigi.dev/mcp`. `enroll_status` reports `clientId=muse`, `pairing=machine`, `link=online`, and `runtime=reachable` while the Mac link is up.
+
+Muse machine pairing (issued 2026-11-10, expiry 2036-11-07) is not rotated. Current `send` allowlist:
+
+| Thread | Verbs |
+| --- | --- |
+| `079d0943-8100-4139-aa79-6b4911ca01cd` | read, watch, send, cancel (Muse own Thread) |
+| `1c0f3099-dd16-429c-992d-62ae75384630` | read, watch, send, cancel |
+| `63aadb58-8773-4a97-b72c-dcc2a1e38b5c` | read, watch, send, cancel |
+| `789b6e7c-29b0-40b6-b89e-46c1322d3c25` | read, watch, send, cancel |
+| `d0be616c-0f2f-4d45-8f1d-867570c2e80d` | read, watch, send |
 
 Live checks that stay true:
 
@@ -275,12 +287,13 @@ Live checks that stay true:
 - Idle `thread_send` starts a Turn. `--view messages` pages oldest-first (default 25, max 100); `nextCursor` reaches the user text for those Turns.
 - Enrolled `THREAD_BUSY` on an already-running grok Thread returns `authorized`/`notStarted` and starts no Turn. Bounded `thread_wait` returns `timedOut` while that Turn is still running.
 - Hop operator `list-clients` / `revoke-client` cut the Muse OAuth grant (2026-11-11). File revoke plus one hop restart loaded the revoked store. Unauthenticated `POST /mcp` stays 401 with `resource_metadata`. Mac enrollment is unchanged. Mac `enroll relay-link` reconnected. Karl reconnects the Muse connector after cutover.
+- A later hop binary replace (2026-11-17) left `/var/lib/codexhost-relay/oauth-store.json` and the Muse enrollment allowlist unchanged. LaunchAgent `com.codexhost.enroll-relay-link-muse` reconnects after the brief listen gap. Rollback copy: `/opt/codexhost-relay-backups/20261117T110008Z`.
 
 Open live checks:
 
 - Mac `enroll revoke` stays planned-only, because it rotates the key.
-- Annotated tag `v0.17.4-7` is GitHub latest. Next unused fork tag is `0.17.4-8`. Mac `enroll revoke` stays planned-only.
-- Expanded eleven-tool Muse reconnect and actual Grok Bot connector acceptance are not claimed here.
+- Expanded eleven-tool Muse reconnect is not claimed here.
+- Grok Bot `delegate_start` / completed-result acceptance is not claimed here.
 
 ## Product boundary
 
