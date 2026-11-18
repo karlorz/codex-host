@@ -210,6 +210,25 @@ describe("gateway start ownership", () => {
     finish();
     await first;
   });
+  it("replaces an in-flight start so Try again is not already pending", async () => {
+    const f = fixture();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const start = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await pending;
+      })
+      .mockResolvedValue("retry");
+    const wrapper = wrapGatewayVoiceStarter(start, f.options);
+    const first = wrapper.start(request);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await expect(wrapper.start(request)).resolves.toBe("retry");
+    finish();
+    await first.catch(() => undefined);
+  });
   it("rejects replaced subscriptions", async () => {
     const f = fixture();
     const wrapper = wrapGatewayVoiceStarter(f.start, {

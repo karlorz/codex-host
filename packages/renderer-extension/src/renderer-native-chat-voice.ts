@@ -316,6 +316,32 @@ export function installNativeChatVoiceHook(
     );
     return forms.length === 1 ? forms[0] : undefined;
   };
+  const leftoverInstantConnectStarting = (): boolean => {
+    if (!boundScope || !modules || typeof modules.initial.SPn !== "function") return false;
+    try {
+      const state = (
+        modules.initial.SPn(boundScope) as {
+          getState(): {
+            isVoiceModeActive?: boolean;
+            server?: { connectionState?: unknown };
+          };
+        }
+      ).getState();
+      return state.isVoiceModeActive === true && state.server?.connectionState !== "connected";
+    } catch {
+      return false;
+    }
+  };
+  const endLeftoverInstantConnect = (): void => {
+    starting = false;
+    const end = doc.querySelector<HTMLElement>(
+      'button[aria-label="End Voice"], button[aria-label="End voice"]',
+    );
+    end?.click();
+  };
+  const releaseChatLaunchOwnership = (): void => {
+    rememberVoiceProductExperience({ productExperience: "" }, target);
+  };
   const findBinding = () => {
     if (!modules || !nativeChatVoicePreferenceAllowsStart(target)) return;
     const form = visibleComposer();
@@ -559,7 +585,17 @@ export function installNativeChatVoiceHook(
       // The hashed graph is only safe to initialize after the Chat surface mounts.
       if (hashed && !visibleComposer()) {
         selectDraft?.();
+        // Instant Connect hides the Chat composer while our START is in flight.
+        if (starting) return;
+        if (leftoverInstantConnectStarting()) {
+          endLeftoverInstantConnect();
+          releaseChatLaunchOwnership();
+          release();
+          handle.status = "pending";
+          return;
+        }
         if (handle.activeCall) return;
+        releaseChatLaunchOwnership();
         release();
         handle.status = "pending";
         return;
@@ -616,7 +652,10 @@ export function installNativeChatVoiceHook(
       }
       if (!current) {
         showHeadline();
-        if (handle.activeCall) return;
+        if (leftoverInstantConnectStarting()) {
+          endLeftoverInstantConnect();
+        } else if (handle.activeCall) return;
+        releaseChatLaunchOwnership();
         if (showHashedComposerWave()) return;
         release();
         handle.status = "pending";

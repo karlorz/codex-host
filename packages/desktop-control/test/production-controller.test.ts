@@ -12,6 +12,16 @@ import {
 } from "../src/production-controller.js";
 import type { RendererCdpControlSession } from "../src/renderer-cdp-control-session.js";
 import { CdpConnectionClosedError } from "../src/cdp-client.js";
+import { connectControllerVoiceHost } from "../src/controller-voice-host.js";
+import type { ControllerVoiceHost } from "../src/controller-voice-host.js";
+
+vi.mock("../src/controller-voice-host.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/controller-voice-host.js")>();
+  return {
+    ...actual,
+    connectControllerVoiceHost: vi.fn(actual.connectControllerVoiceHost),
+  };
+});
 
 const attachmentNonce = "0123456789abcdef0123456789abcdef";
 
@@ -1126,5 +1136,51 @@ describe("production Desktop Controller", () => {
     expect(install).toHaveBeenCalledTimes(2);
     expect(firstClose).toHaveBeenCalledOnce();
     expect(secondClose).toHaveBeenCalledOnce();
+  });
+
+  it("retries Voice Host bind until the Host client-hosts descriptor appears", async () => {
+    await withoutPinnedDesktopVersion(async () => {
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => {
+          abort.abort();
+          return snapshot;
+        }),
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      const host = {
+        owner: "voice-host",
+        generation: 1,
+        close: vi.fn(),
+      } as unknown as ControllerVoiceHost;
+      const connect = vi.mocked(connectControllerVoiceHost);
+      connect.mockReset();
+      connect
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(host);
+      const sleep = vi.fn(async () => {});
+      await runDesktopController(
+        { ...controllerOptions(), hostDataDirectory: path.normalize("/tmp/isolated-host") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async () => "production renderer"),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep,
+          monitorIntervalMs: 1,
+        },
+      );
+      expect(connect).toHaveBeenCalledTimes(3);
+      expect(connect).toHaveBeenCalledWith(path.normalize("/tmp/isolated-host"));
+      expect(sleep).toHaveBeenCalledWith(250);
+      expect(install.mock.calls[0]?.[0].voiceHost).toBe(host);
+    });
   });
 });

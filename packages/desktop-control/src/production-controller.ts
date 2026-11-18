@@ -349,7 +349,10 @@ export async function runDesktopController(
         : undefined;
     startupTrace("installing Renderer Session");
     if (!voiceHost && options.hostDataDirectory && !skipReason) {
-      voiceHost = await connectControllerVoiceHost(options.hostDataDirectory);
+      for (let attempt = 0; attempt < 8 && !voiceHost; attempt += 1) {
+        if (attempt > 0) await dependencies.sleep(250);
+        voiceHost = await connectControllerVoiceHost(options.hostDataDirectory);
+      }
     }
     const installed = await installProductionSession(
       {

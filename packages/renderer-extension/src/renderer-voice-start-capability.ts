@@ -78,7 +78,10 @@ export function wrapGatewayVoiceStarter(
           options.unavailable?.(request) ?? "Work voice is not qualified on this Desktop.",
         );
       }
-      if (active) throw new Error("Voice gateway start is already pending");
+      if (active) {
+        active.binding?.dispose();
+        active = undefined;
+      }
       const attempt: Attempt = {};
       active = attempt;
       const allowed = () => active === attempt && options.qualifies(args[0]);

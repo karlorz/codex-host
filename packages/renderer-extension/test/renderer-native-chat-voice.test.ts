@@ -13,7 +13,10 @@ import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
 } from "../src/renderer-hashed-native-chat-voice.js";
-import { rememberVoiceProductExperience } from "../src/renderer-client-owned-voice.js";
+import {
+  lastVoiceLaunchProductExperience,
+  rememberVoiceProductExperience,
+} from "../src/renderer-client-owned-voice.js";
 import {
   CHAT_LIVE_VOICE_STORAGE_KEY,
   applySharedVoiceRoutes,
@@ -1779,6 +1782,88 @@ describe("native Chat voice lifecycle installation", () => {
     hook.dispose();
   });
 
+  it("ends leftover Instant Connect when Chat composer leaves so Work can start", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    const end = { click: vi.fn() };
+    Object.assign(f.target.document, {
+      querySelector: (selector: string) => (String(selector).includes("End Voice") ? end : null),
+    });
+    const hook = installNativeChatVoiceHook(f);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hook.status).toBe("active");
+    expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+    f.setConnected(false);
+    f.setActive(true);
+    expect(hook.activeCall).toBe(true);
+    f.setVisible(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(end.click).toHaveBeenCalledOnce();
+    expect(hook.status).toBe("pending");
+    expect(lastVoiceLaunchProductExperience(f.target)).toBeUndefined();
+    hook.dispose();
+  });
+
+  it("ends leftover Instant Connect when hashed Chat composer leaves so Work can start", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    attachReviewedVoiceEvidence(f.target.__codexhostCpaLiveVoiceHookV1, ["chat"]);
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const initializeVoiceSession = vi.fn(async () => ({
+      getVoiceNuxMode: vi.fn(async () => "none"),
+      dispatchVoiceCommand: vi.fn(),
+      clearSessionCreate: vi.fn(),
+      startVoiceWithIntroduction: vi.fn().mockResolvedValue(true),
+    }));
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "cY1t") return { Iy: f.initial.aT, Re: initializeVoiceSession };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+        return { __webpack_require__: Object.assign(require, { e: vi.fn(async () => {}) }) };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const end = { click: vi.fn() };
+    Object.assign(f.target.document, {
+      querySelector: (selector: string) => (String(selector).includes("End Voice") ? end : null),
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
+      f.setConnected(false);
+      f.setActive(true);
+      f.setVisible(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(end.click).toHaveBeenCalledOnce();
+      expect(hook.status).toBe("pending");
+      expect(lastVoiceLaunchProductExperience(f.target)).toBeUndefined();
+    } finally {
+      hook.dispose();
+    }
+  });
+
   it("replaces an inactive native hook and keeps an active call", () => {
     const dispose = vi.fn();
     const active = {
@@ -2017,6 +2102,7 @@ describe("native Chat voice lifecycle installation", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(f.unmount).not.toHaveBeenCalled();
     expect(f.browserEnabled()).toBe(true);
+    expect(lastVoiceLaunchProductExperience(f.target)).toBe("chat");
     f.setActive(false);
     f.setVisible(true);
     f.props.isWorkConversation = true;

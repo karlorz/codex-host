@@ -156,6 +156,15 @@ describe("client-owned voice gateway", () => {
     expect(f.original).toHaveBeenCalledOnce();
     expect(f.dispatch).not.toHaveBeenCalled();
   });
+  it("gateways Work Instant Connect after Chat launch ownership is released", async () => {
+    rememberVoiceProductExperience({ productExperience: "chat" });
+    rememberVoiceProductExperience({ productExperience: "" });
+    const f = fixture();
+    wrapClientOwnedVoiceFetch(f.client, f.bridge, () => true, f.responseError);
+    await f.client.fetch(url, options(speechBody(), { originator: "codex_work_desktop" }));
+    expect(f.original).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledOnce();
+  });
   it("passes overlay Chat Instant Connect through even when Work gateway is on", async () => {
     rememberVoiceProductExperience({ productExperience: "chat" });
     const f = fixture();
