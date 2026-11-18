@@ -36,6 +36,7 @@ import {
   type VoiceInputFace,
 } from "./VoiceInput.tsx";
 import { ImportIcon } from "./ImportIcon.tsx";
+import { DocumentDownload } from "./DocumentDownload.tsx";
 import { RemoteAccessAction, type RemoteAccessActionFace } from "./RemoteAccessAction.tsx";
 import type {} from "@deepseek-ai/dsh-api-session-controller/client";
 import { SessionHarnessIcon } from "./SessionHarnessIcon.tsx";
@@ -61,6 +62,8 @@ import { ensureServiceWorker, resubmitNotifications } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
 import type {} from "@deepseek-ai/dsh-client-web";
 import { PwaInstallRow, type PwaInstallFace } from "./PwaInstallRow.tsx";
+import { WallpaperController } from "./wallpaper.ts";
+import { WallpaperRow, type WallpaperFace } from "./WallpaperRow.tsx";
 import { ImportPage, type ImportPageFace } from "./ImportPage.tsx";
 import { HostSettingsSection, type HostSettingsSectionFace } from "./HostSettingsSection.tsx";
 import { SettingsLauncher, type SettingsLauncherFace } from "./SettingsLauncher.tsx";
@@ -111,6 +114,16 @@ const HOST_SETTINGS_PAGES = [
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "ui-codexhost: dictionaries");
   const t = ctx.locale.bind(NS);
+  ctx.slots.inject("sidebar.right.tab.document.actions", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.right.tab.document.actions",
+        id: "codexhost-download",
+        inject: (sessionId) => ({ sessionId, label: t("file.download") }),
+      },
+      DocumentDownload,
+    ),
+  );
   const installation = ctx.get("pwaInstall");
   if (installation !== undefined) {
     ctx.slots.inject("settings.general.item", () =>
@@ -126,6 +139,20 @@ export function apply(ctx: ClientContext): void {
       ),
     );
   }
+  const wallpaper = new WallpaperController();
+  ctx.effect(() => () => wallpaper.dispose(), "ui-codexhost: wallpaper");
+  ctx.slots.inject("settings.general.item", () =>
+    ctx.slots.register(
+      {
+        name: "settings.general.item",
+        id: "codexhost.wallpaper",
+        order: 10.5,
+        locale: NS,
+        inject: (): WallpaperFace => ({ wallpaper }),
+      },
+      WallpaperRow,
+    ),
+  );
   ctx.provide("chatMessageEditing", sentMessageEditApi);
   ctx.provide("chatTurnDiffs", turnDiffsApi);
   ctx.inject(["conversation", "uiSession"], registerThreadReferenceAction);
@@ -419,6 +446,7 @@ export function apply(ctx: ClientContext): void {
         inject: () => ({
           list: ctx.sessions.list,
           connection: ctx.get("connection") as ConnectionHandle,
+          retryHistory: (id: SessionId) => ctx.sessions.retryHistory(id),
         }),
       },
       HostConnectionStatus,

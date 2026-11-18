@@ -25,6 +25,7 @@
 | [`architecture/harness-questions.md`](architecture/harness-questions.md) | 外部 Harness 多选提问卡片、对话内默认位置与 Appearance 开关、只读回答记录、原生单选分流、回答归属与生命周期；修改提问交互时阅读。 |
 | [`architecture/external-thread-steering.md`](architecture/external-thread-steering.md) | 外部 Thread 按 Session 能力选择原生同轮插入或停止后重发；修改 steering 时阅读。 |
 | [`architecture/external-thread-queue.md`](architecture/external-thread-queue.md) | 外部 Thread 跟进消息的 Host 原生 `thread/queue/*`、自动推进与中断暂停；修改排队或 Turn 启动时阅读。 |
+| [`architecture/external-thread-side-chats.md`](architecture/external-thread-side-chats.md) | 外部 Thread 的侧边聊天：挂靠 Fork、来源运行中的 Fork、边界消息暂存并随下一个 Turn 交付，以及列表、历史与删除规则；修改侧边聊天或 Fork 时阅读。 |
 | [`architecture/host-client-channel.md`](architecture/host-client-channel.md) | GUI、Web 与 App 共享原生 Codex／外部 Harness 的生命周期、认证通道、事件驱动快照、交互仲裁及恢复边界。 |
 | [OpenSpec：状态刷新与轮询优化](../openspec/changes/reduce-redundant-state-polling/proposal.md) | Web 目录与组织状态分别校验，远程设置页和 Console 按可见性降频；查看方案、实现进度与验收边界时阅读。 |
 | [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 共享 Host 的官方 Codex 与外部 Thread 所有权、存储边界、启动发现及生命周期；不提供旧 standalone 迁移。 |
@@ -34,14 +35,16 @@
 | [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | CLI 与 HTTP/MCP 委派创建独立 Git worktree 的目录、HEAD 基线、返回字段、状态校验与失败保留边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
 | [`architecture/web-thread-tree.md`](architecture/web-thread-tree.md) | Web 侧栏会话树：委派关系决定的显示父 Thread、Host 树接口、祖先补齐、归档级联、排序与置顶规则；修改侧栏层级或委派显示时阅读。 |
-| [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
+| [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下或等待回答通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/client-enrollment.md`](architecture/client-enrollment.md) | Allowlisted collaborator enrollment (not same-Mac `:4398` MCP). `--enrolled-client` / `CODEXHOST_ENROLL_CLIENT` identity, machine pairing, Path 2 command for tailnet peers, Settings/console list and revoke. |
 | [`architecture/enrolled-mcp-relay.md`](architecture/enrolled-mcp-relay.md) | Outbound MCP hop at `https://codexhost.karldigi.dev/mcp` (sg01 binary from `v0.20.0-0-2`). Live Muse stays four-tool. Grok Bot newbie connector `codexhost` is connected with the eleven-tool catalog. Mac `enroll relay-link` carries operational client identity. |
 | [`architecture/external-clients.md`](architecture/external-clients.md) | Shared Muse/Grok Bot MCP dispatch: Console Add client, All Threads or Selected workspaces, public-relay/local/direct, loopback `:4398`, events. Same-user CLI auto-auth, named client registry, Thread refs, debug export. |
+| [`architecture/delegation-questions.md`](architecture/delegation-questions.md) | 委派问题（`pendingQuestions`/`thread answer`）的来源、唯一状态、回答与失效语义；修改子 Agent 提问交互时阅读。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
 | [`architecture/turn-activity-folding.md`](architecture/turn-activity-folding.md) | 回合完成后过程折叠的 Desktop 条件与 `final_answer` 推断规则；修改 Agent 消息阶段投影或排查过程无法收起时阅读。 |
 | [`architecture/acp-layer-follow-up.md`](architecture/acp-layer-follow-up.md) | 共享 ACP 层的抽取条件与边界；出现第二个适合共享实现的生产 ACP Harness 时阅读。 |
+| [`architecture/acp-implementation-research.md`](architecture/acp-implementation-research.md) | ACP 实现事实记录：本地插件分布、重复职责、会话与进程关系，以及 T3 Code 固定提交的公共 ACP 层和隔离机制；不包含改造方案。 |
 
 ## Harness 专项
 

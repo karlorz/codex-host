@@ -5,7 +5,7 @@ description: 发布 codexhost 正式版、预览版，编写或确认 Release No
 
 # codexhost 版本发布
 
-目标：通过仓库既有 GitHub Actions 发布，不在本地执行 `npm publish`，不手动创建 GitHub Release。默认等待并校验 CI；仅在用户明确选择时，通过手动发布的 `skip_ci=true` 跳过 CI 门禁，其他发布校验不变。
+目标：通过仓库既有 GitHub Actions 发布，不在本地执行 `npm publish`，不手动创建 GitHub Release。是否等待 CI 由用户每次选择（见“确认 CI 策略”），跳过 CI 时其他发布校验不变。
 
 ## 必须先读
 
@@ -40,15 +40,23 @@ description: 发布 codexhost 正式版、预览版，编写或确认 Release No
 用户意图不清楚时，先问清两个渠道的目标。最终执行前明确报告版本、npm dist-tag、GitHub 状态与是否提示更新。
 
 在 `karlorz/codex-host` 上，上表的 BytePioneer npm `@codexhost/cli` / 正式 GitHub latest **不适用**。Fork 标签跟随当前 upstream 版本加计数器（upstream 为 `0.13.3` 时用 `v0.13.3-0`、`v0.13.3-1`，不要写成 `0.13.3-cpa.1`）。不向 `upstream` 推送。Fork **必须**把同一版本发布为 `@karlorz/codexhost-cli@latest`（及对应平台包），并把 `karlorz/codex-host` 上的 GitHub Release 标成 latest，这样 Settings 的 `npm install -g @karlorz/codexhost-cli@latest` 和 in-app Update 才指向 fork。禁止发布 `@codexhost/*`。`Release packages` 已启用，Trusted Publisher 指向 `karlorz/codex-host`；数字计数（如 `0.13.3-0`、`0.13.3-1`）由工作流发成 npm `latest` + GitHub latest。控制台「codexhost 版本」必须与该准备版本一致。`gh pr create` / `gh release` 必须带 `-R karlorz/codex-host`。规则全文：[fork versioning](../../../docs/operations/fork-versioning.md)。
+### 确认 CI 策略
+
+开始前请用户二选一，后续每一步沿用；请求里已经说明时直接沿用，不重复询问。
+
+| 路径 | 做法 | 代价 |
+| --- | --- | --- |
+| 等待 CI | 推送版本提交，等确切 SHA 的 `main push` CI 成功后推 Tag，自动发布 | 多等一轮 CI（工作流最多等 30 分钟） |
+| 不等 CI | 手动运行 `Release packages` 并设 `skip_ci=true`（见第 4 节“可选 CI 门禁”）；新 Tag 需先获临时禁用发布工作流的授权 | CI 能发现的问题可能随版本发布 |
 
 ## 2. 检查现场与验证
 
 1. 检查工作区、当前分支、远端与已有标签；快进同步 `main`，不覆盖无关修改。
 2. 检查目标版本是否已存在于 npm 或 GitHub，是否有正在运行的发布。已推送标签不等于已发布；取消发布也不保证 npm 从未接受某个平台包。
 3. 新版本用 `npm run release:prepare -- <version>` 同步四个版本文件，检查 diff。
-4. 默认走远端 CI 门禁（`skip_ci=false`）时，仅核对四个版本文件的 diff，不在本地跑全套 `npm run check`；仅在用户明确选择 `skip_ci=true` 跳过远端 CI 时，才在本地执行 `npm run check` 兜底（已有无关问题阻断时，报告具体文件、步骤和未执行检查，不顺手修复；不得声称全部通过）。
+4. 选择等待 CI 时，仅核对四个版本文件的 diff，不在本地跑全套 `npm run check`；选择不等 CI 时，才在本地执行 `npm run check` 兜底（已有无关问题阻断时，报告具体文件、步骤和未执行检查，不顺手修复；不得声称全部通过）。
 5. 只提交四个版本文件，使用 `chore: prepare v<version>`，推送 `main`。
-6. 默认确认**标签目标 SHA 对应的 `main push` CI**成功，包含四个基线 job。不能用另一提交的 CI、本地检查、PR CI 或手动单平台 CI 代替。用户明确选择不等待且不校验 CI 时，使用下述手动发布选项；不得将跳过报告为通过。
+6. 选择等待 CI 时，确认**标签目标 SHA 对应的 `main push` CI**成功，包含四个基线 job。不能用另一提交的 CI、本地检查、PR CI 或手动单平台 CI 代替。选择不等 CI 时，使用下述手动发布选项；不得将跳过报告为通过。
 
 CI 失败时查看失败 step 和原始诊断。不自动重试测试或放宽超时；只有核实为可重试的临时故障并获授权后才重跑失败 jobs。重跑完成前不得报告 CI 通过。
 

@@ -73,6 +73,12 @@ Rarely needed: debugging only. Exports the full Thread to a JSON file and return
 Wait until the Thread is terminal or the timeout expires (default 30000 ms), then return the same snapshot as thread read plus timedOut.
 timedOut=true is a running checkpoint: the child keeps running. The response already includes the result when available; another read is unnecessary unless more information is needed.
 ${MESSAGE_VIEW_HELP}`,
+  "thread answer": `codexhost thread answer <thread> --interaction <id> --answers-file <file> [--format json|compact]
+Answer one pending Question request reported by thread read in pendingQuestions, and let the original Turn continue.
+--interaction is the opaque interactionId reported by read. --answers-file contains the existing reply result for kind=requestUserInput, for example {"answers":{"decision":{"answers":["Continue"]}}}. For kind=requestUserInputAsync, each entry is one question: read request.title and request.options and submit {"answer":"Continue"}. Native async questions follow the client channel: answers steer the current active Turn, or start a Turn when idle; the original question need not belong to the current Turn.
+Read pendingQuestions[].request for the original prompts and option labels. Reply interpretation, cancellation, and invalid-input behavior belong to the existing handler, just as for Desktop. Do not assume a rejected reply can be retried; read the Thread again.
+QUESTION_NOT_PENDING means the interaction ID is unknown, already answered by the user or another caller, cancelled, expired, or from a finished Turn or retired Runtime.
+The reply is submitted to the existing request handler, and the same Question closes in Desktop. The receipt means the answer was accepted, not that the delegated work succeeded: read or wait for the outcome.`,
   "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--enrolled-client <id>] [--format json|compact|text]
 Ask the Host to notify one Thread, once, when the watched Thread stops. Returns immediately; no waiting or polling by the caller is needed, and the caller may end its Turn.
 --notify defaults to the calling Thread when it is identified (CODEXHOST_THREAD_ID, or CODEX_THREAD_ID in native Codex); for an external client it defaults to the client, and the notification becomes an event in its log (see codexhost events). Otherwise it is required. delegate start reports the caller as its parent.

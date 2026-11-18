@@ -102,8 +102,9 @@ async function overlayControlSession(overlay: ReturnType<typeof rendererClient>,
 
 function rendererClient(binding = readyBinding()) {
   const commands: Array<{ method: string; params?: Record<string, unknown> }> = [];
-  const evaluateSpy = vi.fn(async (expression: string) => {
+  const evaluateSpy = vi.fn(async (expression: string, timeoutMs?: number) => {
     void expression;
+    void timeoutMs;
     return binding as unknown;
   });
   return {
@@ -115,8 +116,8 @@ function rendererClient(binding = readyBinding()) {
       if (method === "Runtime.evaluate") return { result: { type: "undefined" } };
       return {};
     }),
-    async evaluate<T>(expression: string): Promise<T> {
-      return (await evaluateSpy(expression)) as T;
+    async evaluate<T>(expression: string, timeoutMs?: number): Promise<T> {
+      return (await evaluateSpy(expression, timeoutMs)) as T;
     },
     close: vi.fn(),
   };
@@ -1166,7 +1167,9 @@ describe("Renderer CDP Control Session", () => {
     expect(first.close).toHaveBeenCalledOnce();
     expect(connect).toHaveBeenCalledTimes(2);
     await session.executeRenderer("42");
-    expect(replacement.evaluateSpy).toHaveBeenLastCalledWith("42");
+    expect(replacement.evaluateSpy).toHaveBeenLastCalledWith("42", undefined);
+    await session.executeRenderer("longRemoteOperation()", 40_000);
+    expect(replacement.evaluateSpy).toHaveBeenLastCalledWith("longRemoteOperation()", 40_000);
     session.close();
     expect(replacement.close).toHaveBeenCalledOnce();
   });

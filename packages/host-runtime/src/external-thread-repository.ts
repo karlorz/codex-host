@@ -11,6 +11,7 @@ import {
   type CreateProvisionalThreadInput,
   type DelegationStatus,
   type FindRecentDelegationInput,
+  type InjectedTurnPrefix,
   type RebindSubagentSessionInput,
   type ReplaceReadySessionAfterLastTurnInput,
   type ReplaceReadySessionAfterRollbackInput,
@@ -88,6 +89,15 @@ export interface ExternalThreadStore {
     transportModelId: string,
   ): Promise<StoredThreadRecordV1>;
   setArchived(hostThreadId: HostThreadId, archived: boolean): Promise<StoredThreadRecordV1>;
+  appendPendingInjectedText(
+    hostThreadId: HostThreadId,
+    texts: readonly string[],
+  ): Promise<StoredThreadRecordV1>;
+  consumePendingInjectedText(
+    hostThreadId: HostThreadId,
+    through: number,
+    prefix: InjectedTurnPrefix,
+  ): Promise<StoredThreadRecordV1>;
   setSubagentOrigin(hostThreadId: HostThreadId, origin: "scheduled"): Promise<StoredThreadRecordV1>;
   updateMetadata(
     hostThreadId: HostThreadId,
@@ -257,6 +267,21 @@ export class ExternalThreadRepository {
 
   setArchived(hostThreadId: HostThreadId, archived: boolean): Promise<StoredThreadRecordV1> {
     return this.store.setArchived(hostThreadId, archived);
+  }
+
+  appendPendingInjectedText(
+    hostThreadId: HostThreadId,
+    texts: readonly string[],
+  ): Promise<StoredThreadRecordV1> {
+    return this.store.appendPendingInjectedText(hostThreadId, texts);
+  }
+
+  consumePendingInjectedText(
+    hostThreadId: HostThreadId,
+    through: number,
+    prefix: InjectedTurnPrefix,
+  ): Promise<StoredThreadRecordV1> {
+    return this.store.consumePendingInjectedText(hostThreadId, through, prefix);
   }
 
   setSubagentOrigin(

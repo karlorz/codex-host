@@ -1,6 +1,7 @@
 import type { ThreadExportInput, ThreadExportResult } from "./delegation-thread-export.js";
 import type { DelegationWorktree } from "./delegation-worktree.js";
 import type { RoutedHarnessId } from "@codexhost/protocol-core";
+import type { JsonObject, JsonValue } from "@codexhost/shared-contracts";
 import type {
   HarnessInspection,
   HarnessModelRef,
@@ -62,6 +63,17 @@ export interface DelegationProgress {
   text: string;
 }
 
+export interface DelegationPendingQuestion {
+  /** Opaque Host request identity accepted by `thread answer --interaction`, not an Adapter ID. */
+  interactionId: string;
+  kind: "requestUserInput" | "requestUserInputAsync";
+  /** Turn that asked the question; asynchronous questions do not pause it. */
+  turnId: string;
+  expiresAt?: string;
+  /** Original request params, or one native async question with its source identity. */
+  request: JsonObject;
+}
+
 export interface DelegationThreadResult {
   availability: DelegationResultAvailability;
   text?: string;
@@ -92,6 +104,7 @@ export interface DelegationThreadSnapshot {
   };
   turns?: DelegationMessageTurn[];
   totalTurns?: number;
+  pendingQuestions?: DelegationPendingQuestion[];
   /** Inclusive absolute Turn numbers; null when the range contains no Turns. */
   from?: number | null;
   to?: number | null;
@@ -226,6 +239,24 @@ export interface ThreadWaitInput extends ThreadReadInput {
   timeoutMs: number;
 }
 
+export interface ThreadAnswerInput {
+  threadId: string;
+  /** Interaction ID reported by `thread read` in `pendingQuestions`. */
+  interactionId: string;
+  /** Existing requestUserInput result, or { answer: string } for a native async question. */
+  result: JsonValue;
+}
+
+export interface ThreadAnswerResult {
+  threadId: string;
+  interactionId: string;
+  turnId: string;
+  harnessId: RoutedHarnessId;
+  /** Reply submission receipt; read the Thread for its actual execution state. */
+  status: "running";
+  next: { read: string; wait: string };
+}
+
 export interface ThreadListInput {
   cwd?: string;
   parentThreadId?: string;
@@ -275,6 +306,7 @@ export type ThreadWatchOutcome =
   | "completed"
   | "failed"
   | "interrupted"
+  | "needsInput"
   /** The Thread was still running when the watch expired. */
   | "timedOut"
   /** Reads kept failing, so the state of the Thread is unknown. */
@@ -295,6 +327,7 @@ export interface ThreadWatchEntry {
   notifyThreadId: string;
   state: "watching" | "pendingDelivery" | "undeliverable";
   outcome?: ThreadWatchOutcome;
+  interactionId?: string;
   /** Turn that reached the terminal outcome, when the Thread reported one. */
   turnId?: string;
   /** 1-based index of that Turn, when the snapshot reported one. */
@@ -336,6 +369,7 @@ export interface DelegationControlApi {
   /** Optional for older control registrations that do not support debug exports. */
   exportThread?(input: ThreadExportInput): Promise<ThreadExportResult>;
   wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }>;
+  answer?(input: ThreadAnswerInput): Promise<ThreadAnswerResult>;
   list(input: ThreadListInput): Promise<DelegationThreadListResult>;
 }
 
@@ -371,6 +405,8 @@ export type DelegationControlErrorCode =
   | "UNAUTHORIZED"
   /** The event cursor is older than the oldest retained event. */
   | "CURSOR_EXPIRED"
+  /** The Question request is unknown, already answered, or no longer pending. */
+  | "QUESTION_NOT_PENDING"
   | "INTERNAL_ERROR";
 
 export class DelegationControlError extends Error {

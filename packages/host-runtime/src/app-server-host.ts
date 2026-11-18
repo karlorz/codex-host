@@ -402,6 +402,7 @@ import { ThreadPins } from "./external-thread-pins.js";
 import { ThreadTree } from "./thread-tree.js";
 import { externalThreadListEntries } from "./external-thread-list.js";
 import { queuedSubmissionText } from "./external-thread-follow-up-queue.js";
+import { holdInjectedItems } from "./external-thread-side-chat.js";
 import { ModelPriceCatalog } from "./model-prices.js";
 import { UsageMeasurementsStore } from "./usage-measurements-store.js";
 import { ObservedSessionUsage } from "./observed-session-usage.js";
@@ -785,7 +786,10 @@ export class AppServerHost {
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
-  #pendingOfficialTurnStarts = new Map<unknown, string>();
+  #pendingOfficialTurnStarts = new Map<
+    unknown,
+    { threadId: string; completedTurnIds: Set<string> }
+  >();
   #activeWorkDrainWaiters = new Set<() => void>();
   #pendingOfficialDelegationThreads = new Set<string>();
   #pendingOfficialTerminalStatuses = new Map<string, DelegationStartResult["status"]>();
@@ -856,7 +860,7 @@ export class AppServerHost {
       events: this.clientEvents,
       interactions: {
         approvals: this.#pendingDesktopApprovals,
-        questions: this.#pendingDesktopQuestions,
+        questions: () => this.#pendingDesktopQuestions,
         isApprovalRequestId: isHostApprovalRequestId,
         isQuestionRequestId: isHostQuestionRequestId,
         respondApproval: (response) => this.#handleDesktopApprovalResponse(response),
@@ -1266,6 +1270,8 @@ export class AppServerHost {
         this.#cleanExternalBackgroundTerminals(request, threadId),
       startExternalCompaction: (request, threadId) =>
         this.#startExternalCompaction(request, threadId),
+      injectExternalThreadItems: (request, location) =>
+        this.#injectExternalThreadItems(request, location),
     });
   }
 
@@ -1546,9 +1552,10 @@ export class AppServerHost {
 
   #observeOfficialTurnStartResponse(value: JsonValue): void {
     if (!isRecord(value) || !("id" in value)) return;
-    const threadId = this.#pendingOfficialTurnStarts.get(value.id);
-    if (!threadId) return;
+    const pending = this.#pendingOfficialTurnStarts.get(value.id);
+    if (!pending) return;
     this.#pendingOfficialTurnStarts.delete(value.id);
+    const threadId = pending.threadId;
     const result = isRecord(value.result) ? value.result : null;
     const turn = result && isRecord(result.turn) ? result.turn : null;
     if (turn && typeof turn.id === "string") {
@@ -1661,7 +1668,7 @@ export class AppServerHost {
 
   #forgetPendingOfficialTurnStarts(threadId: string): void {
     for (const [requestId, pendingThreadId] of this.#pendingOfficialTurnStarts) {
-      if (pendingThreadId === threadId) this.#pendingOfficialTurnStarts.delete(requestId);
+      if (pendingThreadId.threadId === threadId) this.#pendingOfficialTurnStarts.delete(requestId);
     }
   }
 
@@ -6332,6 +6339,21 @@ export class AppServerHost {
     ) {
       void this.#startNextQueuedExternalTurn(thread);
     }
+  }
+
+  async #injectExternalThreadItems(
+    request: JsonRpcRequest,
+    location: Extract<ExternalThreadLocation, { kind: "external" }>,
+  ): Promise<void> {
+    const error = await holdInjectedItems({
+      request,
+      record: location.record,
+      repository: this.#repository,
+      runtime: this.#externalRuntime,
+    });
+    await this.#writer.json(
+      error ? rpcError(request, error.code, error.message) : rpcEnvelope(request, { result: {} }),
+    );
   }
 
   async #backfillScheduledSubagentOrigins(parent: ExternalThread): Promise<void> {
