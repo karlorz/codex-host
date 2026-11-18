@@ -1599,6 +1599,15 @@ fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
             restart::stop_managed_runtime()?;
             launch(options, false)
         }
+        Some("open-file") if arguments.len() == 2 => {
+            let path = PathBuf::from(&arguments[1]).canonicalize()?;
+            if !path.is_file() {
+                return Err("native file opener requires a regular file".into());
+            }
+            let path = path.to_str().ok_or("file path must be valid UTF-8")?;
+            codexhost_platform::open_external_url(path).map_err(Into::into)
+        }
+        Some("open-file") => Err("open-file requires one file path".into()),
         Some("open-loopback-url") if arguments.len() == 1 => {
             let url = read_bounded_loopback_url(std::io::stdin().lock())?;
             validate_loopback_root_url(&url)?;

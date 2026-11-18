@@ -8,6 +8,7 @@ import {
   type DelegationWatchApi,
   type HarnessInspectInput,
   type HarnessListInput,
+  type ThreadAnswerInput,
   type ThreadListInput,
   type ThreadReadInput,
   type ThreadWaitInput,
@@ -183,6 +184,18 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
   async read(input: ThreadReadInput) {
     const snapshot = await this.#read(input);
     return withRefs(snapshot, (await this.#refs?.get(snapshot.threadId)) ?? []);
+  }
+
+  async answer(input: ThreadAnswerInput) {
+    const registration = await this.#registrationForThread(input.threadId);
+    if (!registration.answer) {
+      throw new DelegationControlError(
+        "QUESTION_NOT_PENDING",
+        "Question answering is unavailable on this Thread",
+        { threadId: input.threadId, interactionId: input.interactionId },
+      );
+    }
+    return registration.answer(input);
   }
 
   async #read(input: ThreadReadInput) {
