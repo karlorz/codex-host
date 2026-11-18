@@ -63,8 +63,11 @@ export default defineConfig({
     passWithNoTests: false,
     // Hosted Windows runners have highly variable disk latency (fsync + rename
     // under real-time scanning): the same Mapping Store suite ranges from
-    // ~0.4s to ~10s between runs. Keep the default elsewhere so real hangs
-    // still fail fast.
-    ...(process.platform === "win32" ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
+    // ~0.4s to ~10s between runs. Hosted Intel macOS runners are slower than
+    // ARM images for plugin-load and stdio-bridge tests. Keep the default
+    // elsewhere so real hangs still fail fast.
+    ...(process.platform === "win32" || (process.platform === "darwin" && process.arch === "x64")
+      ? { testTimeout: 20_000, hookTimeout: 30_000 }
+      : {}),
   },
 });
