@@ -62,7 +62,12 @@ import { ExternalVoiceResults } from "./external-voice-results.js";
 import { SkillLibrary } from "@codexhost/skill-library";
 import { SKILLS_LIST_METHOD, SKILLS_CHANGED_METHOD } from "@codexhost/shared-contracts";
 import { handleSkillsList } from "./skill-library-host.js";
-import { externalTurnInputText } from "./external-turn-input.js";
+import {
+  EXTERNAL_RESUME_INTERRUPTED_UNSUPPORTED,
+  externalTurnInputText,
+  isInputlessInterruptedTaskResume,
+} from "./external-turn-input.js";
+import { materializeExternalImages } from "./external-inline-attachments.js";
 import {
   presentExternalVoiceMessage,
   presentExternalVoiceTurn,
@@ -436,8 +441,6 @@ import {
   parseJsonFrame,
   projectCodexThreadUsage,
   readLfFrames,
-  writeFrame,
-  writeJsonFrame,
   jsonRpcRequestSchema,
   threadForkResult,
   threadRevertResult,
@@ -726,27 +729,36 @@ function turnProjectionGate(): TurnProjectionGate {
 }
 
 class OrderedWriter {
-  #tail = Promise.resolve();
-
   constructor(
     private readonly stream: Writable,
     /** Returns true for a message it consumed instead of the stream. */
     private readonly intercept: (value: JsonValue) => boolean = () => false,
   ) {}
 
-  frame(frame: Buffer<ArrayBufferLike>): Promise<void> {
-    return this.#enqueue(() => writeFrame(this.stream, frame));
+  async frame(frame: Buffer<ArrayBufferLike>): Promise<void> {
+    await this.write(Buffer.concat([frame, Buffer.from("\n")]));
   }
 
-  json(value: JsonValue): Promise<void> {
-    if (this.intercept(value)) return Promise.resolve();
-    return this.#enqueue(() => writeJsonFrame(this.stream, value));
+  async json(value: JsonValue): Promise<void> {
+    if (this.intercept(value)) return;
+    // Writable owns ordering and backpressure, including unawaited shared notifications.
+    await this.write(encodeJsonFrame(value));
   }
 
-  #enqueue(operation: () => Promise<void>): Promise<void> {
-    const next = this.#tail.then(operation, operation);
-    this.#tail = next.catch(() => undefined);
-    return next;
+  private write(frame: Buffer<ArrayBufferLike>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Accepted writes must not hold Host state updates until a next-tick callback.
+      // A backpressured write waits only for its own completion, not a global drain.
+      const closed = () =>
+        reject(new Error("Protocol stream closed before pending write completed"));
+      const accepted = this.stream.write(frame, (error) => {
+        this.stream.off("close", closed);
+        if (error) reject(error);
+        else resolve();
+      });
+      if (accepted) resolve();
+      else this.stream.once("close", closed);
+    });
   }
 }
 
@@ -878,6 +890,35 @@ export class AppServerHost {
         (error) => this.#diagnose(error),
       ),
     );
+    const environment = this.#options.environment ?? process.env;
+    const permanentHome = path.resolve(environment.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
+    this.#ownsOfficialRuntimeScope = options.officialRuntimeScope === undefined;
+    this.#officialRuntimeScope =
+      options.officialRuntimeScope ??
+      new OfficialRuntimeScope({
+        diagnosticOutput: this.#options.diagnosticOutput,
+        permanentHome,
+        createBackend: () =>
+          createOwnedConnectionBackend(() =>
+            options.createOfficialConnection
+              ? options.createOfficialConnection()
+              : spawnOfficialAppServerConnection({
+                  stockCodexPath: this.#options.stockCodexPath,
+                  arguments: this.#options.arguments,
+                  environment: {
+                    ...officialEnvironment(environment),
+                    CODEX_HOME: permanentHome,
+                  },
+                  ...(this.#options.spawnOfficial
+                    ? { spawnOfficial: this.#options.spawnOfficial }
+                    : {}),
+                  ...(this.#options.officialCloseTimeoutMs === undefined
+                    ? {}
+                    : { closeTimeoutMs: this.#options.officialCloseTimeoutMs }),
+                }),
+          ),
+      });
+    this.#asyncQuestions = this.#officialRuntimeScope.asyncQuestions;
     this.#client = new ClientChannelHost({
       events: this.clientEvents,
       interactions: {
@@ -903,6 +944,7 @@ export class AppServerHost {
         ? {
             native: {
               events: this.clientEvents,
+              asyncQuestions: this.#asyncQuestions,
               request: (method: string, params: JsonObject) =>
                 this.#requestClientNative(method, params),
               respond: (
@@ -927,7 +969,6 @@ export class AppServerHost {
       this.#client.observeDesktopMessage(value);
       return this.#takeConsoleReply(value);
     });
-    const environment = this.#options.environment ?? process.env;
     this.#nativeVoiceGateway = new NativeVoiceGateway(environment);
     this.#externalVoice = new ExternalVoice({
       createCall: options.createExternalVoiceCall ?? configuredExternalVoiceGateway(environment),
@@ -958,34 +999,6 @@ export class AppServerHost {
     this.#launchSettings = new HarnessLaunchSettingsStore(
       this.#options.pluginContext?.environment ?? environment,
     );
-    const permanentHome = path.resolve(environment.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
-    this.#ownsOfficialRuntimeScope = options.officialRuntimeScope === undefined;
-    this.#officialRuntimeScope =
-      options.officialRuntimeScope ??
-      new OfficialRuntimeScope({
-        diagnosticOutput: this.#options.diagnosticOutput,
-        permanentHome,
-        createBackend: () =>
-          createOwnedConnectionBackend(() =>
-            options.createOfficialConnection
-              ? options.createOfficialConnection()
-              : spawnOfficialAppServerConnection({
-                  stockCodexPath: this.#options.stockCodexPath,
-                  arguments: this.#options.arguments,
-                  environment: {
-                    ...officialEnvironment(environment),
-                    CODEX_HOME: permanentHome,
-                  },
-                  ...(this.#options.spawnOfficial
-                    ? { spawnOfficial: this.#options.spawnOfficial }
-                    : {}),
-                  ...(this.#options.officialCloseTimeoutMs === undefined
-                    ? {}
-                    : { closeTimeoutMs: this.#options.officialCloseTimeoutMs }),
-                }),
-          ),
-      });
-    this.#asyncQuestions = this.#officialRuntimeScope.asyncQuestions;
     this.#accountControl =
       options.accountControl ??
       new SingleNativeCodexAccount(() => ({
@@ -1585,7 +1598,7 @@ export class AppServerHost {
     this.#pendingOfficialTurnStarts.delete(value.id);
     const result = isRecord(value.result) ? value.result : null;
     const turn = result && isRecord(result.turn) ? result.turn : null;
-    if (turn && typeof turn.id === "string") {
+    if (turn && typeof turn.id === "string" && !pending.completedTurnIds.has(turn.id)) {
       this.#activeOfficialTurns.set(pending.threadId, turn.id);
     }
     this.#signalActiveWorkChanged();
@@ -1693,12 +1706,6 @@ export class AppServerHost {
     return this.#client.respondClient(input);
   }
 
-  #forgetPendingOfficialTurnStarts(threadId: string): void {
-    for (const [requestId, pending] of this.#pendingOfficialTurnStarts) {
-      if (pending.threadId === threadId) this.#pendingOfficialTurnStarts.delete(requestId);
-    }
-  }
-
   async #forwardDesktop(): Promise<void> {
     for await (const frame of readLfFrames(this.#options.desktopInput)) {
       const parsed = parseJsonFrame(frame);
@@ -1714,6 +1721,8 @@ export class AppServerHost {
         continue;
       }
       if (await this.#handleDesktopApprovalResponse(parsed)) continue;
+      if (await this.#questions.handleDesktopResponse(parsed, this.#options.externalOnly === true))
+        continue;
       if (await this.#handleDesktopQuestionResponse(parsed)) continue;
       const requestResult = jsonRpcRequestSchema.safeParse(parsed);
       if (!requestResult.success) {
@@ -2252,19 +2261,83 @@ export class AppServerHost {
   ): Promise<void> {
     if (this.#options.externalOnly) return;
     const response = isRecord(value) ? value : null;
-    const request =
-      response && (typeof response.id === "string" || typeof response.id === "number")
-        ? this.#officialServerRequests.get(response.id)
-        : null;
-    if (request !== undefined && response) {
-      this.#officialServerRequests.delete(response.id as JsonRpcId);
-      await this.#officialRuntime.send({
-        ...response,
-        id: request,
-      });
+    if (
+      response &&
+      typeof response.method !== "string" &&
+      (typeof response.id === "string" || typeof response.id === "number")
+    ) {
+      const replied = await this.#replyToOfficialServerRequest(response.id, response);
+      if (!replied) this.#diagnose("Discarded an official server reply with no pending request");
       return;
     }
     await this.#officialRuntime.sendFrame(frame);
+  }
+
+  async #replyToOfficialServerRequest(
+    requestId: string | number,
+    response: JsonObject,
+  ): Promise<boolean> {
+    const original = this.#officialServerRequests.get(requestId);
+    if (original === undefined) return false;
+    this.#officialServerRequests.delete(requestId);
+    await this.#officialRuntime.send({ ...response, id: original });
+    return true;
+  }
+
+  #finishOfficialTurn(value: JsonValue): void {
+    if (!isRecord(value) || value.method !== "turn/completed" || !isRecord(value.params)) return;
+    const { threadId, turn } = value.params;
+    if (typeof threadId !== "string" || !isRecord(turn)) return;
+    if (this.#activeOfficialTurns.get(threadId) === turn.id)
+      this.#activeOfficialTurns.delete(threadId);
+    this.#signalActiveWorkChanged();
+  }
+
+  #observeOfficialServerRequest(parsed: JsonValue, forwarded: JsonValue): JsonValue | null {
+    if (!isRecord(forwarded)) return forwarded;
+    const params = forwarded.params;
+    if (
+      forwarded.method === "item/tool/requestUserInput" &&
+      typeof forwarded.id === "string" &&
+      isRecord(params) &&
+      typeof params.threadId === "string" &&
+      typeof params.turnId === "string"
+    ) {
+      const requestId = forwarded.id;
+      this.#questions.register({
+        requestId,
+        threadId: params.threadId,
+        turnId: params.turnId,
+        harnessId: "codex",
+        request: params as JsonObject,
+        retire: () => {
+          this.#officialServerRequests.delete(requestId);
+        },
+        respond: async (reply) => {
+          if (await this.#replyToOfficialServerRequest(requestId, reply)) return;
+          throw new DelegationControlError(
+            "QUESTION_NOT_PENDING",
+            "Native Question reply route is no longer available",
+          );
+        },
+      });
+    }
+    if (
+      forwarded.method !== "serverRequest/resolved" ||
+      !isRecord(parsed) ||
+      !isRecord(parsed.params)
+    )
+      return forwarded;
+    for (const [requestId, originalId] of this.#officialServerRequests) {
+      if (originalId !== parsed.params.requestId) continue;
+      this.#officialServerRequests.delete(requestId);
+      void this.#questions.close(requestId, false);
+      return {
+        ...forwarded,
+        params: { ...(forwarded.params as JsonObject), requestId },
+      } as JsonObject;
+    }
+    return null;
   }
 
   async #forwardOfficialRequest(
@@ -2315,11 +2388,13 @@ export class AppServerHost {
       // Native children created through Delegation still have a native owner
       // and lifecycle. Their rendering stays on the GUI's native connection.
       await this.#observeOfficialTurnLifecycle(input.value);
+      this.#finishOfficialTurn(input.value);
       return;
     }
     const parsed = input.value;
+    if (isRecord(parsed) && typeof parsed.method === "string" && isRecord(parsed.params))
+      this.#asyncQuestions.observe(parsed.method, parsed.params as JsonObject);
     const observedAtMs = Date.now();
-    this.#observeOfficialTurnStartResponse(parsed);
     let forwarded: JsonValue = parsed;
     if (isRecord(parsed) && typeof parsed.method === "string" && "id" in parsed) {
       const originalId = parsed.id;
@@ -2329,6 +2404,7 @@ export class AppServerHost {
         forwarded = { ...parsed, id: forwardedId };
       }
     }
+    forwarded = this.#observeOfficialServerRequest(parsed, forwarded);
     const accountScopedNotification =
       isRecord(parsed) &&
       typeof parsed.method === "string" &&
@@ -2345,24 +2421,31 @@ export class AppServerHost {
       this.#diagnose(error);
     }
     this.#routeObservationTracker.bindOfficialResponse(parsed);
-    const privateTelemetry =
-      isRecord(parsed) &&
-      typeof parsed.method === "string" &&
-      !("id" in parsed) &&
-      !this.#observedSessionUsage.shouldForwardNotification(parsed);
-    if (!privateTelemetry) {
-      if (forwarded === parsed) await this.#writer.frame(input.frame);
-      else await this.#writer.json(forwarded);
+    if (forwarded === null) {
+      this.#nativeAccountObserver?.observe(parsed);
+      return;
     }
-    // Plugin startup and history I/O must never delay the official protocol. Promise
-    // callbacks preserve observation order and the original receipt timestamps.
-    void (this.#usagePluginsReady ?? Promise.resolve())
-      .then(async () => {
-        for (const threadId of this.#observedSessionUsage.observe(parsed, observedAtMs)) {
-          await this.#writer.json({ method: THREAD_USAGE_UPDATED_METHOD, params: { threadId } });
-        }
-      })
-      .catch((error: unknown) => this.#diagnose(error));
+    try {
+      const privateTelemetry =
+        isRecord(parsed) &&
+        typeof parsed.method === "string" &&
+        !("id" in parsed) &&
+        !this.#observedSessionUsage.shouldForwardNotification(parsed);
+      if (!privateTelemetry) {
+        if (forwarded === parsed) await this.#writer.frame(input.frame);
+        else await this.#writer.json(forwarded);
+      }
+      void (this.#usagePluginsReady ?? Promise.resolve())
+        .then(async () => {
+          for (const threadId of this.#observedSessionUsage.observe(parsed, observedAtMs)) {
+            await this.#writer.json({ method: THREAD_USAGE_UPDATED_METHOD, params: { threadId } });
+          }
+        })
+        .catch((error: unknown) => this.#diagnose(error));
+    } finally {
+      this.#observeOfficialTurnStartResponse(parsed);
+      this.#finishOfficialTurn(parsed);
+    }
     this.#nativeAccountObserver?.observe(parsed);
     const deletedProjectId = observeDeletedProject(parsed);
     if (deletedProjectId) {
@@ -2472,21 +2555,32 @@ export class AppServerHost {
   async #observeOfficialTurnLifecycle(value: JsonValue): Promise<void> {
     if (!isRecord(value) || !isRecord(value.params)) return;
     const params = value.params;
+    if (value.method === "thread/closed" && typeof params.threadId === "string") {
+      await this.#questions.closeWhere((request) => request.threadId === params.threadId);
+      this.#activeOfficialTurns.delete(params.threadId);
+      this.#signalActiveWorkChanged();
+      return;
+    }
     if (value.method === "turn/started" && typeof params.threadId === "string") {
       const turn = isRecord(params.turn) ? params.turn : null;
       if (turn && typeof turn.id === "string") {
-        this.#forgetPendingOfficialTurnStarts(params.threadId);
         this.#activeOfficialTurns.set(params.threadId, turn.id);
       }
     }
     if (value.method === "turn/completed" && typeof params.threadId === "string") {
-      this.#forgetPendingOfficialTurnStarts(params.threadId);
-      this.#activeOfficialTurns.delete(params.threadId);
-      this.#signalActiveWorkChanged();
+      const turn = isRecord(params.turn) ? params.turn : null;
+      if (turn && typeof turn.id === "string") {
+        // A terminal can precede its start response. Keep this fact only with in-flight requests.
+        for (const pending of this.#pendingOfficialTurnStarts.values()) {
+          if (pending.threadId === params.threadId) pending.completedTurnIds.add(turn.id);
+        }
+      }
+      await this.#questions.closeWhere(
+        (request) => request.threadId === params.threadId && request.turnId === turn?.id,
+      );
       const delegation = await this.#repository.getDelegationByChild(
         hostThreadIdSchema.parse(params.threadId),
       );
-      const turn = isRecord(params.turn) ? params.turn : null;
       const status =
         turn?.status === "failed"
           ? "failed"
@@ -3010,7 +3104,22 @@ export class AppServerHost {
               },
             ],
       );
-    return [...this.#questions.read(threadId), ...native, ...asynchronous];
+    const desktop = [...this.#pendingDesktopQuestions.entries()].flatMap(
+      ([requestId, pending]): DelegationPendingQuestion[] => {
+        if (pending.thread.id !== threadId) return [];
+        const projected = pending.projection.request;
+        const request = (isRecord(projected.params) ? projected.params : projected) as JsonObject;
+        return [
+          {
+            interactionId: String(requestId),
+            kind: "requestUserInput",
+            turnId: pending.interaction.turnId,
+            request,
+          },
+        ];
+      },
+    );
+    return [...desktop, ...this.#questions.read(threadId), ...native, ...asynchronous];
   }
 
   async #answerDelegationQuestion(input: ThreadAnswerInput): Promise<ThreadAnswerResult> {
@@ -3038,6 +3147,44 @@ export class AppServerHost {
       };
     }
     const prefix = this.#asyncQuestionPrefix();
+    const desktopRequestId = Number(input.interactionId);
+    const desktop =
+      Number.isSafeInteger(desktopRequestId) && isHostQuestionRequestId(desktopRequestId)
+        ? this.#pendingDesktopQuestions.get(desktopRequestId)
+        : undefined;
+    if (desktop && desktop.thread.id !== input.threadId) {
+      throw new DelegationControlError("INVALID_ARGUMENT", "Question belongs to another Thread");
+    }
+    if (desktop) {
+      const response = isRecord(input.result)
+        ? desktop.projection.parseResponse(input.result)
+        : { type: "question" as const, answers: {}, cancelled: true as const };
+      await this.#externalRuntime.idleRelease.runOperation(desktop.thread.id, async () => {
+        if (![...this.#pendingDesktopQuestions.values()].includes(desktop))
+          throw new DelegationControlError("QUESTION_NOT_PENDING", "Question is no longer pending");
+        await this.#resolveDesktopQuestion(desktop.interaction.interactionId, desktop.thread);
+        if (desktop.timeout) clearTimeout(desktop.timeout);
+        const result = await desktop.thread.session.execute({
+          type: "interaction.respond",
+          interactionId: desktop.interaction.interactionId,
+          response,
+        });
+        if (!result.ok && result.error.code !== "invalidState") {
+          throw new DelegationControlError("INTERNAL_ERROR", result.error.message);
+        }
+      });
+      return {
+        threadId: input.threadId,
+        interactionId: input.interactionId,
+        turnId: desktop.interaction.turnId,
+        harnessId: desktop.thread.harnessId,
+        status: "running",
+        next: {
+          read: `codexhost thread read ${input.threadId}`,
+          wait: `codexhost thread wait ${input.threadId} --timeout-ms 30000`,
+        },
+      };
+    }
     if (
       typeof input.interactionId !== "string" ||
       !input.interactionId.startsWith(`${prefix}async:`)
@@ -3739,6 +3886,8 @@ export class AppServerHost {
             },
           }),
         );
+      } finally {
+        if (params.data.refresh) this.clientEvents.harnessInspectionChanged(params.data.harnessId);
       }
       return;
     }
@@ -3765,6 +3914,8 @@ export class AppServerHost {
         rpcError(request, -32077, `Harness inspection failed: ${errorMessage(error)}`),
       );
       return;
+    } finally {
+      if (params.data.refresh) this.clientEvents.harnessInspectionChanged(params.data.harnessId);
     }
     const validated = harnessInspectionSchema.safeParse(inspection);
     if (!validated.success) {
@@ -5441,6 +5592,10 @@ export class AppServerHost {
       return;
     }
     const params = requestObject(request);
+    if (isInputlessInterruptedTaskResume(params)) {
+      await this.#writer.json(rpcError(request, -32078, EXTERNAL_RESUME_INTERRUPTED_UNSUPPORTED));
+      return;
+    }
     if (typeof params.model === "string") {
       let route: ReturnType<typeof decodeCreateRoute>;
       try {
@@ -5460,6 +5615,10 @@ export class AppServerHost {
     const clientUserMessageId =
       typeof params.clientUserMessageId === "string" ? params.clientUserMessageId : undefined;
     try {
+      params.input = await materializeExternalImages(
+        requestInput(params),
+        this.#options.environment ?? process.env,
+      );
       text = requestText(params);
     } catch (error) {
       try {
@@ -5583,6 +5742,10 @@ export class AppServerHost {
         return;
       }
       if (request.method === "thread/queue/add") {
+        params.input = await materializeExternalImages(
+          requestInput(params),
+          this.#options.environment ?? process.env,
+        );
         requestText(params);
         const queuedSubmission = this.#externalQueue.add(
           thread.id,
@@ -5619,6 +5782,10 @@ export class AppServerHost {
       }
       if (!itemId) throw new ExternalSteerError(-32602, "Queued submission identity is required");
       if (request.method === "thread/queue/update") {
+        params.input = await materializeExternalImages(
+          requestInput(params),
+          this.#options.environment ?? process.env,
+        );
         requestText(params);
         const queuedSubmission = this.#externalQueue.update(
           thread.id,
@@ -5911,6 +6078,14 @@ export class AppServerHost {
           expectedTurnId: marker.data.expectedTurnId,
           [THREAD_STEER_DELIVERY_PARAM]: marker.data.delivery,
         };
+      }
+      try {
+        params.input = await materializeExternalImages(
+          requestInput(params),
+          this.#options.environment ?? process.env,
+        );
+      } catch (error) {
+        throw new ExternalSteerError(-32602, errorMessage(error));
       }
       queued = this.#externalQueue.takeSteered(thread.id, params.clientUserMessageId, params.input);
       const started = await this.#externalSteering.run(
