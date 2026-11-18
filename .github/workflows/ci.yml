@@ -10,7 +10,7 @@ on:
         options:
           - all
           - ubuntu-22.04
-          - macos-15-intel
+          - macos-26
           - windows-latest
 
   pull_request:
@@ -127,7 +127,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform != 'all' && format('["{0}"]', inputs.platform) || '["ubuntu-22.04","macos-15-intel","windows-latest"]') }}
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform != 'all' && format('["{0}"]', inputs.platform) || '["ubuntu-22.04","macos-26","windows-latest"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
