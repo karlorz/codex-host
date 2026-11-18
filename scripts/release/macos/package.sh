@@ -137,7 +137,11 @@ PLIST
 /usr/bin/codesign --force --sign - "$CONTENTS/MacOS/codexhost"
 /usr/bin/codesign --force --sign - "$APP_PATH"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-"$RESOURCES/runtime/node" -e 'if (process.version !== "v24.13.1") process.exit(1)'
+if /usr/bin/lipo "$RESOURCES/runtime/node" -verify_arch "$(uname -m)" >/dev/null 2>&1; then
+  "$RESOURCES/runtime/node" -e 'if (process.version !== "v24.13.1") process.exit(1)'
+else
+  /usr/bin/lipo "$RESOURCES/runtime/node" -info | /usr/bin/grep -Eq 'arm64|x86_64'
+fi
 
 mkdir -p "$DMG_STAGE"
 /usr/bin/ditto "$APP_PATH" "$DMG_STAGE/codexhost.app"

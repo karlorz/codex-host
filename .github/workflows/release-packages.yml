@@ -162,7 +162,7 @@ jobs:
       matrix:
         include:
           - target: macos-arm64
-            runner: macos-15
+            runner: macos-15-intel
             rustTarget: aarch64-apple-darwin
           - target: macos-x64
             runner: macos-15-intel
