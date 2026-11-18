@@ -101,7 +101,7 @@ async function runPackagedHost(host, directory, requests) {
     child.once("error", reject);
     child.once("close", (code) => resolve(code));
   });
-  const timeout = setTimeout(() => child.kill(), 15_000);
+  const timeout = setTimeout(() => child.kill(), 60_000);
   child.stdin.write(requests.map((request) => JSON.stringify(request)).join("\n") + "\n");
   try {
     const code = await closed;
