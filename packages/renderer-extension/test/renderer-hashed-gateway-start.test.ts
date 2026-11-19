@@ -245,10 +245,14 @@ function overlayWebpackRuntime(fallback?: (id: string) => unknown): OverlayWebpa
     getters: Record<string, () => unknown>,
     setters: Record<string, (value: unknown) => void> = {},
   ) => {
-    for (const key of Object.keys(getters))
-      Object.defineProperty(exports, key, { enumerable: true, get: getters[key] });
-    for (const key of Object.keys(setters))
-      Object.defineProperty(exports, key, { enumerable: true, value: setters[key] });
+    for (const key of Object.keys(getters)) {
+      const get = getters[key];
+      if (get) Object.defineProperty(exports, key, { enumerable: true, get });
+    }
+    for (const key of Object.keys(setters)) {
+      const set = setters[key];
+      if (set) Object.defineProperty(exports, key, { enumerable: true, value: set });
+    }
   };
   const req = ((id: string) => {
     const cached = cache[id];
@@ -261,7 +265,7 @@ function overlayWebpackRuntime(fallback?: (id: string) => unknown): OverlayWebpa
       if (fallback) return fallback(id);
       throw new Error(id);
     }
-    const module = (cache[id] = { exports: {} });
+    const module: { exports: unknown; error?: unknown } = (cache[id] = { exports: {} });
     try {
       modules[id]?.call(module.exports, module, module.exports as Record<string, unknown>, req);
     } catch (error) {
