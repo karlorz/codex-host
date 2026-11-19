@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { HostCommand } from "@codexhost/harness-adapter";
 import type { JsonObject } from "@codexhost/protocol-core";
 
 import {
@@ -343,7 +344,7 @@ describe("External Thread follow-up queue", () => {
           );
         }
         const rejectedCalls = execute.mock.calls.filter(
-          ([command]) => command.type === "turn.steer",
+          ([command]: [HostCommand]) => command.type === "turn.steer",
         ).length;
         expect(rejectedCalls).toBe(1);
         const completeBoundary = async () => {
@@ -356,7 +357,7 @@ describe("External Thread follow-up queue", () => {
           );
           await new Promise<void>((resolve) => setImmediate(resolve));
           expect(
-            execute.mock.calls.filter(([command]) => command.type === "turn.steer"),
+            execute.mock.calls.filter(([command]: [HostCommand]) => command.type === "turn.steer"),
           ).toHaveLength(1);
         };
         await completeBoundary();

@@ -1,7 +1,11 @@
 import { FakeHarnessSession } from "@codexhost/harness-adapter/testing";
 import type { JsonObject } from "@codexhost/protocol-core";
 import type { HostItem } from "@codexhost/harness-adapter";
-import { harnessCommandDescriptorSchema, hostItemIdSchema } from "@codexhost/shared-contracts";
+import {
+  harnessCommandDescriptorSchema,
+  hostItemIdSchema,
+  hostTurnIdSchema,
+} from "@codexhost/shared-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -116,7 +120,7 @@ describe("Native steering", () => {
       fixture.adapter.supportsSteer = true;
       try {
         const threadId = await startPiThread(fixture);
-        const turnId = await startPiTurn(fixture, threadId);
+        const turnId = hostTurnIdSchema.parse(await startPiTurn(fixture, threadId));
         const session = fixture.adapter.sessions[0];
         if (!session) throw new Error("Fake Session was not opened");
         await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
