@@ -61,9 +61,9 @@ add fresh internal media-track or gateway-hangup measurements.
 
 The registry activates Chat, Work/Codex and Work/Grok for macOS Desktop
 **26.1106.51428**, native build **26605**, on implementation
-**af0ca16ef25a57ae**. Original attended Chat and Work/Grok results use
+**8c002fd4e12c0ecb**. Original attended Chat and Work/Grok results use
 **5f84eb365e1b6736**; Work/Codex uses **f6f9c208ad38f922**. These are preserved
-acceptance results, not new attended speech on af0ca16ef25a57ae. Chat acceptance includes
+acceptance results, not new attended speech on 8c002fd4e12c0ecb. Chat acceptance includes
 existing conversations, new-draft navigation, leave/return, two-way speech,
 End Voice and microphone release. Work acceptance includes selected-Harness
 preservation, two-way speech, End Voice and microphone release; Grok also
@@ -119,7 +119,13 @@ Hashed 26.1106 Work uses the overlay fetch wrap and Host CPA gateway. Overlay CD
 
 The hashed overlay bootstrap owns its client, starter Proxy and capability binding
 under `__codexhostOverlayVoiceBootstrapV1`. Reinjection disposes them in reverse
-order. Its starter and subscription helpers are schema-free modules; the overlay
+order. Cold document startup observes the native GaA7 factory and `appServices`
+read before starter registration, while service discovery reads the module cache.
+Native startup retains module initialization ownership. Disposal restores the
+owned factory and cached exports. An already registered callback or a namespace
+retained before observation requires a fresh native document initialization;
+current-document injection cannot retroactively wrap that callback.
+Its starter and subscription helpers are schema-free modules; the overlay
 bundle is minified and release tests enforce its 64 KB limit and dependency boundary.
 Overlay capability starts pending, retries late client/fiber availability,
 and rebinds replaced surfaces. A gateway start waits for the actual committed

@@ -175,7 +175,7 @@ function overlayWorkFixture(
         return { [HASHED_OVERLAY_VOICE_ROLES.voiceAccessExport]: access };
       throw new Error(id);
     },
-    { m: {}, c: {} },
+    { m: { GaA7: () => undefined }, c: { GaA7: { exports: { appServices: services } } } },
   ) as HashedWebpackRequire;
   const built: Surface[] = [];
   if (options.surface !== false) built.push(overlaySurface(accessAtom, family, options));
@@ -218,6 +218,83 @@ const workRequest = (model?: string) => ({
   hostId: "local",
   ...(model === undefined ? {} : { activeCollaborationMode: { settings: { model } } }),
 });
+
+type WebpackModuleFactory = (
+  this: unknown,
+  module?: { exports?: unknown },
+  exports?: Record<string, unknown>,
+  require?: unknown,
+) => unknown;
+
+type OverlayWebpackRuntime = {
+  req: ((id: string) => unknown) & {
+    m: Record<string, WebpackModuleFactory | undefined>;
+    c: Record<string, { exports?: unknown; error?: unknown } | undefined>;
+  };
+  installGaA7(): void;
+};
+
+/** Shipped rspack shapes: `req.m` factories, `req.c` module cache, and the
+ * 307320 GaA7 factory that publishes `appServices` through a module-local getter
+ * plus a non-writable `setAppServices` data property. */
+function overlayWebpackRuntime(fallback?: (id: string) => unknown): OverlayWebpackRuntime {
+  const modules: Record<string, WebpackModuleFactory | undefined> = {};
+  const cache: Record<string, { exports?: unknown; error?: unknown } | undefined> = {};
+  const define = (
+    exports: Record<string, unknown>,
+    getters: Record<string, () => unknown>,
+    setters: Record<string, (value: unknown) => void> = {},
+  ) => {
+    for (const key of Object.keys(getters))
+      Object.defineProperty(exports, key, { enumerable: true, get: getters[key] });
+    for (const key of Object.keys(setters))
+      Object.defineProperty(exports, key, { enumerable: true, value: setters[key] });
+  };
+  const req = ((id: string) => {
+    const cached = cache[id];
+    if (cached) {
+      if (cached.error !== undefined) throw cached.error;
+      return cached.exports;
+    }
+    const factory = modules[id];
+    if (!factory) {
+      if (fallback) return fallback(id);
+      throw new Error(id);
+    }
+    const module = (cache[id] = { exports: {} });
+    try {
+      modules[id]?.call(module.exports, module, module.exports as Record<string, unknown>, req);
+    } catch (error) {
+      module.error = error;
+      throw error;
+    }
+    return module.exports;
+  }) as OverlayWebpackRuntime["req"];
+  req.m = modules;
+  req.c = cache;
+  return {
+    req,
+    /** The 307320 async chunk installs GaA7 after document start. */
+    installGaA7() {
+      modules.GaA7 = (_module, exports) => {
+        let host: unknown;
+        let services: unknown;
+        define(
+          exports as Record<string, unknown>,
+          { appHost: () => host, appServices: () => services },
+          {
+            setAppHost: (value) => {
+              host = value;
+            },
+            setAppServices: (value) => {
+              services = value;
+            },
+          },
+        );
+      };
+    },
+  };
+}
 
 describe("hashed overlay realtime starter", () => {
   it("registers Compact Voice through wrapGatewayVoiceStarter", async () => {
@@ -452,6 +529,166 @@ describe("hashed overlay realtime starter", () => {
 });
 
 describe("hashed overlay voice bootstrap", () => {
+  it("waits for native service registration without requiring an absent factory", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const originalRuntime = fixture.services.realtimeVoiceRuntime;
+    const cache: Record<string, { exports: unknown }> = {};
+    const requireModule = vi.fn(fixture.req);
+    const req = Object.assign(requireModule, { m: {}, c: cache });
+    const bootstrap = installOverlayVoiceBootstrap(fixture.target, {
+      importRuntime: async () => ({ __webpack_require__: req }),
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(requireModule).not.toHaveBeenCalled();
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+
+    cache.GaA7 = { exports: { appServices: fixture.services } };
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fixture.services.realtimeVoiceRuntime).not.toBe(originalRuntime);
+    expect(fixture.target.__codexhostVoiceCapabilityV1).toMatchObject({ status: "active" });
+    bootstrap?.dispose();
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+  });
+
+  it("retries until native services are populated and cancels pending retries on disposal", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const originalRuntime = fixture.services.realtimeVoiceRuntime;
+    const nativeExports: { appServices?: typeof fixture.services } = {};
+    const req = Object.assign(fixture.req, {
+      c: { GaA7: { exports: nativeExports } },
+    });
+    const bootstrap = installOverlayVoiceBootstrap(fixture.target, {
+      importRuntime: async () => ({ __webpack_require__: req }),
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+    nativeExports.appServices = fixture.services;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fixture.services.realtimeVoiceRuntime).not.toBe(originalRuntime);
+    bootstrap?.dispose();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+    expect(fixture.target.__codexhostVoiceCapabilityV1).toBeUndefined();
+  });
+
+  it("wraps the starter the native controller registers between polls", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ client: "pending", evidence: ["work-codex"] });
+    const nativeRuntime = fixture.services.realtimeVoiceRuntime as unknown as {
+      registerRealtimeStarter: ReturnType<typeof vi.fn>;
+      unregisterRealtimeStarter: ReturnType<typeof vi.fn>;
+    };
+    const runtime = overlayWebpackRuntime((id) => fixture.req(id));
+    const bootstrap = installOverlayVoiceBootstrap(fixture.target, {
+      importRuntime: async () => ({
+        __webpack_require__: runtime.req as unknown as HashedWebpackRequire,
+      }),
+    });
+    // The runtime import resolves before the first retry, and native startup owns
+    // module initialization, so GaA7 stays unrequired.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.req.c.GaA7).toBeUndefined();
+    expect(fixture.services.realtimeVoiceRuntime).toBe(nativeRuntime);
+
+    // Native startup installs 307320, publishes services and registers its
+    // starter without waiting for the next poll.
+    runtime.installGaA7();
+    const ga = runtime.req("GaA7") as {
+      appServices?: {
+        realtimeVoiceRuntime: {
+          registerRealtimeStarter(start: unknown, cancel: unknown): unknown;
+        };
+      };
+      setAppServices(value: unknown): void;
+    };
+    ga.setAppServices(fixture.services);
+    const nativeStart = vi.fn(async () => "native-start");
+    const nativeCancel = vi.fn(async () => undefined);
+    ga.appServices?.realtimeVoiceRuntime.registerRealtimeStarter(nativeStart, nativeCancel);
+
+    expect(nativeRuntime.registerRealtimeStarter).toHaveBeenCalledOnce();
+    const held = nativeRuntime.registerRealtimeStarter.mock.calls[0]?.[0] as (
+      request: unknown,
+    ) => Promise<unknown>;
+    // The controller already holds the gateway wrapper, not the native callback.
+    expect(held).not.toBe(nativeStart);
+    expect(fixture.services.realtimeVoiceRuntime).not.toBe(nativeRuntime);
+
+    // The controller-held callback waits for the committed capability instead of
+    // starting natively.
+    const refused = expect(held(workRequest())).rejects.toThrow("Voice gateway is not ready");
+    await vi.advanceTimersByTimeAsync(3_000);
+    await refused;
+    expect(nativeStart).not.toHaveBeenCalled();
+
+    const client = fixture.target.__codexhostClientOwnedVoiceV1;
+    if (!client) throw new Error("bootstrap client hook unavailable");
+    client.status = "active";
+    await vi.advanceTimersByTimeAsync(1_000);
+    const started = held(workRequest());
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(started).resolves.toBe("native-start");
+    expect(nativeStart).toHaveBeenCalledOnce();
+
+    bootstrap?.dispose();
+    expect(fixture.services.realtimeVoiceRuntime).toBe(nativeRuntime);
+    expect(runtime.req("GaA7")).not.toBe(ga);
+    ga.appServices?.realtimeVoiceRuntime.registerRealtimeStarter(nativeStart, nativeCancel);
+    expect(nativeRuntime.registerRealtimeStarter.mock.calls.at(-1)?.[0]).toBe(nativeStart);
+  });
+
+  it("cancels the pending runtime import when disposed", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const originalRuntime = fixture.services.realtimeVoiceRuntime;
+    const runtime = overlayWebpackRuntime();
+    let resolveImport: ((value: Record<string, unknown>) => void) | undefined;
+    const bootstrap = installOverlayVoiceBootstrap(fixture.target, {
+      importRuntime: () =>
+        new Promise<Record<string, unknown>>((resolve) => {
+          resolveImport = resolve;
+        }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolveImport).toBeDefined();
+    bootstrap?.dispose();
+    resolveImport?.({ __webpack_require__: runtime.req as unknown as HashedWebpackRequire });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+    expect(fixture.target.__codexhostVoiceCapabilityV1).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(runtime.req.m, "GaA7")).toBeUndefined();
+    expect(runtime.req.c.GaA7).toBeUndefined();
+  });
+
+  it("removes module observation when disposed while a retry is pending", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const originalRuntime = fixture.services.realtimeVoiceRuntime;
+    const runtime = overlayWebpackRuntime();
+    const bootstrap = installOverlayVoiceBootstrap(fixture.target, {
+      importRuntime: async () => ({
+        __webpack_require__: runtime.req as unknown as HashedWebpackRequire,
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(Object.getOwnPropertyDescriptor(runtime.req.m, "GaA7")).toBeDefined();
+    bootstrap?.dispose();
+    expect(Object.getOwnPropertyDescriptor(runtime.req.m, "GaA7")).toBeUndefined();
+
+    runtime.installGaA7();
+    const ga = runtime.req("GaA7") as {
+      appServices?: { realtimeVoiceRuntime: unknown };
+      setAppServices(value: unknown): void;
+    };
+    ga.setAppServices(fixture.services);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.services.realtimeVoiceRuntime).toBe(originalRuntime);
+    expect(fixture.target.__codexhostVoiceCapabilityV1).toBeUndefined();
+  });
+
   it("replaces the previous bootstrap without stacking proxies or bindings", async () => {
     vi.useFakeTimers();
     const fixture = overlayWorkFixture({ client: "pending", evidence: ["work-codex"] });
