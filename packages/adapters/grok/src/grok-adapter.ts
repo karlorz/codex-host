@@ -344,6 +344,7 @@ function capabilitiesForModels(modelState: GrokModelState): HarnessSessionCapabi
   };
 }
 const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
+const INSPECTION_CACHE_TTL_MS = 30_000;
 
 function invalidState(message: string): HarnessError {
   return { code: "invalidState", message, retryable: false };
@@ -2778,7 +2779,10 @@ export class GrokAdapter implements HarnessAdapter {
   readonly #fetchCredits: (input: {
     environment?: NodeJS.ProcessEnv;
   }) => Promise<GrokCreditsSnapshot | null>;
-  readonly #inspectionCache = new Map<string, Extract<HarnessInspection, { status: "ready" }>>();
+  readonly #inspectionCache = new Map<
+    string,
+    { inspection: Extract<HarnessInspection, { status: "ready" }>; expiresAt: number }
+  >();
   readonly #sessions = new Set<GrokHarnessSession>();
   readonly #toolOutputLimit: number;
   #closePromise: Promise<void> | null = null;
@@ -2871,7 +2875,7 @@ export class GrokAdapter implements HarnessAdapter {
     const cwd = path.resolve(input.cwd ?? process.cwd());
     if (!input.refresh) {
       const cached = this.#inspectionCache.get(cwd);
-      if (cached) return cached;
+      if (cached && Date.now() < cached.expiresAt) return cached.inspection;
     }
     let transport: GrokAcpTransportLike | null = null;
     const startedAt = Date.now();
@@ -2891,7 +2895,10 @@ export class GrokAdapter implements HarnessAdapter {
         permissionModes: GROK_PERMISSION_MODE_CATALOG,
         capabilities: capabilitiesForModels(modelState),
       };
-      this.#inspectionCache.set(cwd, ready);
+      this.#inspectionCache.set(cwd, {
+        inspection: ready,
+        expiresAt: Date.now() + INSPECTION_CACHE_TTL_MS,
+      });
       this.#scheduleCreditsRefresh();
       return ready;
     } catch (error) {
