@@ -354,9 +354,14 @@ export async function runDesktopController(
         : undefined;
     startupTrace("installing Renderer Session");
     if (!voiceHost && options.hostDataDirectory && !skipReason) {
-      for (let attempt = 0; attempt < 8 && !voiceHost; attempt += 1) {
+      for (let attempt = 0; attempt < 8 && !voiceHost && !signal.aborted; attempt += 1) {
         if (attempt > 0) await dependencies.sleep(250);
         voiceHost = await connectControllerVoiceHost(options.hostDataDirectory);
+      }
+      if (signal.aborted && voiceHost) {
+        // Shutdown began while discovering the Host: never hold its channel past the Controller.
+        voiceHost.close();
+        voiceHost = undefined;
       }
     }
     const installed = await installProductionSession(
@@ -376,7 +381,7 @@ export async function runDesktopController(
     return installed;
   };
   const ensureVoiceHost = async (current: RendererCdpControlSession): Promise<void> => {
-    if (skipReason || !options.hostDataDirectory) return;
+    if (skipReason || !options.hostDataDirectory || signal.aborted) return;
     let connectedNow = false;
     if (!voiceHost) {
       if (now() < nextVoiceHostAt) return;
@@ -396,21 +401,29 @@ export async function runDesktopController(
       voiceHost = connected;
       connectedNow = true;
     }
+    // The Controller's abort listener clears `voiceHost`; an attach already in flight
+    // must release exactly the channel it was given, once.
+    const host = voiceHost;
     try {
-      await current.attachVoiceHost(voiceHost);
+      await current.attachVoiceHost(host);
     } catch (error) {
       // The installed Renderer integration stays; release the channel and retry later.
-      voiceHost.close();
-      voiceHost = undefined;
+      if (voiceHost === host) {
+        host.close();
+        voiceHost = undefined;
+      }
+      if (signal.aborted) return;
       nextVoiceHostAt = now() + voiceHostDelayMs;
       voiceHostDelayMs = Math.min(voiceHostDelayMs * 2, VOICE_HOST_RETRY_MAX_MS);
       startupTrace("Voice Host attachment deferred", error);
       return;
     }
-    if (signal.aborted) {
-      // The Session is closing, so release the channel instead of leaving it open.
-      voiceHost.close();
-      voiceHost = undefined;
+    if (signal.aborted || voiceHost !== host) {
+      // Shutdown or the abort listener already released the channel.
+      if (voiceHost === host) {
+        host.close();
+        voiceHost = undefined;
+      }
       return;
     }
     nextVoiceHostAt = 0;
@@ -447,9 +460,21 @@ export async function runDesktopController(
         remoteRecovery = undefined;
       });
   };
+  // A shutdown release and a late recovery can both reach one Session object; release it once.
+  const releasedSessions = new WeakSet<RendererCdpControlSession>();
   const resetSession = (): void => {
-    session?.close();
+    if (session && !releasedSessions.has(session)) {
+      releasedSessions.add(session);
+      session.close();
+    }
     session = undefined;
+  };
+  // Abort must release the owned Session and Host channel immediately: the monitor may be
+  // awaiting a Renderer attach whose own deadline is longer than the Controller's shutdown.
+  const releaseOwnedResources = (): void => {
+    resetSession();
+    voiceHost?.close();
+    voiceHost = undefined;
   };
   const ensureSession = async (): Promise<RendererCdpControlSession> => {
     if (skipReason) throw new Error(skipReason);
@@ -472,6 +497,8 @@ export async function runDesktopController(
 
   let attachmentServer: ControllerAttachmentServer | undefined;
   try {
+    signal.addEventListener("abort", releaseOwnedResources, { once: true });
+    if (signal.aborted) releaseOwnedResources();
     startupTrace("starting attachment server");
     attachmentServer = await dependencies.startAttachmentServer({
       port: options.attachmentPort,
@@ -518,6 +545,11 @@ export async function runDesktopController(
       if (session || skipReason) return;
       try {
         session = await createSession();
+        if (signal.aborted) {
+          // Shutdown began while installing: release instead of reporting an install.
+          resetSession();
+          return;
+        }
         recordRecoverySuccess();
         restoreRemoteConnections(session);
       } catch (error) {
@@ -541,16 +573,13 @@ export async function runDesktopController(
       });
     }
   } finally {
+    signal.removeEventListener("abort", releaseOwnedResources);
     await attachmentServer?.close();
     // Closing the session below releases an evaluation still waiting on the Renderer.
     await settleWithin(operation, SHUTDOWN_OPERATION_WAIT_MS);
-    resetSession();
-    voiceHost?.close();
+    releaseOwnedResources();
     // An operation that outlives the wait may still open a session or connect a Host;
     // close both once it settles.
-    void operation.then(() => {
-      resetSession();
-      voiceHost?.close();
-    });
+    void operation.then(releaseOwnedResources);
   }
 }

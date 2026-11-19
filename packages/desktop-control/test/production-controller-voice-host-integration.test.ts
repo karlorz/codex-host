@@ -135,11 +135,17 @@ interface FakeCdpTarget {
   readonly url: string;
 }
 
-async function startFakeCdp(targets: readonly FakeCdpTarget[]) {
+interface FakeCdpOptions {
+  /** Withholds the current-document voice capability publish until its connection closes. */
+  holdVoiceCapabilityPublication?: boolean;
+}
+
+async function startFakeCdp(targets: readonly FakeCdpTarget[], options: FakeCdpOptions = {}) {
   const pages = new Map(targets.map((target) => [target.id, fakeCdpPage(target.id, target.url)]));
   const connections: FakeCdpConnection[] = [];
   const sockets = new WebSocketServer({ noServer: true });
   let scriptSequence = 0;
+  let heldPublicationCount = 0;
   let port = 0;
 
   const server = createServer((request, response) => {
@@ -264,8 +270,18 @@ async function startFakeCdp(targets: readonly FakeCdpTarget[]) {
             Reflect.deleteProperty(page.sandbox, name);
             return {};
           }
-          case "Runtime.evaluate":
+          case "Runtime.evaluate": {
+            const expression =
+              typeof frame.params?.expression === "string" ? frame.params.expression : "";
+            if (
+              options.holdVoiceCapabilityPublication &&
+              expression.includes('const cap = "__codexhostVoiceHostV1"')
+            ) {
+              heldPublicationCount += 1;
+              return new Promise<never>(() => undefined);
+            }
             return await evaluate(frame.params);
+          }
           case "Page.addScriptToEvaluateOnNewDocument":
             scriptSequence += 1;
             return { identifier: `script-${scriptSequence}` };
@@ -315,6 +331,12 @@ async function startFakeCdp(targets: readonly FakeCdpTarget[]) {
     },
     publications(targetId: string): number {
       return pages.get(targetId)?.publications ?? 0;
+    },
+    get heldPublicationCount(): number {
+      return heldPublicationCount;
+    },
+    get openSockets(): number {
+      return sockets.clients.size;
     },
     bindingConnections(targetId: string): number {
       return connections.filter(
@@ -572,6 +594,95 @@ describe("production Desktop Controller Voice Host integration", () => {
         await waitFor(() => host.openEventStreams === 0, 5_000, "Host channel release");
       } finally {
         if (!stopping) abort.abort();
+        await run.catch(() => undefined);
+      }
+    });
+  }, 60_000);
+
+  it("releases the Session, Host stream, and owned CDP connections when the Controller aborts a held voice attach", async () => {
+    await withVoiceEnvironment(async () => {
+      const cdp = await startFakeCdp([{ id: PRIMARY_TARGET_ID, url: PRIMARY_TARGET_URL }], {
+        holdVoiceCapabilityPublication: true,
+      });
+      cleanups.push(() => cdp.close());
+      const host = await startFakeVoiceHost();
+      cleanups.push(() => host.close());
+      const rendererDirectory = await mkdtemp(
+        path.join(os.tmpdir(), "codexhost-controller-abort-"),
+      );
+      cleanups.push(() => rm(rendererDirectory, { recursive: true, force: true }));
+
+      const rendererPath = path.join(rendererDirectory, "renderer-extension.js");
+      const installed = Promise.withResolvers<undefined>();
+      const abort = new AbortController();
+      let runError: unknown;
+      const run = runDesktopController(
+        {
+          rendererCdpEndpoint: cdp.endpoint,
+          rendererPath,
+          attachmentPort: 43_125,
+          attachmentNonce: ATTACHMENT_NONCE,
+          hostDataDirectory: host.dataDirectory,
+        },
+        abort.signal,
+        {
+          readRenderer: async (filePath) => {
+            if (filePath !== rendererPath) throw new Error(`Unexpected Renderer read ${filePath}`);
+            return RENDERER_SOURCE;
+          },
+          install: async (options): Promise<RendererCdpControlSession> => {
+            const session = await createRendererCdpControlSession({
+              ...options,
+              operations: {
+                listTargets: (endpoint, signal) => listCdpTargets(endpoint, fetch, signal),
+                connect: (webSocketDebuggerUrl) => CdpClient.connect(webSocketDebuggerUrl),
+                installDraftPrewarmPolicy: async () => ({
+                  state: "ready" as const,
+                  reason: "owned-request-bridge" as const,
+                }),
+              },
+            });
+            installed.resolve(undefined);
+            return session;
+          },
+          startAttachmentServer: async () => ({ close: async () => {} }),
+          ready: () => {},
+          sleep,
+          monitorIntervalMs: 50,
+        },
+      );
+      run.catch((error: unknown) => {
+        runError = error;
+      });
+
+      try {
+        await installed.promise;
+        if (runError) throw runError;
+        await host.publish();
+        await waitFor(
+          () => cdp.heldPublicationCount === 1,
+          25_000,
+          "held voice capability publication",
+        );
+        // The attach is suspended on an external CDP response the Controller does not own.
+        expect(host.eventConnections).toBe(1);
+        expect(cdp.pageHasCapability(PRIMARY_TARGET_ID)).toBe(false);
+
+        const abortedAt = Date.now();
+        abort.abort();
+        await run;
+        const settledAfterMs = Date.now() - abortedAt;
+        if (runError) throw runError;
+        expect(settledAfterMs).toBeLessThan(2_000);
+        await waitFor(() => host.openEventStreams === 0, 5_000, "Host stream release");
+        await waitFor(() => cdp.openSockets === 0, 5_000, "owned CDP connection release");
+
+        // Settlement leaves no owned retry behind: a live Host channel reconnects after 1s.
+        await sleep(1_200);
+        expect(host.eventConnections).toBe(1);
+        expect(cdp.openSockets).toBe(0);
+      } finally {
+        abort.abort();
         await run.catch(() => undefined);
       }
     });
