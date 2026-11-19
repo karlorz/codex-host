@@ -90,12 +90,16 @@ implementation to match; mismatches remain disabled.
 Managed local launch passes the Host data directory to the Desktop Controller
 as `--host-data`, including the default `~/.codexhost` and explicit isolated
 locations. The Controller uses that directory's authenticated client channel
-for the voice-only Renderer capability. Remote SSH-managed launches do not
-inherit a local voice Host. A configured gateway without that capability cannot
-be treated as a ready Work route. Updating qualification metadata takes effect
-at Controller startup; an already-running Controller retains its startup
-snapshot. A temporary, verified voice-only attachment can apply the reviewed
-configuration and Host binding without restarting Desktop or Host; it must end
+for the voice-only Renderer capability. If the Host starts after the Renderer,
+the Controller retries discovery and attaches the capability to the existing
+primary and qualified overlay documents. Host reconnects refresh its generation;
+a lost attachment is re-established without replaying voice requests. Remote
+SSH-managed launches do not inherit a local voice Host. A configured gateway
+without that capability cannot be treated as a ready Work route. Updating
+qualification metadata takes effect at Controller startup; an already-running
+Controller retains its startup snapshot. A temporary, verified voice-only
+attachment can apply the reviewed configuration and Host binding without
+restarting Desktop or Host; it must end
 with that owned Controller and leave calls untouched.
 
 Support claims come from scoped evidence. Windows delivery acceptance is

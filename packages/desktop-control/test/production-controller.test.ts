@@ -195,6 +195,7 @@ describe("production Desktop Controller", () => {
         snapshot,
         ensureInstalled,
         activateDesktop,
+        attachVoiceHost: vi.fn(async () => {}),
         executeRenderer: vi.fn(),
         close,
       };
@@ -268,6 +269,7 @@ describe("production Desktop Controller", () => {
           return snapshot;
         }),
         activateDesktop: vi.fn(async () => 1),
+        attachVoiceHost: vi.fn(async () => {}),
         executeRenderer: vi.fn(),
         close: vi.fn(),
       };
@@ -310,6 +312,7 @@ describe("production Desktop Controller", () => {
         return snapshot;
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close: vi.fn(),
     };
@@ -344,6 +347,7 @@ describe("production Desktop Controller", () => {
         snapshot,
         ensureInstalled: vi.fn(async () => snapshot),
         activateDesktop: vi.fn(() => new Promise<number>(() => undefined)),
+        attachVoiceHost: vi.fn(async () => {}),
         executeRenderer: vi.fn(),
         close,
       };
@@ -386,6 +390,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(async () => controllerSnapshot()),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close,
     };
@@ -436,6 +441,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close,
@@ -475,6 +481,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close,
@@ -612,6 +619,7 @@ describe("production Desktop Controller", () => {
         return snapshot;
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close: vi.fn(),
     };
@@ -755,6 +763,7 @@ describe("production Desktop Controller", () => {
         return snapshot;
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close: vi.fn(),
     };
@@ -845,6 +854,7 @@ describe("production Desktop Controller", () => {
         return snapshot;
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close: vi.fn(),
     };
@@ -890,6 +900,7 @@ describe("production Desktop Controller", () => {
           return snapshot;
         }),
         activateDesktop: vi.fn(async () => 1),
+        attachVoiceHost: vi.fn(async () => {}),
         executeRenderer: vi.fn(),
         close: vi.fn(),
       };
@@ -951,6 +962,7 @@ describe("production Desktop Controller", () => {
         return snapshot;
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
       executeRenderer: vi.fn(),
       close: vi.fn(),
     };
@@ -983,6 +995,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close: vi.fn(),
@@ -1059,6 +1072,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(),
       activateDesktop,
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close,
@@ -1101,6 +1115,7 @@ describe("production Desktop Controller", () => {
         throw new Error("Renderer binding disappeared");
       }),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close: firstClose,
@@ -1109,6 +1124,7 @@ describe("production Desktop Controller", () => {
       snapshot: controllerSnapshot(),
       ensureInstalled: vi.fn(),
       activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
 
       executeRenderer: vi.fn(),
       close: secondClose,
@@ -1151,6 +1167,7 @@ describe("production Desktop Controller", () => {
           return snapshot;
         }),
         activateDesktop: vi.fn(async () => 1),
+        attachVoiceHost: vi.fn(async () => {}),
         executeRenderer: vi.fn(),
         close: vi.fn(),
       };
@@ -1183,6 +1200,176 @@ describe("production Desktop Controller", () => {
       expect(connect).toHaveBeenCalledWith(path.normalize("/tmp/isolated-host"));
       expect(sleep).toHaveBeenCalledWith(250);
       expect(install.mock.calls[0]?.[0].voiceHost).toBe(host);
+    });
+  });
+
+  it("attaches a Voice Host that appears after startup without reinstalling the Renderer", async () => {
+    await withoutPinnedDesktopVersion(async () => {
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const attachVoiceHost = vi.fn(async () => {
+        abort.abort();
+      });
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => snapshot),
+        attachVoiceHost,
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      const host = {
+        owner: "voice-host",
+        generation: 1,
+        close: vi.fn(),
+      } as unknown as ControllerVoiceHost;
+      const connect = vi.mocked(connectControllerVoiceHost);
+      connect.mockReset();
+      let attempts = 0;
+      connect.mockImplementation(async () => (++attempts < 10 ? undefined : host));
+      let currentTime = 0;
+      let cycles = 0;
+      const sleep = vi.fn(async (milliseconds: number) => {
+        if (milliseconds !== 1) return;
+        currentTime += 500;
+        if (++cycles > 12) abort.abort();
+      });
+
+      await runDesktopController(
+        { ...controllerOptions(), hostDataDirectory: path.normalize("/tmp/isolated-host") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async () => "production renderer"),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep,
+          now: () => currentTime,
+          monitorIntervalMs: 1,
+        },
+      );
+
+      // Eight startup attempts, one throttled retry, then the descriptor appears.
+      expect(connect).toHaveBeenCalledTimes(10);
+      expect(install).toHaveBeenCalledOnce();
+      expect(install.mock.calls[0]?.[0].voiceHost).toBeUndefined();
+      expect(attachVoiceHost).toHaveBeenCalledOnce();
+      expect(attachVoiceHost).toHaveBeenCalledWith(host);
+      expect(host.close).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("retries a failed late Voice Host attachment without replacing the Renderer Session", async () => {
+    await withoutPinnedDesktopVersion(async () => {
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const firstHost = {
+        owner: "voice-host-1",
+        generation: 1,
+        close: vi.fn(),
+      } as unknown as ControllerVoiceHost;
+      const secondHost = {
+        owner: "voice-host-2",
+        generation: 1,
+        close: vi.fn(),
+      } as unknown as ControllerVoiceHost;
+      const attachVoiceHost = vi
+        .fn<RendererCdpControlSession["attachVoiceHost"]>()
+        .mockRejectedValueOnce(new Error("Renderer voice binding failed"))
+        .mockImplementationOnce(async () => {
+          abort.abort();
+        });
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => snapshot),
+        attachVoiceHost,
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      const connect = vi.mocked(connectControllerVoiceHost);
+      connect.mockReset();
+      let attempts = 0;
+      connect.mockImplementation(async () =>
+        ++attempts < 9 ? undefined : attempts === 9 ? firstHost : secondHost,
+      );
+      let currentTime = 0;
+      let cycles = 0;
+      const sleep = vi.fn(async (milliseconds: number) => {
+        if (milliseconds !== 1) return;
+        currentTime += 500;
+        if (++cycles > 12) abort.abort();
+      });
+
+      await runDesktopController(
+        { ...controllerOptions(), hostDataDirectory: path.normalize("/tmp/isolated-host") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async () => "production renderer"),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep,
+          now: () => currentTime,
+          monitorIntervalMs: 1,
+        },
+      );
+
+      expect(install).toHaveBeenCalledOnce();
+      expect(attachVoiceHost).toHaveBeenCalledTimes(2);
+      expect(attachVoiceHost).toHaveBeenLastCalledWith(secondHost);
+      expect(firstHost.close).toHaveBeenCalledOnce();
+      expect(secondHost.close).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("does not attach a Voice Host that resolves after shutdown begins", async () => {
+    await withoutPinnedDesktopVersion(async () => {
+      const abort = new AbortController();
+      const snapshot = controllerSnapshot();
+      const attachVoiceHost = vi.fn(async () => {});
+      const session: RendererCdpControlSession = {
+        snapshot,
+        ensureInstalled: vi.fn(async () => snapshot),
+        attachVoiceHost,
+        activateDesktop: vi.fn(async () => 1),
+        executeRenderer: vi.fn(),
+        close: vi.fn(),
+      };
+      const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
+      const host = {
+        owner: "voice-host",
+        generation: 1,
+        close: vi.fn(),
+      } as unknown as ControllerVoiceHost;
+      const connect = vi.mocked(connectControllerVoiceHost);
+      connect.mockReset();
+      let attempts = 0;
+      connect.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts < 9) return undefined;
+        abort.abort();
+        return host;
+      });
+
+      await runDesktopController(
+        { ...controllerOptions(), hostDataDirectory: path.normalize("/tmp/isolated-host") },
+        abort.signal,
+        {
+          readRenderer: vi.fn(async () => "production renderer"),
+          install,
+          startAttachmentServer: vi.fn(async () => attachmentServer()),
+          ready: vi.fn(),
+          sleep: vi.fn(async () => {}),
+          monitorIntervalMs: 1,
+        },
+      );
+
+      expect(connect).toHaveBeenCalledTimes(9);
+      expect(attachVoiceHost).not.toHaveBeenCalled();
+      expect(host.close).toHaveBeenCalledOnce();
     });
   });
 });

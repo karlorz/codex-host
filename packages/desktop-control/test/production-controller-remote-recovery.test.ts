@@ -21,6 +21,7 @@ it("passes the remote deadline through the production Controller to Renderer eva
     snapshot,
     ensureInstalled: async () => snapshot,
     activateDesktop: async () => 1,
+    attachVoiceHost: vi.fn(async () => {}),
     executeRenderer: executeRenderer as RendererCdpControlSession["executeRenderer"],
     close() {},
   };
@@ -103,6 +104,7 @@ it("restores enabled connections at Controller startup and after backoff without
     snapshot,
     ensureInstalled: vi.fn(async () => snapshot),
     activateDesktop: vi.fn(async () => 1),
+    attachVoiceHost: vi.fn(async () => {}),
     executeRenderer: evaluate,
     close,
   };
@@ -158,6 +160,7 @@ it("coalesces pending recovery evaluations without blocking monitoring and close
     snapshot,
     ensureInstalled,
     activateDesktop: vi.fn(async () => 1),
+    attachVoiceHost: vi.fn(async () => {}),
     executeRenderer,
     close,
   };

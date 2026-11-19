@@ -80,6 +80,9 @@ const TRANSIENT_INSTALL_RETRY_MS = 250;
 const RECOVERY_RETRY_INITIAL_MS = 30_000;
 const RECOVERY_RETRY_MAX_MS = 300_000;
 const REMOTE_CONNECTION_RECOVERY_INTERVAL_MS = 5_000;
+// A shared Host can publish its descriptor after the Controller's startup attempts.
+const VOICE_HOST_RETRY_INITIAL_MS = 1_000;
+const VOICE_HOST_RETRY_MAX_MS = 30_000;
 // Below `npm stop`'s 10s exit bound, so a stuck Renderer evaluation cannot hold the controller.
 const SHUTDOWN_OPERATION_WAIT_MS = 3_000;
 
@@ -269,6 +272,8 @@ export async function runDesktopController(
   const now = dependencies.now ?? Date.now;
   let session: RendererCdpControlSession | undefined;
   let voiceHost: ControllerVoiceHost | undefined;
+  let nextVoiceHostAt = 0;
+  let voiceHostDelayMs = VOICE_HOST_RETRY_INITIAL_MS;
   let nextRecoveryAt = 0;
   let recoveryDelayMs = RECOVERY_RETRY_INITIAL_MS;
   const overlayDir = path.dirname(options.rendererPath);
@@ -369,6 +374,48 @@ export async function runDesktopController(
     );
     startupTrace("Renderer Session installed");
     return installed;
+  };
+  const ensureVoiceHost = async (current: RendererCdpControlSession): Promise<void> => {
+    if (skipReason || !options.hostDataDirectory) return;
+    let connectedNow = false;
+    if (!voiceHost) {
+      if (now() < nextVoiceHostAt) return;
+      const connected = await connectControllerVoiceHost(options.hostDataDirectory).catch(
+        () => undefined,
+      );
+      if (signal.aborted) {
+        // Shutdown began while connecting: never hold a channel past the Controller.
+        connected?.close();
+        return;
+      }
+      if (!connected) {
+        nextVoiceHostAt = now() + voiceHostDelayMs;
+        voiceHostDelayMs = Math.min(voiceHostDelayMs * 2, VOICE_HOST_RETRY_MAX_MS);
+        return;
+      }
+      voiceHost = connected;
+      connectedNow = true;
+    }
+    try {
+      await current.attachVoiceHost(voiceHost);
+    } catch (error) {
+      // The installed Renderer integration stays; release the channel and retry later.
+      voiceHost.close();
+      voiceHost = undefined;
+      nextVoiceHostAt = now() + voiceHostDelayMs;
+      voiceHostDelayMs = Math.min(voiceHostDelayMs * 2, VOICE_HOST_RETRY_MAX_MS);
+      startupTrace("Voice Host attachment deferred", error);
+      return;
+    }
+    if (signal.aborted) {
+      // The Session is closing, so release the channel instead of leaving it open.
+      voiceHost.close();
+      voiceHost = undefined;
+      return;
+    }
+    nextVoiceHostAt = 0;
+    voiceHostDelayMs = VOICE_HOST_RETRY_INITIAL_MS;
+    if (connectedNow) startupTrace("Voice Host attached to the installed Renderer Session");
   };
   startupTrace("initialization started");
 
@@ -485,7 +532,9 @@ export async function runDesktopController(
       await useSession(async () => {
         if (!session && now() < nextRecoveryAt) return;
         try {
-          restoreRemoteConnections(await recoverSession());
+          const current = await recoverSession();
+          restoreRemoteConnections(current);
+          await ensureVoiceHost(current);
         } catch {
           // Renderer integration remains unavailable until a later bounded retry succeeds.
         }
@@ -497,7 +546,11 @@ export async function runDesktopController(
     await settleWithin(operation, SHUTDOWN_OPERATION_WAIT_MS);
     resetSession();
     voiceHost?.close();
-    // An operation that outlives the wait may still open a session; close it once it settles.
-    void operation.then(resetSession);
+    // An operation that outlives the wait may still open a session or connect a Host;
+    // close both once it settles.
+    void operation.then(() => {
+      resetSession();
+      voiceHost?.close();
+    });
   }
 }

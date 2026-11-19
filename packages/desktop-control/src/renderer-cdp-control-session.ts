@@ -61,6 +61,9 @@ interface RendererCdpControlOperations {
 export interface RendererCdpControlSession {
   readonly snapshot: RendererCdpControlSnapshot;
   ensureInstalled(): Promise<RendererCdpControlSnapshot>;
+  /** Binds a Host voice owner that appeared after installation. Installed
+   * Renderer hooks and the session's own connections are left untouched. */
+  attachVoiceHost(voiceHost: RendererVoiceHostOwner): Promise<void>;
   activateDesktop(): Promise<number>;
   executeRenderer<T>(expression: string, timeoutMs?: number): Promise<T>;
   close(): void;
@@ -99,6 +102,12 @@ function discoveryTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortS
 
 function abortFailure(signal: AbortSignal, fallback: string): Error {
   return signal.reason instanceof Error ? signal.reason : new Error(fallback);
+}
+
+/** Checked immediately before a client is committed to a session-owned map, so a
+ * connection that finished opening after the session closed is never retained. */
+function throwIfCdpAborted(signal: AbortSignal, fallback: string): void {
+  if (signal.aborted) throw abortFailure(signal, fallback);
 }
 
 function awaitWithSignal<T>(
@@ -263,6 +272,83 @@ async function bindRendererVoiceHost(
 function unbindRendererVoiceHost(renderer: RendererCdpClient, disposals: VoiceHostDisposals): void {
   disposals.get(renderer)?.();
   disposals.delete(renderer);
+}
+
+interface LateVoiceHostBinding {
+  readonly targetId: string;
+  readonly client: RendererCdpClient;
+  /** Last time this connection answered a liveness probe. */
+  verifiedAt: number;
+  dispose(): void;
+}
+
+// Late attachment runs inside the Controller's serialized session work.
+const VOICE_HOST_ATTACH_TIMEOUT_MS = 15_000;
+const VOICE_HOST_OVERLAY_RETRY_MS = 5_000;
+// A target ID outlives its CDP connection, so target inventory cannot prove a
+// binding still delivers. One bounded round trip per interval retires a dead or
+// stalled connection without probing the Renderer on every monitor pass.
+const VOICE_HOST_LIVENESS_INTERVAL_MS = 5_000;
+// Long enough for a Renderer that is briefly busy with an active call, short
+// enough to stay below the probe interval so probes never overlap.
+export const VOICE_HOST_LIVENESS_TIMEOUT_MS = 3_000;
+
+/** Late attachment must not depend on whether re-enabling Runtime on the
+ * installed connection replays `Runtime.executionContextCreated`: that replay
+ * differs across Chromium builds. A fresh connection reports the live contexts
+ * when Runtime is enabled, and leaves the installed session's listeners and
+ * injections untouched. */
+async function bindVoiceHostOnNewConnection(
+  target: CdpTarget,
+  voiceHost: RendererVoiceHostOwner,
+  operations: RendererCdpControlOperations,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<LateVoiceHostBinding> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const deadline = signal ? AbortSignal.any([timeout, signal]) : timeout;
+  const timeoutMessage = "Voice Host attachment timed out";
+  const client = await connectRendererTarget(target, operations, deadline, timeoutMessage);
+  const installing = installRendererVoiceHostBinding(client, voiceHost);
+  try {
+    const dispose = await awaitWithSignal(installing, deadline, timeoutMessage);
+    return { targetId: target.id, client, dispose, verifiedAt: Date.now() };
+  } catch (error) {
+    // Closing the connection clears the binding's listeners and stops a publish that
+    // is still in flight. A capability this attempt already published is left for the
+    // next successful attach to replace: disposing here would settle page requests
+    // that this attempt may still be serving.
+    client.close();
+    throw error;
+  }
+}
+
+/** A closed socket rejects at once. A connection that stays silent past the
+ * probe bound is retired instead of keeping the target's only binding slot, so a
+ * later pass re-attaches on a fresh connection and never replays a page request
+ * whose delivery was uncertain. The bound is also handed to the client, which
+ * drops the unanswered command instead of queueing behind it; the external
+ * deadline still bounds a client that ignores it and stops the probe as soon as
+ * the session closes. A Renderer that is only briefly busy answers in time, so
+ * its active call is not cancelled by a spurious retirement. */
+async function lateVoiceBindingIsLive(
+  binding: LateVoiceHostBinding,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (Date.now() - binding.verifiedAt < VOICE_HOST_LIVENESS_INTERVAL_MS) return true;
+  if (signal.aborted) return false;
+  const deadline = AbortSignal.any([AbortSignal.timeout(VOICE_HOST_LIVENESS_TIMEOUT_MS), signal]);
+  try {
+    await awaitWithSignal(
+      binding.client.evaluate<unknown>("1", VOICE_HOST_LIVENESS_TIMEOUT_MS),
+      deadline,
+      "Voice Host binding liveness check timed out",
+    );
+    binding.verifiedAt = Date.now();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function evaluateSource(renderer: RendererCdpClient, source: string): Promise<void> {
@@ -518,6 +604,7 @@ async function installOverlayHook(
         );
       await run(() => connected.command("Runtime.enable"));
       await run(() => connected.command("Page.enable"));
+      throwIfCdpAborted(signal, timeoutMessage);
       overlayClients.set(target.id, connected);
     } else if (voiceHost && voiceHostDisposals && !voiceHostDisposals.has(connected)) {
       await run(() =>
@@ -630,6 +717,7 @@ async function installBrowserAnnotationStyles(
         }),
       );
       // Chromium removes new-document scripts when their CDP session detaches.
+      throwIfCdpAborted(signal, timeoutMessage);
       browserClients.set(target.id, connected);
     }
     const installed = await run(() =>
@@ -684,6 +772,7 @@ async function installAuxiliaryRenderers(
   signal: AbortSignal,
   voiceHost?: RendererVoiceHostOwner,
   voiceHostDisposals?: VoiceHostDisposals,
+  lateVoiceBindings?: Map<string, LateVoiceHostBinding>,
 ): Promise<void> {
   try {
     const targets = await awaitWithSignal(
@@ -701,6 +790,13 @@ async function installAuxiliaryRenderers(
         }
       }
     }
+    if (lateVoiceBindings)
+      for (const [id, binding] of lateVoiceBindings) {
+        if (liveTargets.has(id)) continue;
+        binding.dispose();
+        binding.client.close();
+        lateVoiceBindings.delete(id);
+      }
     await Promise.allSettled([
       ...targets
         .filter(isBrowserPage)
@@ -741,24 +837,40 @@ async function installTarget(
   operations: RendererCdpControlOperations,
   voiceHost?: RendererVoiceHostOwner,
   voiceHostDisposals?: VoiceHostDisposals,
+  signal?: AbortSignal,
 ): Promise<{
   renderer: RendererCdpClient;
   snapshot: RendererCdpControlSnapshot;
   disposeModules(): void;
 }> {
-  const renderer = await operations.connect(target.webSocketDebuggerUrl);
+  const timeoutMessage = "Primary Renderer installation timed out";
+  const run = <T>(operation: () => Promise<T>): Promise<T> =>
+    signal ? runWithCdpSignal(signal, timeoutMessage, operation) : operation();
+  const renderer = signal
+    ? await connectRendererTarget(target, operations, signal, timeoutMessage)
+    : await operations.connect(target.webSocketDebuggerUrl);
   let disposeModules: (() => void) | undefined;
   try {
     if (voiceHost && voiceHostDisposals)
-      await bindRendererVoiceHost(renderer, voiceHost, voiceHostDisposals, {
-        enableRuntime: false,
-      });
-    disposeModules = await installRendererLoadedModules(renderer);
-    await renderer.command("Page.enable");
-    await renderer.command("Page.addScriptToEvaluateOnNewDocument", { source: rendererSource });
-    await evaluateSource(renderer, rendererSource);
-    const draftPrewarmPolicy = await operations.installDraftPrewarmPolicy(renderer);
-    const binding = await waitForBinding(renderer, enabledAgents, timeoutMs, pollIntervalMs);
+      await run(() =>
+        bindRendererVoiceHost(renderer, voiceHost, voiceHostDisposals, {
+          enableRuntime: false,
+        }),
+      );
+    disposeModules = await run(() => installRendererLoadedModules(renderer));
+    await run(() => renderer.command("Page.enable"));
+    await run(() =>
+      renderer.command("Page.addScriptToEvaluateOnNewDocument", { source: rendererSource }),
+    );
+    await run(() => evaluateSource(renderer, rendererSource));
+    const draftPrewarmPolicy = await run(() => operations.installDraftPrewarmPolicy(renderer));
+    const binding = await waitForBinding(
+      renderer,
+      enabledAgents,
+      timeoutMs,
+      pollIntervalMs,
+      signal,
+    );
     return { renderer, snapshot: { target, draftPrewarmPolicy, binding }, disposeModules };
   } catch (error) {
     disposeModules?.();
@@ -770,6 +882,14 @@ async function installTarget(
 
 class InstalledRendererCdpControlSession implements RendererCdpControlSession {
   #closed = false;
+  #lateVoiceHost: RendererVoiceHostOwner | undefined;
+  #lateVoicePrimaryId: string | undefined;
+  #lateVoiceAttach: Promise<void> | undefined;
+  readonly #lateVoiceBindings = new Map<string, LateVoiceHostBinding>();
+  readonly #overlayVoiceRetryAt = new Map<string, number>();
+  // close() aborts this deadline, so discovery, connects, installs, and
+  // liveness probes in flight stop instead of running to their own timeouts.
+  readonly #shutdown = new AbortController();
 
   constructor(
     private renderer: RendererCdpClient,
@@ -794,63 +914,22 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
   }
 
   async ensureInstalled(): Promise<RendererCdpControlSnapshot> {
-    if (this.#closed) throw new Error("Renderer CDP Control Session is closed");
+    this.#assertOpen();
     const target = await waitForPrimaryTarget(
       this.rendererCdpEndpoint,
       this.operations,
       this.timeoutMs,
       this.pollIntervalMs,
       this.currentSnapshot.target.id,
+      this.#shutdown.signal,
     );
+    // close() cancels discovery; a target found after it must not open connections.
+    this.#assertOpen();
     if (target.id !== this.currentSnapshot.target.id) {
-      const replacement = await installTarget(
-        target,
-        this.rendererSource,
-        this.enabledAgents,
-        this.timeoutMs,
-        this.pollIntervalMs,
-        this.operations,
-        this.voiceHost,
-        this.voiceHostDisposals,
-      );
-      this.disposeModules();
-      unbindRendererVoiceHost(this.renderer, this.voiceHostDisposals);
-      this.renderer.close();
-      this.renderer = replacement.renderer;
-      this.disposeModules = replacement.disposeModules;
-      this.currentSnapshot = replacement.snapshot;
+      this.#disposeLateVoiceBinding(this.currentSnapshot.target.id);
+      await this.#replacePrimary(target);
     } else {
-      try {
-        const existing = await readBinding(this.renderer);
-        if (existing === null) await evaluateSource(this.renderer, this.rendererSource);
-        // A Host switch can temporarily leave the Adapter installing. Reconcile
-        // native owners before validating readiness; that is not a lost CDP page.
-        const draftPrewarmPolicy = await this.operations.installDraftPrewarmPolicy(this.renderer);
-        const binding = await waitForBinding(
-          this.renderer,
-          this.enabledAgents,
-          this.timeoutMs,
-          this.pollIntervalMs,
-        );
-        this.currentSnapshot = { target, draftPrewarmPolicy, binding };
-      } catch {
-        const replacement = await installTarget(
-          target,
-          this.rendererSource,
-          this.enabledAgents,
-          this.timeoutMs,
-          this.pollIntervalMs,
-          this.operations,
-          this.voiceHost,
-          this.voiceHostDisposals,
-        );
-        this.disposeModules();
-        unbindRendererVoiceHost(this.renderer, this.voiceHostDisposals);
-        this.renderer.close();
-        this.renderer = replacement.renderer;
-        this.disposeModules = replacement.disposeModules;
-        this.currentSnapshot = replacement.snapshot;
-      }
+      await this.#reconcilePrimary(target);
     }
     await installAuxiliaryRenderers(
       this.rendererCdpEndpoint,
@@ -861,15 +940,202 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
       this.browserStyleClients,
       this.overlayClients,
       this.operations,
-      discoveryTimeoutSignal(this.timeoutMs),
+      discoveryTimeoutSignal(this.timeoutMs, this.#shutdown.signal),
       this.voiceHost,
       this.voiceHostDisposals,
+      this.#lateVoiceBindings,
     );
+    this.#assertOpen();
     return this.currentSnapshot;
   }
 
-  async activateDesktop(): Promise<number> {
+  async #reconcilePrimary(target: CdpTarget): Promise<void> {
+    try {
+      const existing = await this.#runWhileOpen(() => readBinding(this.renderer));
+      if (existing === null)
+        await this.#runWhileOpen(() => evaluateSource(this.renderer, this.rendererSource));
+      // A Host switch can temporarily leave the Adapter installing. Reconcile
+      // native owners before validating readiness; that is not a lost CDP page.
+      const draftPrewarmPolicy = await this.#runWhileOpen(() =>
+        this.operations.installDraftPrewarmPolicy(this.renderer),
+      );
+      const binding = await waitForBinding(
+        this.renderer,
+        this.enabledAgents,
+        this.timeoutMs,
+        this.pollIntervalMs,
+        this.#shutdown.signal,
+      );
+      this.#assertOpen();
+      this.currentSnapshot = { target, draftPrewarmPolicy, binding };
+    } catch {
+      // close() already released the installed connection; it must not be
+      // followed by a replacement install for the same target.
+      this.#assertOpen();
+      this.#disposeLateVoiceBinding(this.currentSnapshot.target.id);
+      await this.#replacePrimary(target);
+    }
+  }
+
+  async #replacePrimary(target: CdpTarget): Promise<void> {
+    const replacement = await installTarget(
+      target,
+      this.rendererSource,
+      this.enabledAgents,
+      this.timeoutMs,
+      this.pollIntervalMs,
+      this.operations,
+      this.voiceHost,
+      this.voiceHostDisposals,
+      this.#shutdown.signal,
+    );
+    if (this.#closed) {
+      // Everything this install acquired belongs to a closed session: release it
+      // instead of committing a connection that no later close() would reach.
+      replacement.disposeModules();
+      unbindRendererVoiceHost(replacement.renderer, this.voiceHostDisposals);
+      replacement.renderer.close();
+      throw new Error("Renderer CDP Control Session is closed");
+    }
+    this.disposeModules();
+    unbindRendererVoiceHost(this.renderer, this.voiceHostDisposals);
+    this.renderer.close();
+    this.renderer = replacement.renderer;
+    this.disposeModules = replacement.disposeModules;
+    this.currentSnapshot = replacement.snapshot;
+  }
+
+  #assertOpen(): void {
     if (this.#closed) throw new Error("Renderer CDP Control Session is closed");
+  }
+
+  #runWhileOpen<T>(operation: () => Promise<T>): Promise<T> {
+    return runWithCdpSignal(
+      this.#shutdown.signal,
+      "Renderer CDP Control Session is closed",
+      operation,
+    );
+  }
+
+  async attachVoiceHost(voiceHost: RendererVoiceHostOwner): Promise<void> {
+    this.#assertOpen();
+    if (this.voiceHost) return;
+    this.#lateVoiceAttach ??= this.#reconcileVoiceHost(voiceHost).finally(() => {
+      this.#lateVoiceAttach = undefined;
+    });
+    return this.#lateVoiceAttach;
+  }
+
+  async #reconcileVoiceHost(voiceHost: RendererVoiceHostOwner): Promise<void> {
+    const timeoutMs = Math.min(this.timeoutMs, VOICE_HOST_ATTACH_TIMEOUT_MS);
+    // Bindings published for another owner cannot serve this Host.
+    if (this.#lateVoiceHost !== undefined && this.#lateVoiceHost !== voiceHost)
+      this.#disposeLateVoiceBindings();
+    const primaryTarget = this.currentSnapshot.target;
+    if (this.#lateVoicePrimaryId !== undefined && this.#lateVoicePrimaryId !== primaryTarget.id)
+      this.#disposeLateVoiceBinding(this.#lateVoicePrimaryId);
+    const existingPrimary = this.#lateVoiceBindings.get(primaryTarget.id);
+    if (existingPrimary && !(await lateVoiceBindingIsLive(existingPrimary, this.#shutdown.signal)))
+      this.#disposeLateVoiceBinding(primaryTarget.id);
+    this.#assertOpen();
+    if (!this.#lateVoiceBindings.has(primaryTarget.id)) {
+      this.#disposeLateVoiceBinding(primaryTarget.id);
+      const binding = await bindVoiceHostOnNewConnection(
+        primaryTarget,
+        voiceHost,
+        this.operations,
+        timeoutMs,
+        this.#shutdown.signal,
+      );
+      if (this.#closed) {
+        binding.dispose();
+        binding.client.close();
+        throw new Error("Renderer CDP Control Session is closed");
+      }
+      this.#lateVoiceBindings.set(binding.targetId, binding);
+    }
+    this.#lateVoicePrimaryId = primaryTarget.id;
+    this.#lateVoiceHost = voiceHost;
+    await this.#reconcileOverlayVoiceHost(voiceHost, timeoutMs);
+    this.#assertOpen();
+  }
+
+  async #reconcileOverlayVoiceHost(
+    voiceHost: RendererVoiceHostOwner,
+    timeoutMs: number,
+  ): Promise<void> {
+    // Overlay voice exists only for an installed overlay hook, exactly as the
+    // auxiliary installation decides whether the overlay page is qualified.
+    if (this.#closed || !this.overlayHookSource) return;
+    const deadline = AbortSignal.any([AbortSignal.timeout(timeoutMs), this.#shutdown.signal]);
+    let targets: CdpTarget[];
+    try {
+      targets = await awaitWithSignal(
+        this.operations.listTargets(this.rendererCdpEndpoint, deadline),
+        deadline,
+        "Late overlay CDP target discovery timed out",
+      );
+    } catch {
+      return;
+    }
+    const overlays = selectAvatarOverlayRendererTargets(targets);
+    const live = new Set(overlays.map((target) => target.id));
+    for (const id of [...this.#lateVoiceBindings.keys()])
+      if (id !== this.#lateVoicePrimaryId && !live.has(id)) this.#disposeLateVoiceBinding(id);
+    for (const id of [...this.#overlayVoiceRetryAt.keys()])
+      if (!live.has(id)) this.#overlayVoiceRetryAt.delete(id);
+    await Promise.allSettled(
+      overlays.map(async (target) => {
+        if (this.#closed) return;
+        const existing = this.#lateVoiceBindings.get(target.id);
+        if (existing) {
+          if (await lateVoiceBindingIsLive(existing, this.#shutdown.signal)) return;
+          if (this.#closed) return;
+          this.#disposeLateVoiceBinding(target.id);
+        }
+        if ((this.#overlayVoiceRetryAt.get(target.id) ?? 0) > Date.now()) return;
+        try {
+          const binding = await bindVoiceHostOnNewConnection(
+            target,
+            voiceHost,
+            this.operations,
+            timeoutMs,
+            this.#shutdown.signal,
+          );
+          if (this.#closed) {
+            binding.dispose();
+            binding.client.close();
+            return;
+          }
+          this.#lateVoiceBindings.set(binding.targetId, binding);
+          this.#overlayVoiceRetryAt.delete(binding.targetId);
+        } catch {
+          // The avatar overlay keeps its own hook; only the primary binding is required.
+          this.#overlayVoiceRetryAt.set(target.id, Date.now() + VOICE_HOST_OVERLAY_RETRY_MS);
+        }
+      }),
+    );
+  }
+
+  #disposeLateVoiceBinding(targetId: string): void {
+    const binding = this.#lateVoiceBindings.get(targetId);
+    if (!binding) return;
+    // Disposal removes the page capability on its own connection asynchronously;
+    // the replacement publishes on a fresh connection after this call returns.
+    binding.dispose();
+    binding.client.close();
+    this.#lateVoiceBindings.delete(targetId);
+    if (this.#lateVoicePrimaryId === targetId) this.#lateVoicePrimaryId = undefined;
+    this.#overlayVoiceRetryAt.delete(targetId);
+  }
+
+  #disposeLateVoiceBindings(): void {
+    for (const targetId of [...this.#lateVoiceBindings.keys()])
+      this.#disposeLateVoiceBinding(targetId);
+  }
+
+  async activateDesktop(): Promise<number> {
+    this.#assertOpen();
     await this.renderer.command("Page.bringToFront");
     return 1;
   }
@@ -882,6 +1148,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#shutdown.abort(new Error("Renderer CDP Control Session is closed"));
     this.disposeModules();
     unbindRendererVoiceHost(this.renderer, this.voiceHostDisposals);
     this.renderer.close();
@@ -894,6 +1161,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     this.overlayClients.clear();
     for (const dispose of this.voiceHostDisposals.values()) dispose();
     this.voiceHostDisposals.clear();
+    this.#disposeLateVoiceBindings();
   }
 }
 

@@ -5,6 +5,7 @@ import {
   REALTIME_CALL_METHOD,
   VOICE_GATEWAY_STATUS_METHOD,
   VOICE_SETTINGS_METHOD,
+  realtimeCallParamsSchema,
 } from "@codexhost/shared-contracts";
 import {
   isEligibleVoiceHostUrl,
@@ -14,7 +15,9 @@ import {
   RENDERER_VOICE_HOST_BINDING_NAME,
   RENDERER_VOICE_HOST_CAPABILITY_GLOBAL,
   RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED,
+  RENDERER_VOICE_HOST_DELIVER_GLOBAL,
   RENDERER_VOICE_HOST_PENDING_GLOBAL,
+  RENDERER_VOICE_HOST_PUBLISH_RETRY_MS,
   installRendererVoiceHostBinding,
   rendererVoiceHostCapabilitySource,
   type RendererVoiceHostCdpClient,
@@ -24,8 +27,19 @@ import {
 function fakeRenderer() {
   const listeners = new Map<string, (params: unknown) => void>();
   const commands: Array<{ method: string; params?: Record<string, unknown> }> = [];
+  const events: string[] = [];
+  const publishHolds: Array<() => void> = [];
+  const pagePublishHolds: Array<() => void> = [];
+  const deliverHolds: Array<() => void> = [];
   const evaluate = vi.fn(async <T>(expression: string): Promise<T> => {
-    void expression;
+    const publishing = expression.includes("Object.defineProperty(globalThis");
+    events.push(publishing ? "evaluate:publish" : "evaluate:cleanup");
+    if (publishing && renderer.holdNextPublish) {
+      renderer.holdNextPublish = false;
+      await new Promise<void>((resolve) => {
+        publishHolds.push(resolve);
+      });
+    }
     return true as T;
   });
   let scripts = 0;
@@ -33,31 +47,61 @@ function fakeRenderer() {
   const topByContext: Record<number, boolean> = {};
   const hrefHolds: Array<() => void> = [];
   const addHolds: Array<() => void> = [];
+  const removeHolds: Array<() => void> = [];
   const renderer = {
     commands,
+    events,
     evaluate,
     listeners,
     hrefByContext,
     topByContext,
     hrefHolds,
     addHolds,
+    removeHolds,
+    publishHolds,
+    pagePublishHolds,
+    deliverHolds,
     holdNextAdd: false,
+    holdNextRemove: false,
+    holdNextPagePublish: false,
+    holdNextPublish: false,
+    holdNextDeliver: false,
+    failNextAdd: false,
     holdHref: false,
     command: vi.fn(async (method: string, params?: Record<string, unknown>) => {
       commands.push({ method, ...(params ? { params } : {}) });
+      events.push(`command:${method}`);
       if (method === "Page.addScriptToEvaluateOnNewDocument") {
-        scripts += 1;
-        const identifier = `script-${scripts}`;
         if (renderer.holdNextAdd) {
           renderer.holdNextAdd = false;
           await new Promise<void>((resolve) => {
             addHolds.push(resolve);
           });
         }
-        return { identifier };
+        if (renderer.failNextAdd) {
+          renderer.failNextAdd = false;
+          throw new Error("Page.addScriptToEvaluateOnNewDocument failed");
+        }
+        scripts += 1;
+        return { identifier: `script-${scripts}` };
+      }
+      if (method === "Page.removeScriptToEvaluateOnNewDocument") {
+        if (renderer.holdNextRemove) {
+          renderer.holdNextRemove = false;
+          await new Promise<void>((resolve) => {
+            removeHolds.push(resolve);
+          });
+        }
+        return {};
       }
       if (method === "Runtime.evaluate") {
         const expression = typeof params?.expression === "string" ? params.expression : "";
+        if (expression.includes('"ok":true') && renderer.holdNextDeliver) {
+          renderer.holdNextDeliver = false;
+          await new Promise<void>((resolve) => {
+            deliverHolds.push(resolve);
+          });
+        }
         if (
           expression.includes("href:String(location.href)") ||
           expression.includes("location.href")
@@ -77,6 +121,7 @@ function fakeRenderer() {
       return {};
     }),
     on: vi.fn((method: string, listener: (params: unknown) => void) => {
+      events.push(`on:${method}`);
       listeners.set(method, listener);
       return () => listeners.delete(method);
     }),
@@ -143,8 +188,8 @@ function operations(request: ReturnType<typeof vi.fn>) {
 function expectAbandonedCreate(request: ReturnType<typeof vi.fn>) {
   const seen = operations(request);
   expect(seen.filter((operation) => operation === "create")).toEqual(["create"]);
-  expect(seen).toContain("cancel");
-  expect(seen).toContain("hangup");
+  expect(seen.filter((operation) => operation === "cancel")).toHaveLength(1);
+  expect(seen.filter((operation) => operation === "hangup")).toHaveLength(1);
 }
 
 function evaluateExpression(item: { method: string; params?: Record<string, unknown> }): string {
@@ -171,6 +216,67 @@ async function bindReady(renderer: ReturnType<typeof fakeRenderer>, owner = host
   );
   emitDefaultContext(renderer);
   return { owner, dispose };
+}
+
+interface PageCapability {
+  generation: number;
+  instance: string;
+  request(method: string, params: Record<string, unknown>): Promise<unknown>;
+}
+
+/** A Renderer page that really executes `evaluate`, so page-side capability and
+ * pending-waiter state stays observable across binding installations. */
+function pageSandbox(): Record<string, unknown> {
+  const window = { top: null as unknown };
+  window.top = window;
+  let ids = 0;
+  const bindingCalls: Array<Record<string, unknown>> = [];
+  const sandbox: Record<string, unknown> = {
+    window,
+    location: { href: "app://-/index.html" },
+    URL,
+    Map,
+    Object,
+    JSON,
+    Error,
+    setTimeout,
+    clearTimeout,
+    crypto: { randomUUID: () => `id-${(ids += 1)}` },
+    bindingCalls,
+  };
+  sandbox[RENDERER_VOICE_HOST_BINDING_NAME] = (raw: string) => {
+    bindingCalls.push(JSON.parse(raw) as Record<string, unknown>);
+  };
+  sandbox.globalThis = sandbox;
+  return sandbox;
+}
+
+function pageRenderer(sandbox: Record<string, unknown>): ReturnType<typeof fakeRenderer> {
+  const renderer = fakeRenderer();
+  renderer.evaluate.mockImplementation(async <T>(expression: string): Promise<T> => {
+    if (renderer.holdNextPagePublish && expression.includes("Object.defineProperty(globalThis")) {
+      renderer.holdNextPagePublish = false;
+      await new Promise<void>((resolve) => {
+        renderer.pagePublishHolds.push(resolve);
+      });
+    }
+    return vm.runInNewContext(expression, sandbox) as T;
+  });
+  return renderer;
+}
+
+function pageCapability(sandbox: Record<string, unknown>): PageCapability | undefined {
+  return sandbox[RENDERER_VOICE_HOST_CAPABILITY_GLOBAL] as PageCapability | undefined;
+}
+
+function pageBindingCalls(sandbox: Record<string, unknown>): Array<Record<string, unknown>> {
+  return sandbox.bindingCalls as Array<Record<string, unknown>>;
+}
+
+function publishExpressions(renderer: ReturnType<typeof fakeRenderer>): string[] {
+  return renderer.evaluate.mock.calls
+    .map(([expression]) => String(expression))
+    .filter((expression) => expression.includes("Object.defineProperty(globalThis"));
 }
 
 describe("Renderer voice Host document eligibility", () => {
@@ -673,6 +779,12 @@ describe("Renderer voice Host CDP binding", () => {
     expect(
       owner.request.mock.calls.filter(([, value]) => value.operation === "create"),
     ).toHaveLength(1);
+    expect(
+      owner.request.mock.calls.filter(([, value]) => value.operation === "cancel"),
+    ).toHaveLength(1);
+    expect(
+      owner.request.mock.calls.filter(([, value]) => value.operation === "hangup"),
+    ).toHaveLength(1);
     const delivered = renderer.commands
       .map(evaluateExpression)
       .filter((expression) => expression.includes('"ok":true'));
@@ -948,6 +1060,15 @@ describe("Renderer voice Host CDP binding", () => {
       expect(expressions).toContain(RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED);
       expect(expressions).toContain('"stage":"cancel"');
     });
+    await vi.waitFor(() =>
+      expect(operations(requestA).filter((operation) => operation === "hangup")).toHaveLength(1),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(
+      renderer.commands
+        .map(evaluateExpression)
+        .filter((expression) => expression.includes(RENDERER_VOICE_HOST_CLEANUP_UNCONFIRMED)),
+    ).toHaveLength(1);
     expect(requestB).not.toHaveBeenCalled();
     expect(owner.request).not.toHaveBeenCalled();
     expect(
@@ -1030,5 +1151,520 @@ describe("Renderer voice Host CDP binding", () => {
         .filter((expression) => expression.includes('"ok":true')),
     ).toHaveLength(0);
     dispose();
+  });
+
+  it("installs context and binding listeners before the capability can issue requests", async () => {
+    const renderer = fakeRenderer();
+    const { dispose } = await bindReady(renderer);
+    const order = renderer.events;
+    const runtimeEnable = order.indexOf("command:Runtime.enable");
+    const addBinding = order.indexOf("command:Runtime.addBinding");
+    const publish = order.indexOf("evaluate:publish");
+    expect(order.indexOf("on:Runtime.executionContextCreated")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("on:Runtime.executionContextDestroyed")).toBeLessThan(runtimeEnable);
+    expect(order.indexOf("on:Runtime.executionContextsCleared")).toBeLessThan(runtimeEnable);
+    expect(order.indexOf("on:Runtime.bindingCalled")).toBeLessThan(addBinding);
+    expect(order.indexOf("on:Runtime.bindingCalled")).toBeLessThan(publish);
+    expect(addBinding).toBeLessThan(publish);
+    dispose();
+  });
+
+  it("publishes the newest generation when it changes during the initial future script", async () => {
+    const renderer = fakeRenderer();
+    let generation = 1;
+    const owner = host();
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    renderer.holdNextAdd = true;
+    const installing = installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    await vi.waitFor(() => expect(renderer.addHolds).toHaveLength(1));
+    generation = 2;
+    renderer.addHolds[0]?.();
+    const dispose = await installing;
+    const added = renderer.commands.filter(
+      (item) => item.method === "Page.addScriptToEvaluateOnNewDocument",
+    );
+    expect(added).toHaveLength(2);
+    expect(String(added[0]?.params?.source)).toContain("const generation = 1");
+    expect(String(added[1]?.params?.source)).toContain("const generation = 2");
+    expect(
+      renderer.commands.some(
+        (item) =>
+          item.method === "Page.removeScriptToEvaluateOnNewDocument" &&
+          item.params?.identifier === "script-1",
+      ),
+    ).toBe(true);
+    const published = publishExpressions(renderer);
+    expect(published).toHaveLength(1);
+    expect(published[0]).toContain("const generation = 2");
+    emitDefaultContext(renderer);
+    renderer.emit("Runtime.bindingCalled", {
+      name: RENDERER_VOICE_HOST_BINDING_NAME,
+      executionContextId: 1,
+      payload: payload({ generation: 2 }),
+    });
+    await vi.waitFor(() => expect(owner.request).toHaveBeenCalledOnce());
+    expect(owner.request).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("republishes when the generation changes during the initial capability evaluation", async () => {
+    const renderer = fakeRenderer();
+    let generation = 1;
+    const owner = host();
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    renderer.holdNextPublish = true;
+    const installing = installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    await vi.waitFor(() => expect(renderer.publishHolds).toHaveLength(1));
+    generation = 2;
+    renderer.publishHolds[0]?.();
+    const dispose = await installing;
+    const published = publishExpressions(renderer);
+    expect(published).toHaveLength(2);
+    expect(published[0]).toContain("const generation = 1");
+    expect(published[1]).toContain("const generation = 2");
+    dispose();
+  });
+
+  it("does not publish twice when a generation change races the initial publish", async () => {
+    const renderer = fakeRenderer();
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    renderer.holdNextAdd = true;
+    const installing = installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    await vi.waitFor(() => expect(renderer.addHolds).toHaveLength(1));
+    generation = 2;
+    for (const listener of listeners) listener();
+    renderer.addHolds[0]?.();
+    const dispose = await installing;
+    const published = publishExpressions(renderer);
+    expect(published).toHaveLength(1);
+    expect(published[0]).toContain("const generation = 2");
+    expect(renderer.events.filter((event) => event === "on:Runtime.bindingCalled")).toHaveLength(1);
+    emitDefaultContext(renderer);
+    renderer.emit("Runtime.bindingCalled", {
+      name: RENDERER_VOICE_HOST_BINDING_NAME,
+      executionContextId: 1,
+      payload: payload({ generation: 2 }),
+    });
+    await vi.waitFor(() => expect(owner.request).toHaveBeenCalledOnce());
+    expect(owner.request).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("keeps a replacement capability and its pending request across an asynchronous dispose", async () => {
+    const sandbox = pageSandbox();
+    const owner = host();
+    const disposeFirst = await installRendererVoiceHostBinding(
+      pageRenderer(sandbox) as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    const original = pageCapability(sandbox);
+    expect(original?.generation).toBe(1);
+    const disposeSecond = await installRendererVoiceHostBinding(
+      pageRenderer(sandbox) as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    const replacement = pageCapability(sandbox);
+    expect(replacement).toBeDefined();
+    expect(replacement).not.toBe(original);
+    let outcome: string | undefined;
+    const pending = replacement?.request(VOICE_SETTINGS_METHOD, { operation: "get" });
+    void pending?.then(
+      () => {
+        outcome = "resolved";
+      },
+      (error: Error) => {
+        outcome = `rejected:${error.message}`;
+      },
+    );
+    await vi.waitFor(() => expect(pageBindingCalls(sandbox)).toHaveLength(1));
+    disposeFirst();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pageCapability(sandbox)).toBe(replacement);
+    expect(outcome).toBeUndefined();
+    void replacement?.request(VOICE_GATEWAY_STATUS_METHOD, {}).catch(() => undefined);
+    expect(pageBindingCalls(sandbox)).toHaveLength(2);
+    disposeSecond();
+    await vi.waitFor(() => expect(pageCapability(sandbox)).toBeUndefined());
+    await vi.waitFor(() =>
+      expect(outcome).toBe("rejected:Host request outcome is unknown. Do not retry automatically."),
+    );
+  });
+
+  it("replaces capability state retained from an earlier Controller process", () => {
+    const sandbox = pageSandbox();
+    vm.runInNewContext(
+      rendererVoiceHostCapabilitySource("old-owner", 4, "old-instance", 50, "old-process"),
+      sandbox,
+    );
+    vm.runInNewContext(
+      rendererVoiceHostCapabilitySource("new-owner", 1, "new-instance", 1, "new-process"),
+      sandbox,
+    );
+    expect(pageCapability(sandbox)?.instance).toBe("new-instance");
+    expect(pageCapability(sandbox)?.generation).toBe(1);
+  });
+
+  it("does not publish into the current document when dispose wins the previous-script removal", async () => {
+    const sandbox = pageSandbox();
+    const renderer = pageRenderer(sandbox);
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    expect(pageCapability(sandbox)?.generation).toBe(1);
+
+    renderer.holdNextRemove = true;
+    generation = 2;
+    for (const listener of listeners) listener();
+    await vi.waitFor(() => expect(renderer.removeHolds).toHaveLength(1));
+    dispose();
+    expect(pageCapability(sandbox)).toBeUndefined();
+    renderer.removeHolds[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pageCapability(sandbox)).toBeUndefined();
+    // The disposal window must not evaluate a second capability into the document.
+    expect(publishExpressions(renderer)).toHaveLength(1);
+  });
+
+  it("does not leave page globals when dispose wins the current-document publish", async () => {
+    const sandbox = pageSandbox();
+    const renderer = pageRenderer(sandbox);
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+
+    renderer.holdNextPagePublish = true;
+    generation = 2;
+    for (const listener of listeners) listener();
+    await vi.waitFor(() => expect(renderer.pagePublishHolds).toHaveLength(1));
+    dispose();
+    expect(pageCapability(sandbox)).toBeUndefined();
+    renderer.pagePublishHolds[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pageCapability(sandbox)).toBeUndefined();
+    expect(sandbox[RENDERER_VOICE_HOST_DELIVER_GLOBAL]).toBeUndefined();
+    expect(sandbox[RENDERER_VOICE_HOST_PENDING_GLOBAL]).toBeUndefined();
+  });
+
+  it("does not let a late publish from a disposed installation replace a replacement capability", async () => {
+    const sandbox = pageSandbox();
+    const rendererA = pageRenderer(sandbox);
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const disposeA = await installRendererVoiceHostBinding(
+      rendererA as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    rendererA.holdNextPagePublish = true;
+    generation = 2;
+    for (const listener of listeners) listener();
+    await vi.waitFor(() => expect(rendererA.pagePublishHolds).toHaveLength(1));
+
+    const disposeB = await installRendererVoiceHostBinding(
+      pageRenderer(sandbox) as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    const replacement = pageCapability(sandbox);
+    expect(replacement?.generation).toBe(2);
+    let outcome: string | undefined;
+    const pending = replacement?.request(VOICE_SETTINGS_METHOD, { operation: "get" });
+    void pending?.then(
+      () => {
+        outcome = "resolved";
+      },
+      (error: Error) => {
+        outcome = `rejected:${error.message}`;
+      },
+    );
+    await vi.waitFor(() => expect(pageBindingCalls(sandbox)).toHaveLength(1));
+
+    disposeA();
+    rendererA.pagePublishHolds[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pageCapability(sandbox)).toBe(replacement);
+    expect(outcome).toBeUndefined();
+
+    disposeB();
+    await vi.waitFor(() => expect(pageCapability(sandbox)).toBeUndefined());
+    await vi.waitFor(() =>
+      expect(outcome).toBe("rejected:Host request outcome is unknown. Do not retry automatically."),
+    );
+  });
+
+  it("keeps the previous future script across a rejected registration and republishes on retry", async () => {
+    vi.useFakeTimers();
+    const sandbox = pageSandbox();
+    const renderer = pageRenderer(sandbox);
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    const adds = () =>
+      renderer.commands.filter((item) => item.method === "Page.addScriptToEvaluateOnNewDocument");
+    const removes = () =>
+      renderer.commands.filter(
+        (item) => item.method === "Page.removeScriptToEvaluateOnNewDocument",
+      );
+    const previousSource = String(adds()[0]?.params?.source);
+    expect(previousSource).toContain("const generation = 1");
+    expect(pageCapability(sandbox)?.generation).toBe(1);
+
+    generation = 2;
+    renderer.failNextAdd = true;
+    for (const listener of listeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(adds()).toHaveLength(2);
+    expect(String(adds()[1]?.params?.source)).toContain("const generation = 2");
+    // The rejected registration leaves the previous script for future documents.
+    expect(removes()).toHaveLength(0);
+    expect(pageCapability(sandbox)?.generation).toBe(1);
+    const retainedDocument = pageSandbox();
+    vm.runInNewContext(previousSource, retainedDocument);
+    expect(pageCapability(retainedDocument)?.generation).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(RENDERER_VOICE_HOST_PUBLISH_RETRY_MS);
+    expect(adds()).toHaveLength(3);
+    expect(String(adds()[2]?.params?.source)).toContain("const generation = 2");
+    expect(removes().map((item) => item.params?.identifier)).toContain("script-1");
+    expect(pageCapability(sandbox)?.generation).toBe(2);
+    const futureDocument = pageSandbox();
+    vm.runInNewContext(String(adds()[2]?.params?.source), futureDocument);
+    expect(pageCapability(futureDocument)?.generation).toBe(2);
+    dispose();
+  });
+
+  it("stops retrying a failed publication after dispose", async () => {
+    vi.useFakeTimers();
+    const renderer = fakeRenderer();
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    generation = 2;
+    renderer.failNextAdd = true;
+    for (const listener of listeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+    const attempts = () =>
+      renderer.commands.filter((item) => item.method === "Page.addScriptToEvaluateOnNewDocument");
+    expect(attempts()).toHaveLength(2);
+    dispose();
+    await vi.advanceTimersByTimeAsync(RENDERER_VOICE_HOST_PUBLISH_RETRY_MS * 3);
+    expect(attempts()).toHaveLength(2);
+  });
+
+  it("keeps the previous future script when a refresh add loses the generation race", async () => {
+    const renderer = fakeRenderer();
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    generation = 2;
+    renderer.holdNextAdd = true;
+    for (const listener of listeners) listener();
+    await vi.waitFor(() => expect(renderer.addHolds).toHaveLength(1));
+    generation = 3;
+    renderer.addHolds[0]?.();
+    await vi.waitFor(() => expect(publishExpressions(renderer)).toHaveLength(2));
+    const adds = renderer.commands.filter(
+      (item) => item.method === "Page.addScriptToEvaluateOnNewDocument",
+    );
+    expect(adds).toHaveLength(3);
+    expect(String(adds[1]?.params?.source)).toContain("const generation = 2");
+    expect(String(adds[2]?.params?.source)).toContain("const generation = 3");
+    // The script that lost the generation race is removed; the previous script is
+    // replaced only by the accepted generation.
+    expect(
+      renderer.commands
+        .filter((item) => item.method === "Page.removeScriptToEvaluateOnNewDocument")
+        .map((item) => item.params?.identifier),
+    ).toEqual(["script-2", "script-1"]);
+    expect(publishExpressions(renderer)[1]).toContain("const generation = 3");
+    dispose();
+  });
+
+  it("rejects a failed initial registration without leaving a binding and installs again on the same owner", async () => {
+    const renderer = fakeRenderer();
+    const owner = host();
+    renderer.failNextAdd = true;
+    await expect(
+      installRendererVoiceHostBinding(renderer as unknown as RendererVoiceHostCdpClient, owner),
+    ).rejects.toThrow("Page.addScriptToEvaluateOnNewDocument failed");
+    expect(renderer.commands.some((item) => item.method === "Runtime.removeBinding")).toBe(true);
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    const scripts = renderer.commands.filter(
+      (item) => item.method === "Page.addScriptToEvaluateOnNewDocument",
+    );
+    expect(scripts).toHaveLength(2);
+    expect(String(scripts[1]?.params?.source)).toContain("const generation = 1");
+    dispose();
+  });
+
+  it("cancels a pending create once across generation refresh, context destruction, and dispose", async () => {
+    const renderer = fakeRenderer();
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    let release: (value: unknown) => void = () => undefined;
+    const created = new Promise((resolve) => {
+      release = resolve;
+    });
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    owner.request.mockImplementation(async (_method: string, params: Record<string, unknown>) => {
+      if (params.operation === "create") {
+        await created;
+        return createdCallResult();
+      }
+      return { status: 204, body: "", headers: {} };
+    });
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    emitDefaultContext(renderer);
+    renderer.emit("Runtime.bindingCalled", {
+      name: RENDERER_VOICE_HOST_BINDING_NAME,
+      executionContextId: 1,
+      payload: createPayload(),
+    });
+    await vi.waitFor(() => expect(owner.request).toHaveBeenCalledOnce());
+
+    generation = 2;
+    for (const listener of listeners) listener();
+    renderer.emit("Runtime.executionContextDestroyed", { executionContextId: 1 });
+    dispose();
+    await vi.waitFor(() =>
+      expect(operations(owner.request).filter((operation) => operation === "cancel")).toHaveLength(
+        1,
+      ),
+    );
+    release(undefined);
+    await vi.waitFor(() => expectAbandonedCreate(owner.request));
+    for (const [, params] of owner.request.mock.calls)
+      if (params.operation !== "create")
+        expect(realtimeCallParamsSchema.safeParse(params).success).toBe(true);
+    expect(
+      renderer.commands
+        .map(evaluateExpression)
+        .filter((expression) => expression.includes('"ok":true')),
+    ).toHaveLength(0);
+  });
+
+  it("hangs up a settled create once without cancelling it", async () => {
+    const renderer = fakeRenderer();
+    const listeners: Array<() => void> = [];
+    let generation = 1;
+    const owner = host({
+      onGenerationChange(listener) {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    Object.defineProperty(owner, "generation", { get: () => generation, configurable: true });
+    owner.request.mockImplementation(async (_method: string, params: Record<string, unknown>) =>
+      params.operation === "create" ? createdCallResult() : { status: 204, body: "", headers: {} },
+    );
+    const dispose = await installRendererVoiceHostBinding(
+      renderer as unknown as RendererVoiceHostCdpClient,
+      owner,
+    );
+    emitDefaultContext(renderer);
+    renderer.holdNextDeliver = true;
+    renderer.emit("Runtime.bindingCalled", {
+      name: RENDERER_VOICE_HOST_BINDING_NAME,
+      executionContextId: 1,
+      payload: createPayload(),
+    });
+    await vi.waitFor(() => expect(renderer.deliverHolds).toHaveLength(1));
+
+    generation = 2;
+    for (const listener of listeners) listener();
+    await vi.waitFor(() =>
+      expect(operations(owner.request).filter((operation) => operation === "hangup")).toHaveLength(
+        1,
+      ),
+    );
+    expect(operations(owner.request)).not.toContain("cancel");
+    dispose();
+    renderer.deliverHolds[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(operations(owner.request).filter((operation) => operation === "hangup")).toHaveLength(1);
   });
 });
