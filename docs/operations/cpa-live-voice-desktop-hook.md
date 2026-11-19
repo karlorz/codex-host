@@ -61,9 +61,9 @@ add fresh internal media-track or gateway-hangup measurements.
 
 The registry activates Chat, Work/Codex and Work/Grok for macOS Desktop
 **26.1106.51428**, native build **26605**, on implementation
-**ba87539932d96217**. Original attended Chat and Work/Grok results use
+**af0ca16ef25a57ae**. Original attended Chat and Work/Grok results use
 **5f84eb365e1b6736**; Work/Codex uses **f6f9c208ad38f922**. These are preserved
-acceptance results, not new attended speech on ba87539932d96217. Chat acceptance includes
+acceptance results, not new attended speech on af0ca16ef25a57ae. Chat acceptance includes
 existing conversations, new-draft navigation, leave/return, two-way speech,
 End Voice and microphone release. Work acceptance includes selected-Harness
 preservation, two-way speech, End Voice and microphone release; Grok also

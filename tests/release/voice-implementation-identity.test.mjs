@@ -25,6 +25,45 @@ describe("voice implementation identity", () => {
     expect(files).toContain("src/overlay-voice-bootstrap-entry.ts");
   });
 
+  it.each([
+    [
+      "src/renderer-voice-starter-core.ts",
+      "return workGateway || externalHarness;",
+      "return false;",
+    ],
+    [
+      "src/renderer-voice-capability-subscriptions.ts",
+      'const ALLOWED_ACCESS = { status: "allowed" }',
+      'const ALLOWED_ACCESS = { status: "denied" }',
+    ],
+    ["src/renderer-voice-routes-cache.ts", 'routes.workConnection === "gateway"', "false"],
+  ])(
+    "hashes behavior in multiline runtime imports and re-exports for %s",
+    async (relative, from, to) => {
+      expect(await listVoiceImplementationSourceFiles(packageRoot)).toContain(relative);
+      const source = await readFile(path.join(packageRoot, relative), "utf8");
+      expect(source).toContain(from);
+      const before = await computeVoiceImplementationIdentity(packageRoot);
+      expect(
+        await computeVoiceImplementationIdentity(packageRoot, {
+          [relative]: source.replace(from, to),
+        }),
+      ).not.toBe(before);
+    },
+  );
+
+  it("follows multiline re-exports and skips type-only module edges", async () => {
+    const relative = "src/renderer-voice-start-capability.ts";
+    const replacements = {
+      [relative]: `export {\n value,\n} from "./runtime-edge.js";\nimport type { Value } from "./type-edge.js";\nexport type { Other } from "./type-export-edge.js";`,
+      "src/runtime-edge.ts": "export const value = true;",
+    };
+    const files = await listVoiceImplementationSourceFiles(packageRoot, replacements);
+    expect(files).toContain("src/runtime-edge.ts");
+    expect(files).not.toContain("src/type-edge.ts");
+    expect(files).not.toContain("src/type-export-edge.ts");
+  });
+
   it("changes when omitted asset-selection source changes", async () => {
     const first = await computeVoiceImplementationIdentity(packageRoot);
     const assetsPath = "src/renderer-voice-assets.ts";

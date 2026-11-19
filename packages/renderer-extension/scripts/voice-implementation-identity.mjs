@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import ts from "typescript";
 
 /** Production voice entry modules. Import-closure fills remaining runtime files. */
 export const VOICE_IMPLEMENTATION_SEED_FILES = [
@@ -35,13 +36,14 @@ export function generatedRevisionSource(revision) {
 
 function localSpecifiers(source) {
   const specs = [];
-  for (const line of source.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("import type ") || trimmed.startsWith("export type ")) continue;
-    const from = trimmed.match(/^(?:import|export)\s.+\sfrom\s+["'](\.\/[^"']+)["']/);
-    if (from) specs.push(from[1]);
-    const side = trimmed.match(/^import\s+["'](\.\/[^"']+)["']/);
-    if (side) specs.push(side[1]);
+  const file = ts.createSourceFile("voice.ts", source, ts.ScriptTarget.Latest, true);
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+    if (ts.isImportDeclaration(statement) && statement.importClause?.isTypeOnly) continue;
+    if (ts.isExportDeclaration(statement) && statement.isTypeOnly) continue;
+    const specifier = statement.moduleSpecifier;
+    if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("./"))
+      specs.push(specifier.text);
   }
   return specs;
 }
