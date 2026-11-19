@@ -2,21 +2,21 @@ import {
   gatewayVoiceStartRequest,
   hashedOverlayVoiceStarterFibers,
   wrapGatewayVoiceStarter,
-} from "./renderer-voice-start-capability.js";
+} from "./renderer-voice-starter-core.js";
 import {
   bindVoiceCapabilitySubscriptions,
   hashedVoiceCapabilityFamilies,
   replayHashedWorkAccessCapability,
   resolveDerivedAccessAtom,
   type VoiceCapabilityProject,
-} from "./renderer-voice-capability.js";
+} from "./renderer-voice-capability-subscriptions.js";
 import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
 import type { HashedWebpackRequire } from "./renderer-hashed-native-chat-voice.js";
 import { isAvatarOverlayHref } from "./renderer-overlay-thread-isolation.js";
 import {
   chatLiveVoicePreferenceAllowsOverride,
   cpaLiveVoicePreferenceAllowsInstall,
-} from "./renderer-cpa-live-voice-preference.js";
+} from "./renderer-voice-routes-cache.js";
 import { workVoiceLaneEnabled, workVoiceUserFacingUnavailable } from "./renderer-voice-evidence.js";
 
 type RecordValue = Record<string, unknown>;

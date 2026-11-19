@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { build } from "esbuild";
 
 import { RENDERER_PROBE_AGENTS, validateProbeStatus } from "../../tools/renderer-binding/run.mjs";
 
@@ -106,6 +107,27 @@ describe("production Renderer release chain", () => {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
       throw error;
     }
+  });
+
+  it("bundles the overlay bootstrap without main-renderer schema dependencies", async () => {
+    const result = await build({
+      absWorkingDir: root,
+      entryPoints: ["packages/renderer-extension/src/overlay-voice-bootstrap-entry.ts"],
+      bundle: true,
+      write: false,
+      metafile: true,
+      minify: true,
+      platform: "browser",
+      format: "iife",
+      target: "es2024",
+    });
+    expect(result.outputFiles[0].contents.length).toBeLessThan(64_000);
+    const inputs = Object.keys(result.metafile.inputs);
+    expect(inputs.some((input) => input.includes("node_modules/zod/"))).toBe(false);
+    expect(inputs).not.toContain("packages/renderer-extension/src/renderer-voice-capability.ts");
+    expect(inputs).not.toContain(
+      "packages/renderer-extension/src/renderer-voice-start-capability.ts",
+    );
   });
 
   it("requires Launcher consumption rather than file presence alone", async () => {

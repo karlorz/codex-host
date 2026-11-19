@@ -44,6 +44,7 @@ for (const { entry, format, outfile } of entries) {
     platform: "browser",
     format,
     target: "es2024",
+    minify: entry === "src/overlay-voice-bootstrap-entry.ts",
     loader: { ".png": "dataurl", ".svg": "dataurl", ".css": "text" },
     plugins: [tailwindEsbuildPlugin()],
     outfile,

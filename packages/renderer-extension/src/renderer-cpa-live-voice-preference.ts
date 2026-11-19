@@ -3,7 +3,6 @@ import {
   CHAT_LIVE_VOICE_STORAGE_KEY,
   CPA_LIVE_VOICE_STORAGE_KEY,
   SHARED_VOICE_CACHE,
-  cachedVoiceRoutes,
   nativeChatVoicePreferenceAllowsStart,
   readVoiceStorageFlag,
   rememberVoiceRoutes,
@@ -51,28 +50,9 @@ export function legacyVoiceRoutes(owner: Window): VoiceRoutes {
   };
 }
 
-/** Codex Work gateway choice; legacy storage is read only until shared migration. */
-export function readCpaLiveVoicePreference(owner: Window): boolean {
-  const routes = cachedVoiceRoutes(owner);
-  return routes
-    ? routes.workConnection === "gateway"
-    : readVoiceStorageFlag(owner, CPA_LIVE_VOICE_STORAGE_KEY, true);
-}
-
-/** Gateway is an explicit Codex Chat connection, independent of native ChatGPT. */
-export function readChatLiveVoicePreference(owner: Window): boolean {
-  const routes = cachedVoiceRoutes(owner);
-  return routes
-    ? routes.chatExperience === "codex" && routes.chatConnection === "gateway"
-    : readVoiceStorageFlag(owner, CHAT_LIVE_VOICE_STORAGE_KEY, false);
-}
-
-/** Work override state for the injected hook, which only exposes a global object. */
-export function cpaLiveVoicePreferenceAllowsInstall(globalObject: object): boolean {
-  return readCpaLiveVoicePreference(globalObject as Window);
-}
-
-/** Chat override state for the injected hook, which only exposes a global object. */
-export function chatLiveVoicePreferenceAllowsOverride(globalObject: object): boolean {
-  return readChatLiveVoicePreference(globalObject as Window);
-}
+export {
+  readCpaLiveVoicePreference,
+  readChatLiveVoicePreference,
+  cpaLiveVoicePreferenceAllowsInstall,
+  chatLiveVoicePreferenceAllowsOverride,
+} from "./renderer-voice-routes-cache.js";
