@@ -174,6 +174,16 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
         if (typeof original !== "function" && !isRecord(original)) return false;
         const start: unknown = Reflect.get(original, "requestRealtimeStart");
         if (typeof start !== "function") return false;
+        const invoke = (...startArgs: unknown[]) => Reflect.apply(start, original, startArgs);
+        const gatewayStarter = wrapGatewayVoiceStarter(
+          invoke,
+          hashedGatewayStarterOptions(
+            target,
+            () => cpaLiveVoicePreferenceAllowsInstall(target),
+            () => chatLiveVoicePreferenceAllowsOverride(target),
+            () => isExternalHarnessComposer(target),
+          ),
+        );
         const launch = (...args: unknown[]): unknown => {
           let request = args[0];
           const chatStart = startNativeChatVoiceForRequest(request, target);
@@ -188,7 +198,6 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
           } catch {
             // Retired or disconnected owners cannot claim native traffic.
           }
-          const invoke = (...startArgs: unknown[]) => Reflect.apply(start, original, startArgs);
           if (
             hashed &&
             isRecord(request) &&
@@ -210,16 +219,7 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
               isExternalHarnessComposer(target),
             )
           ) {
-            const wrapper = wrapGatewayVoiceStarter(
-              invoke,
-              hashedGatewayStarterOptions(
-                target,
-                () => cpaLiveVoicePreferenceAllowsInstall(target),
-                () => chatLiveVoicePreferenceAllowsOverride(target),
-                () => isExternalHarnessComposer(target),
-              ),
-            );
-            return wrapper.start(request, ...args.slice(1)).then(
+            return gatewayStarter.start(request, ...args.slice(1)).then(
               (value) => {
                 chatVoiceDebug("realtime-start", {
                   productExperience: experience,
@@ -265,11 +265,21 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
         };
         const wrapped = new Proxy(original, {
           get(service, key, receiver) {
-            return key === "requestRealtimeStart" ? launch : Reflect.get(service, key, receiver);
+            if (key === "requestRealtimeStart") return launch;
+            if (key === "cancelRealtimeSessionStart") {
+              const cancel = Reflect.get(service, key, receiver);
+              if (typeof cancel === "function")
+                return (...args: unknown[]) => {
+                  gatewayStarter.cancel();
+                  return Reflect.apply(cancel, original, args);
+                };
+            }
+            return Reflect.get(service, key, receiver);
           },
         });
         if (!Reflect.set(services, "realtimeVoiceRuntime", wrapped)) return false;
         restore = () => {
+          gatewayStarter.cancel();
           if (services.realtimeVoiceRuntime === wrapped) services.realtimeVoiceRuntime = original;
         };
         handle.status = "active";

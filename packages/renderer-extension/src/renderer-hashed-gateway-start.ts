@@ -63,7 +63,12 @@ export function hashedGatewayStarterOptions(
   external: () => boolean = () => false,
 ) {
   const configured = (request: unknown) =>
-    gatewayVoiceStartRequest(request, workGateway(), chatGateway(), external());
+    gatewayVoiceStartRequest(
+      request,
+      workGateway(),
+      chatGateway(),
+      external() || workLane(request) === "work-grok",
+    );
   return {
     configured,
     qualifies: (request: unknown) => {
@@ -77,10 +82,17 @@ export function hashedGatewayStarterOptions(
     },
     unavailable: (request: unknown) => workVoiceUserFacingUnavailable(target, workLane(request)),
     ready: async () => {
-      const client = (target as RecordValue).__codexhostClientOwnedVoiceV1;
-      return (
-        record(client) && client.status === "active" && committedCapability(target) !== undefined
-      );
+      for (let i = 0; i < COMMIT_POLLS; i += 1) {
+        const client = (target as RecordValue).__codexhostClientOwnedVoiceV1;
+        if (
+          record(client) &&
+          client.status === "active" &&
+          committedCapability(target) !== undefined
+        )
+          return true;
+        await new Promise((resolve) => target.setTimeout(resolve, COMMIT_POLL_MS));
+      }
+      return false;
     },
     prepare: async () => {
       const capability = committedCapability(target);
@@ -178,7 +190,9 @@ export function installHashedOverlayWorkCapability(
   const allowed = () => {
     const client = (target as RecordValue).__codexhostClientOwnedVoiceV1;
     return (
-      record(client) && client.status === "active" && cpaLiveVoicePreferenceAllowsInstall(target)
+      record(client) &&
+      client.status === "active" &&
+      (cpaLiveVoicePreferenceAllowsInstall(target) || workVoiceLaneEnabled(target, "work-grok"))
     );
   };
   const attempt = () => {

@@ -369,6 +369,37 @@ describe("hashed overlay realtime starter", () => {
     restore?.();
   });
 
+  it("waits for capability installation when Work is selected immediately before Start", async () => {
+    vi.useFakeTimers();
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const nativeStart = vi.fn(async () => "existingCall");
+    const wrapper = wrapGatewayVoiceStarter(
+      nativeStart,
+      hashedGatewayStarterOptions(fixture.target),
+    );
+    const started = wrapper.start(workRequest());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(nativeStart).not.toHaveBeenCalled();
+    const restore = installHashedOverlayWorkCapability(fixture.target, fixture.req);
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(started).resolves.toBe("existingCall");
+    expect(nativeStart).toHaveBeenCalledOnce();
+    restore?.();
+  });
+
+  it("gates external overlay requests even without a primary composer owner", async () => {
+    const fixture = overlayWorkFixture({ evidence: ["work-codex"] });
+    const nativeStart = vi.fn(async () => "existingCall");
+    const register = vi.fn();
+    const services = { realtimeVoiceRuntime: { registerRealtimeStarter: register } };
+    const dispose = wrapHashedOverlayRealtimeStarter(services, fixture.target);
+    services.realtimeVoiceRuntime.registerRealtimeStarter(nativeStart, vi.fn());
+    const start = register.mock.calls[0]?.[0] as (request: unknown) => Promise<unknown>;
+    await expect(start(workRequest("codexhost/grok-4"))).rejects.toThrow(/not qualified/);
+    expect(nativeStart).not.toHaveBeenCalled();
+    dispose?.();
+  });
+
   it("does not start an external Harness request without lane evidence", async () => {
     const fixture = overlayWorkFixture({ evidence: [] });
     const restore = installHashedOverlayWorkCapability(fixture.target, fixture.req);
@@ -387,6 +418,24 @@ describe("hashed overlay realtime starter", () => {
     await expect(wrapper.start(request)).rejects.toThrow(/not qualified/);
     expect(nativeStart).not.toHaveBeenCalled();
     restore?.();
+  });
+
+  it("keeps qualified external voice on gateway when Work chooses Desktop", async () => {
+    const fixture = overlayWorkFixture({ evidence: ["work-grok"] });
+    applySharedVoiceRoutes(fixture.target, {
+      chatExperience: "chatgpt",
+      chatConnection: "desktop",
+      workConnection: "desktop",
+    });
+    const dispose = installHashedOverlayWorkCapability(fixture.target, fixture.req);
+    const options = hashedGatewayStarterOptions(fixture.target);
+    expect(options.configured(workRequest("codexhost/grok-4"))).toBe(true);
+    expect(options.qualifies(workRequest("codexhost/grok-4"))).toBe(true);
+    expect(await options.ready()).toBe(true);
+    const binding = await options.prepare();
+    expect(binding.current()).toBe(true);
+    expect(options.configured(workRequest())).toBe(false);
+    dispose?.();
   });
 
   it("requires the reviewed lane selected by the request", () => {
