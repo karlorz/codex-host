@@ -628,9 +628,15 @@ describe("version and runtime qualification", () => {
         await vi.advanceTimersByTimeAsync(1);
         expect(hook.status).toBe("active");
         expect(f.f.instance.getSnapshot()).toMatchObject({ isCapable: true });
+        expect(hook.current?.()).toBe(true);
+        f.f.owner.memoizedState.next.next.memoizedState = f.f.original();
+        expect(hook.current?.()).toBe(false);
+        f.f.notify();
+        expect(hook.current?.()).toBe(true);
       } finally {
         hook.dispose();
       }
+      expect(hook.current?.()).toBe(false);
     },
   );
   it("reports native ineligibility when provider-only replay cannot make the capability capable", async () => {

@@ -41,7 +41,7 @@ live test. Accepted production activation survives builds and releases.
 
 The accepted daily driver is `/Applications/ChatGPT.app` at
 **26.1106.51428**, build **26605**. Chat, Work/Codex and Work/Grok have reviewed
-activation on implementation **496ea96312a2e7b6**, preserving their original
+activation on implementation **c754615c663fdc40**, preserving their original
 attended evidence. Karl reported the installed full build passed after a normal
 restart on 2026-11-17. Preserve this activation across builds and releases;
 package version changes and incomplete later runs do not revoke acceptance.

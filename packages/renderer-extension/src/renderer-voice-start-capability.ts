@@ -134,6 +134,21 @@ export function overlayVoiceStarterFibers(document: Document, page: unknown): Se
   return fibers;
 }
 
+/** Hashed 26.1106 Compact Voice has no named AvatarOverlayNativePage export.
+ * Instant Connect compositor subscriptions live on these overlay surfaces.
+ */
+export function hashedOverlayVoiceStarterFibers(document: Document): Set<RecordValue> {
+  const fibers = new Set<RecordValue>();
+  for (const element of document.querySelectorAll("[data-avatar-overlay-native-surface-id]")) {
+    const key = Object.getOwnPropertyNames(element).find((key) => key.startsWith("__reactFiber$"));
+    const ancestors = committedReactAncestors(
+      key && Object.getOwnPropertyDescriptor(element, key)?.value,
+    );
+    for (const fiber of ancestors) if (record(fiber)) fibers.add(fiber);
+  }
+  return fibers;
+}
+
 /** The overlay registers a native callback through an immutable RPC stub. Wrap
  * that service reference, preserving registration arguments and cancellation.
  */

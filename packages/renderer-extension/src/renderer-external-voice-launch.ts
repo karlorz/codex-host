@@ -2,6 +2,7 @@ import { selectVoiceAssets, supportsVoiceVersion } from "./renderer-voice-assets
 import { startNativeChatVoiceForRequest } from "./renderer-native-chat-voice.js";
 import {
   CLIENT_OWNED_VOICE_ASSETS,
+  isExternalHarnessComposer,
   rememberVoiceProductExperience,
 } from "./renderer-client-owned-voice.js";
 import {
@@ -21,6 +22,16 @@ import {
   chatVoiceQualifiedOnOwner,
   chatVoiceUserFacingUnavailable,
 } from "./renderer-voice-evidence.js";
+import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
+import {
+  gatewayVoiceStartRequest,
+  wrapGatewayVoiceStarter,
+} from "./renderer-voice-start-capability.js";
+import { hashedGatewayStarterOptions } from "./renderer-hashed-gateway-start.js";
+import {
+  chatLiveVoicePreferenceAllowsOverride,
+  cpaLiveVoicePreferenceAllowsInstall,
+} from "./renderer-cpa-live-voice-preference.js";
 
 const HOOK_GLOBAL = "__codexhostExternalVoiceLaunchV1";
 const SHARED_ASSET = "app-shared-8bd9d0399038.js";
@@ -177,7 +188,80 @@ export function installExternalVoiceLaunchHook(options: InstallOptions = {}): La
           } catch {
             // Retired or disconnected owners cannot claim native traffic.
           }
-          return Reflect.apply(start, original, [request, ...args.slice(1)]);
+          const invoke = (...startArgs: unknown[]) => Reflect.apply(start, original, startArgs);
+          if (
+            hashed &&
+            isRecord(request) &&
+            request.productExperience === "codex" &&
+            request.source === "composer_button_new_thread"
+          ) {
+            request = { ...request, productExperience: "work" };
+          }
+          const experience =
+            isRecord(request) && typeof request.productExperience === "string"
+              ? request.productExperience
+              : "unset";
+          if (
+            hashed &&
+            gatewayVoiceStartRequest(
+              request,
+              cpaLiveVoicePreferenceAllowsInstall(target),
+              chatLiveVoicePreferenceAllowsOverride(target),
+              isExternalHarnessComposer(target),
+            )
+          ) {
+            const wrapper = wrapGatewayVoiceStarter(
+              invoke,
+              hashedGatewayStarterOptions(
+                target,
+                () => cpaLiveVoicePreferenceAllowsInstall(target),
+                () => chatLiveVoicePreferenceAllowsOverride(target),
+                () => isExternalHarnessComposer(target),
+              ),
+            );
+            return wrapper.start(request, ...args.slice(1)).then(
+              (value) => {
+                chatVoiceDebug("realtime-start", {
+                  productExperience: experience,
+                  outcome: "ok",
+                });
+                return value;
+              },
+              (error) => {
+                chatVoiceDebug("realtime-start", {
+                  productExperience: experience,
+                  outcome: "rejected",
+                });
+                throw error;
+              },
+            );
+          }
+          try {
+            const result = invoke(request, ...args.slice(1));
+            if (result && typeof (result as Promise<unknown>).then === "function") {
+              return (result as Promise<unknown>).then(
+                (value) => {
+                  chatVoiceDebug("realtime-start", {
+                    productExperience: experience,
+                    outcome: "ok",
+                  });
+                  return value;
+                },
+                (error) => {
+                  chatVoiceDebug("realtime-start", {
+                    productExperience: experience,
+                    outcome: "rejected",
+                  });
+                  throw error;
+                },
+              );
+            }
+            chatVoiceDebug("realtime-start", { productExperience: experience, outcome: "sync" });
+            return result;
+          } catch (error) {
+            chatVoiceDebug("realtime-start", { productExperience: experience, outcome: "throw" });
+            throw error;
+          }
         };
         const wrapped = new Proxy(original, {
           get(service, key, receiver) {

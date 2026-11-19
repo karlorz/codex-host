@@ -22,6 +22,7 @@ describe("voice implementation identity", () => {
     expect(files).not.toContain(GENERATED_REVISION_RELATIVE);
     expect(files).toContain("src/renderer-voice-assets.ts");
     expect(files).toContain("src/renderer-chat-voice-debug.ts");
+    expect(files).toContain("src/overlay-voice-bootstrap-entry.ts");
   });
 
   it("changes when omitted asset-selection source changes", async () => {

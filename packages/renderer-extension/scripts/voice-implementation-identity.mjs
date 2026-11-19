@@ -4,6 +4,7 @@ import path from "node:path";
 
 /** Production voice entry modules. Import-closure fills remaining runtime files. */
 export const VOICE_IMPLEMENTATION_SEED_FILES = [
+  "src/overlay-voice-bootstrap-entry.ts",
   "src/renderer-client-owned-voice.ts",
   "src/renderer-cpa-live-voice-config.ts",
   "src/renderer-cpa-live-voice-hook.ts",

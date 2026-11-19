@@ -148,7 +148,7 @@ export function isDerivedAccessFactory(value: unknown): value is DerivedAccessFa
   );
 }
 
-function hashedVoiceCapabilityFamilies(
+export function hashedVoiceCapabilityFamilies(
   req: HashedWebpackRequire,
 ):
   | { family: Family; gates: Family; access: DerivedAccessFactory }
@@ -553,7 +553,7 @@ export function installVoiceCapabilityProjection(
     target?: Target;
     importModule?: (url: string) => Promise<RecordValue>;
   } = {},
-): { status: string; reason?: VoiceCapabilityReason; dispose(): void } {
+): { status: string; reason?: VoiceCapabilityReason; current?(): boolean; dispose(): void } {
   const target = options.target ?? (globalThis as unknown as Target);
   const revision = voiceImplementationRevision();
   const existing = target[GLOBAL] as
@@ -575,6 +575,9 @@ export function installVoiceCapabilityProjection(
     status: "pending",
     reason: "pending" as VoiceCapabilityReason,
     revision,
+    current() {
+      return !disposed && allowed() && binding?.current() === true;
+    },
     dispose() {
       disposed = true;
       target.clearTimeout(timer);

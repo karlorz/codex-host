@@ -16,7 +16,7 @@ import {
   HASHED_WEBPACK_VOICE_RUNTIME_ASSET,
   HASHED_WEBPACK_VOICE_VERSION,
 } from "../src/renderer-hashed-native-chat-voice.js";
-import { hashedVoiceTestIdentity } from "./voice-evidence-fixture.js";
+import { attachReviewedVoiceEvidence, hashedVoiceTestIdentity } from "./voice-evidence-fixture.js";
 import { voiceImplementationRevision } from "../src/renderer-voice-profiles.js";
 
 const carrier = "codexhost/plugin-v1@grok-test-model-permission";
@@ -173,6 +173,62 @@ describe("native new-voice selection", () => {
     await f.services.realtimeVoiceRuntime.requestRealtimeStart(request);
     expect(nativeStart).toHaveBeenCalledOnce();
     expect(f.start).not.toHaveBeenCalled();
+    hook.dispose();
+  });
+
+  it("starts hashed Work Instant Connect after the committed capability snapshot", async () => {
+    vi.useFakeTimers();
+    const f = hookFixture();
+    f.policy.selectedModel.mockReturnValue(null);
+    let committed = false;
+    Reflect.set(
+      f.target[CPA_LIVE_VOICE_HOOK_GLOBAL],
+      "desktopVersion",
+      HASHED_WEBPACK_VOICE_VERSION,
+    );
+    Reflect.set(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], "desktopPlatform", "darwin");
+    Object.assign(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], hashedVoiceTestIdentity());
+    attachReviewedVoiceEvidence(f.target[CPA_LIVE_VOICE_HOOK_GLOBAL], ["work-codex"]);
+    f.names.splice(0, f.names.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    Object.assign(f.target, {
+      __codexhostClientOwnedVoiceV1: { status: "active" },
+      __codexhostVoiceCapabilityV1: {
+        status: "active",
+        current: () => committed,
+        dispose() {},
+      },
+    });
+    applySharedVoiceRoutes(f.target, {
+      chatExperience: "chatgpt",
+      chatConnection: "desktop",
+      workConnection: "gateway",
+    });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GaA7") return { appServices: f.services };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    const hook = installExternalVoiceLaunchHook({
+      target: f.target,
+      importModule: async () => ({ __webpack_require__: require }),
+    });
+    await settle();
+    expect(hook.status).toBe("active");
+    const pending = f.services.realtimeVoiceRuntime.requestRealtimeStart({
+      source: "composer_button_new_thread",
+      productExperience: "codex",
+      hostId: "local",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.start).not.toHaveBeenCalled();
+    committed = true;
+    await vi.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(f.start).toHaveBeenCalledOnce();
+    expect(f.start.mock.calls[0]?.[0]).toMatchObject({ productExperience: "work" });
+    expect(result).toMatchObject({ args: [{ productExperience: "work" }] });
     hook.dispose();
   });
 

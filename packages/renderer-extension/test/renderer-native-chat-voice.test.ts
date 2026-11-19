@@ -2,6 +2,7 @@ import { NATIVE_CHAT_VOICE_ASSETS } from "../src/renderer-native-chat-voice-asse
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectNativeChatVoiceBinding,
+  detectWorkInstantConnectBinding,
   installNativeChatVoiceHook,
   replaceNativeChatVoiceHookIfInactive,
   startNativeChatVoiceForRequest,
@@ -234,6 +235,26 @@ describe("native Chat composer binding", () => {
     const f = fixture();
     f.owner.memoizedState.next = { memoizedState: { current: { ...f.scope } }, next: null };
     expect(detectNativeChatVoiceBinding(f.composer, f)?.scope.node).toBe(f.scope.node);
+  });
+
+  it("binds hashed Work Instant Connect to the visible Work AppScope", () => {
+    const f = fixture();
+    const workScope = {
+      scope: f.scopeDefinition,
+      node: f.scope.chain.get(f.scopeDefinition.id),
+      chain: f.scope.chain,
+      get: f.scope.get,
+      set: f.scope.set,
+    };
+    const work = {
+      __reactFiber$fixture: {
+        return: {
+          memoizedState: { memoizedState: { current: workScope }, next: null },
+          return: null,
+        },
+      },
+    } as unknown as Element;
+    expect(detectWorkInstantConnectBinding(work, f)?.scope).toBe(workScope);
   });
 
   it("rejects competing RouteScope nodes and cycles in native hook state", () => {
@@ -1809,6 +1830,163 @@ describe("native Chat voice lifecycle installation", () => {
     expect(hook.status).toBe("pending");
     expect(lastVoiceLaunchProductExperience(f.target)).toBeUndefined();
     hook.dispose();
+  });
+
+  it("keeps Work launch ownership when hashed Chat composer leaves a Work surface", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    attachReviewedVoiceEvidence(f.target.__codexhostCpaLiveVoiceHookV1, ["chat"]);
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const initializeVoiceSession = vi.fn(async () => ({
+      getVoiceNuxMode: vi.fn(async () => "none"),
+      dispatchVoiceCommand: vi.fn(),
+      clearSessionCreate: vi.fn(),
+      startVoiceWithIntroduction: vi.fn().mockResolvedValue(true),
+    }));
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "cY1t") return { Iy: f.initial.aT, Re: initializeVoiceSession };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+        return { __webpack_require__: Object.assign(require, { e: vi.fn(async () => {}) }) };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const workRoot = {
+      getBoundingClientRect: () => ({ width: 400, height: 80 }),
+      closest: () => null,
+    };
+    const end = { click: vi.fn() };
+    const document = f.target.document as Document & {
+      querySelectorAll: (selector: string) => unknown;
+    };
+    const queryAll = document.querySelectorAll.bind(document);
+    Object.assign(f.target.document, {
+      querySelector: (selector: string) => (String(selector).includes("End Voice") ? end : null),
+      querySelectorAll: (selector: string) => {
+        if (selector === "[data-codex-composer-root]") return [workRoot];
+        return queryAll(selector);
+      },
+    });
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(hook.status).toBe("active");
+      rememberVoiceProductExperience({ productExperience: "work" }, f.target);
+      f.setVisible(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(lastVoiceLaunchProductExperience(f.target)).toBe("work");
+      expect(f.unmount).not.toHaveBeenCalled();
+      f.setSessionStarted(false);
+      f.setConnected(false);
+      f.setActive(true);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(end.click).not.toHaveBeenCalled();
+      expect(lastVoiceLaunchProductExperience(f.target)).toBe("work");
+      expect(f.unmount).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
+  });
+
+  it("enables hashed Instant Connect runtime on the Work composer AppScope", async () => {
+    vi.useFakeTimers();
+    const f = installFixture();
+    Object.assign(f.target.__codexhostCpaLiveVoiceHookV1, {
+      desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+      desktopPlatform: "darwin",
+    });
+    attachReviewedVoiceEvidence(f.target.__codexhostCpaLiveVoiceHookV1, ["chat", "work-codex"]);
+    f.assets.splice(0, f.assets.length, HASHED_WEBPACK_VOICE_RUNTIME_ASSET);
+    const initializeVoiceSession = vi.fn(async () => ({
+      getVoiceNuxMode: vi.fn(async () => "none"),
+      dispatchVoiceCommand: vi.fn(),
+      clearSessionCreate: vi.fn(),
+      startVoiceWithIntroduction: vi.fn().mockResolvedValue(true),
+    }));
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "j9r7") return { initializeVoiceSession };
+        if (id === "oWM3") return { VoiceInstantConnectCacheController: vi.fn() };
+        if (id === "OWtl") return { u: f.shared.Qst };
+        if (id === "Oj9r") return { GD: f.initial.MOr };
+        if (id === "Sd8U") return { PR: f.initial.CDr };
+        if (id === "bgok") return { MH: f.initial.SPn };
+        if (id === "cY1t") return { Iy: f.initial.aT, Re: initializeVoiceSession };
+        if (id === "zd8w") return { createElement: f.createElement };
+        if (id === "CE87") return { createRoot: f.createRoot };
+        throw new Error(id);
+      },
+      { m: {}, c: {} },
+    );
+    f.importModule.mockImplementation(async (url) => {
+      if (url.endsWith(HASHED_WEBPACK_VOICE_RUNTIME_ASSET))
+        return { __webpack_require__: Object.assign(require, { e: vi.fn(async () => {}) }) };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_START_ASSET}`))
+        return { __webpack_modules__: {} };
+      if (url.endsWith(`async/${HASHED_NATIVE_CHAT_PREWARM_ASSET}`))
+        return { __webpack_modules__: {} };
+      throw new Error(url);
+    });
+    const workScope = {
+      scope: f.scopeDefinition,
+      node: f.scope.chain.get(f.scopeDefinition.id),
+      chain: f.scope.chain,
+      get: f.scope.get,
+      set: f.scope.set,
+    };
+    const workRoot = {
+      __reactFiber$fixture: {
+        return: {
+          memoizedState: { memoizedState: { current: workScope }, next: null },
+          return: null,
+        },
+      },
+      getBoundingClientRect: () => ({ width: 400, height: 80 }),
+      closest: () => null,
+    };
+    const document = f.target.document as Document & {
+      querySelectorAll: (selector: string) => unknown;
+    };
+    const queryAll = document.querySelectorAll.bind(document);
+    Object.assign(f.target.document, {
+      querySelectorAll: (selector: string) => {
+        if (selector === "[data-codex-composer-root]") return [workRoot];
+        return queryAll(selector);
+      },
+    });
+    f.setVisible(false);
+    const hook = installNativeChatVoiceHook(f);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.importModule).toHaveBeenCalledWith(
+        `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}`,
+      );
+      expect(f.browserEnabled()).toBe(true);
+      expect(hook.status).toBe("pending");
+      expect(f.createRoot).not.toHaveBeenCalled();
+    } finally {
+      hook.dispose();
+    }
   });
 
   it("ends leftover Instant Connect when hashed Chat composer leaves so Work can start", async () => {

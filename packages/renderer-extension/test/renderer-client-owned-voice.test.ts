@@ -988,6 +988,128 @@ describe("client-owned voice gateway", () => {
     expect(f.client.fetch).toBe(f.original);
   });
 
+  it("hooks GDNt factory after wrapping the current hashed WebFetch client", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const makeClient = () => {
+      const original = vi.fn(async () => new Response("native"));
+      return {
+        original,
+        client: { fetch: original as (url: string, options?: RequestInit) => Promise<Response> },
+      };
+    };
+    const factoryClient = makeClient();
+    const restoredClient = makeClient();
+    const reinstalledClient = makeClient();
+    const produced = [factoryClient, restoredClient, reinstalledClient];
+    const receiver = { invocations: 0 };
+    let factoryArgs: unknown[] = [];
+    const originalFactory = function (
+      this: unknown,
+      module?: unknown,
+      exports?: Record<string, unknown>,
+    ) {
+      if (this === receiver) receiver.invocations += 1;
+      factoryArgs = [module, exports];
+      const next = produced.shift();
+      const webFetch = Object.assign(function WebFetch() {}, {
+        getInstance: () => next?.client,
+      });
+      if (exports) exports._n = webFetch;
+      return webFetch;
+    };
+    const factories: { GDNt: typeof originalFactory } = { GDNt: originalFactory };
+    const fetchClass = Object.assign(function WebFetch() {}, {
+      getInstance: () => f.client,
+    });
+    const require = Object.assign(
+      (id: string) => {
+        if (id === "GDNt") return { _n: fetchClass };
+        if (id === "TL6G") return { O1: f.bridge };
+        if (id === "eShZ") return { s1: f.responseError };
+        throw new Error(id);
+      },
+      { m: factories, c: { GDNt: { exports: { _n: fetchClass } } } },
+    );
+    const target = {
+      [CPA_LIVE_VOICE_HOOK_GLOBAL]: {
+        enabled: true,
+        desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+        desktopPlatform: "darwin",
+        ...hashedVoiceTestIdentity(),
+        auditedDesktopVersion: "26.1007.30912",
+        auditedAppInitialAsset: "app-initial-6350d04672d0.js",
+        voiceEvidence: [
+          reviewedVoiceEvidenceRecord({
+            path: "work-codex",
+            desktopPlatform: "darwin",
+            desktopVersion: HASHED_WEBPACK_VOICE_VERSION,
+          }),
+        ],
+      },
+      document: {
+        querySelectorAll: () => [
+          { getAttribute: () => `app://-/assets/${HASHED_WEBPACK_VOICE_RUNTIME_ASSET}` },
+        ],
+      } as unknown as ParentNode,
+      setTimeout,
+      clearTimeout,
+    };
+    const importModule = async () => ({ __webpack_require__: require });
+    const workRequest = () => options(speechBody(), { originator: "codex_work_desktop" });
+
+    const hook = installClientOwnedVoiceHook({ target, importModule });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hook.status).toBe("active");
+    expect(hook.activation).toMatchObject({
+      importResolved: true,
+      factoryHooked: true,
+      wrapperActive: true,
+    });
+    const moduleArgument = { id: "GDNt" };
+    const exports: Record<string, unknown> = {};
+    expect(factories.GDNt.call(receiver, moduleArgument, exports)).toBe(exports._n);
+    expect(receiver.invocations).toBe(1);
+    expect(factoryArgs).toEqual([moduleArgument, exports]);
+    rememberVoiceProductExperience({ productExperience: "work" });
+    await factoryClient.client.fetch(url, workRequest());
+    expect(f.dispatch).toHaveBeenCalledOnce();
+    expect(factoryClient.original).not.toHaveBeenCalled();
+    await f.client.fetch(url, workRequest());
+    expect(f.dispatch).toHaveBeenCalledTimes(2);
+    expect(f.original).not.toHaveBeenCalled();
+
+    hook.dispose();
+    expect(factories.GDNt).toBe(originalFactory);
+    expect(f.client.fetch).toBe(f.original);
+
+    factories.GDNt({}, {});
+    await restoredClient.client.fetch(url, workRequest());
+    expect(restoredClient.original).toHaveBeenCalledOnce();
+    expect(f.dispatch).toHaveBeenCalledTimes(2);
+
+    const reinstalled = installClientOwnedVoiceHook({ target, importModule });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reinstalled.status).toBe("active");
+      expect(reinstalled.activation).toMatchObject({
+        importResolved: true,
+        factoryHooked: true,
+        wrapperActive: true,
+      });
+      expect(factories.GDNt).not.toBe(originalFactory);
+      const reinstalledExports: Record<string, unknown> = {};
+      factories.GDNt({}, reinstalledExports);
+      rememberVoiceProductExperience({ productExperience: "work" });
+      await reinstalledClient.client.fetch(url, workRequest());
+      expect(f.dispatch).toHaveBeenCalledTimes(3);
+      expect(reinstalledClient.original).not.toHaveBeenCalled();
+    } finally {
+      reinstalled.dispose();
+    }
+    expect(factories.GDNt).toBe(originalFactory);
+  });
+
   it("hooks overlay GDNt factory without executing an incomplete webpack module", async () => {
     vi.useFakeTimers();
     const f = fixture();

@@ -1,7 +1,11 @@
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-react-ownership";
 import { chatVoiceDebug } from "./renderer-chat-voice-debug.js";
 import { loadedAssetNames, readCpaLiveVoiceHookConfig } from "./renderer-cpa-live-voice-config.js";
-import { rememberVoiceProductExperience } from "./renderer-voice-gateway-wrap.js";
+import {
+  lastVoiceLaunchProductExperience,
+  rememberVoiceProductExperience,
+} from "./renderer-voice-gateway-wrap.js";
+import { isWorkComposerSurface } from "./renderer-work-composer-surface.js";
 import { nativeChatVoicePreferenceAllowsStart } from "./renderer-voice-routes-cache.js";
 import { nativeChatVoiceDraftSelection } from "./renderer-native-chat-voice-selection.js";
 import {
@@ -194,6 +198,35 @@ export function detectNativeChatVoiceBinding(
   }
 }
 
+/** Work Instant Connect uses the official composer mic. Enable the hashed
+ * runtime on the visible Work AppScope so native start can POST /wham.
+ */
+export function detectWorkInstantConnectBinding(
+  composer: Element,
+  native: Pick<NativeChatVoiceModules, "scopeDefinition">,
+): NativeChatVoiceBinding | undefined {
+  const key = Object.getOwnPropertyNames(composer).find((key) => key.startsWith("__reactFiber$"));
+  if (!key) return;
+  const ancestors = committedReactAncestors(Object.getOwnPropertyDescriptor(composer, key)?.value);
+  for (const owner of ancestors) {
+    const scopes = scopeRefs(owner, native.scopeDefinition);
+    if (scopes.size !== 1) continue;
+    const scope = [...scopes.values()][0];
+    if (!scope) continue;
+    const appNode = scope.chain.get(native.scopeDefinition.id);
+    if (!record(appNode)) continue;
+    return {
+      composer,
+      appNode,
+      props: { conversationId: "work" },
+      scope,
+      context: {},
+      composerContext: { context: {}, chain: scope.chain },
+      backendConversationId: undefined,
+    };
+  }
+}
+
 interface ChatVoiceHook {
   readonly activeCall?: boolean;
   status: "disabled" | "pending" | "active" | "unsupported";
@@ -317,7 +350,13 @@ export function installNativeChatVoiceHook(
     return forms.length === 1 ? forms[0] : undefined;
   };
   const leftoverInstantConnectStarting = (): boolean => {
-    if (!boundScope || !modules || typeof modules.initial.SPn !== "function") return false;
+    if (
+      lastVoiceLaunchProductExperience(target) !== "chat" ||
+      !boundScope ||
+      !modules ||
+      typeof modules.initial.SPn !== "function"
+    )
+      return false;
     try {
       const state = (
         modules.initial.SPn(boundScope) as {
@@ -598,18 +637,28 @@ export function installNativeChatVoiceHook(
         selectDraft?.();
         // Instant Connect hides the Chat composer while our START is in flight.
         if (starting) return;
+        const workSurface = isWorkComposerSurface(target);
         if (leftoverInstantConnectStarting()) {
           endLeftoverInstantConnect();
+          if (workSurface) {
+            rememberVoiceProductExperience({ productExperience: "work" }, target);
+            handle.status = "pending";
+            return;
+          }
           releaseChatLaunchOwnership();
           release();
           handle.status = "pending";
           return;
         }
         if (handle.activeCall) return;
-        releaseChatLaunchOwnership();
-        release();
-        handle.status = "pending";
-        return;
+        if (workSurface) {
+          rememberVoiceProductExperience({ productExperience: "work" }, target);
+        } else {
+          releaseChatLaunchOwnership();
+          release();
+          handle.status = "pending";
+          return;
+        }
       }
       if (renderFailed) throw new Error();
       if (!modules) {
@@ -648,6 +697,34 @@ export function installNativeChatVoiceHook(
           modules = undefined;
           return;
         }
+      }
+      if (hashed && !visibleComposer() && isWorkComposerSurface(target)) {
+        const work = [...doc.querySelectorAll("[data-codex-composer-root]")].find((element) => {
+          const box = element.getBoundingClientRect?.() ?? { width: 0 };
+          return box.width > 0 && !element.closest?.("[hidden], [inert]");
+        });
+        const current = work
+          ? detectWorkInstantConnectBinding(work, {
+              scopeDefinition: modules.shared.Qst as NativeChatVoiceModules["scopeDefinition"],
+            })
+          : undefined;
+        if (current) {
+          if (mounted && current.appNode !== mounted.node) release();
+          boundScope = current.scope;
+          if (!mounted) {
+            mounted = mountNativeChatVoiceRuntime({
+              adapter,
+              binding: current,
+              modules,
+              document: doc,
+              onRenderFailed() {
+                renderFailed = true;
+              },
+            });
+          }
+        }
+        handle.status = "pending";
+        return;
       }
       const current = findBinding();
       selectDraft?.();

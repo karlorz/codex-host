@@ -11,6 +11,7 @@ import {
   type NativeVoiceFetch,
 } from "./renderer-voice-gateway-wrap.js";
 import { isWorkComposerSurface } from "./renderer-work-composer-surface.js";
+
 import {
   chatVoiceQualifiedOnOwner,
   chatVoiceUserFacingUnavailable,
@@ -202,6 +203,8 @@ interface WebpackModule {
 interface WebpackFactory {
   (this: unknown, module?: WebpackModule, exports?: unknown, require?: unknown): unknown;
   __codexhostVoiceFactory?: boolean;
+  __codexhostVoiceOriginal?: WebpackFactory;
+  __codexhostVoiceSubscriber?: (exports: unknown) => void;
 }
 
 interface WebpackRequire {
@@ -260,25 +263,44 @@ function readGdntExports(req: WebpackRequire): unknown {
   return undefined;
 }
 
+/** Subscribe to GDNt factory exports without nesting wrappers. A later install
+ * replaces the previous subscriber, and dispose restores the exact factory this
+ * subscription replaced, so a disposed hook never serves a later client.
+ */
 function hookWebpackVoiceFactory(
   req: WebpackRequire,
   onExports: (exports: unknown) => void,
-): boolean {
+): (() => void) | undefined {
   const modules = req.m;
   const factoryId = HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId;
-  const original = modules?.[factoryId];
-  if (!modules || typeof original !== "function") return false;
-  if (original.__codexhostVoiceFactory) return true;
-  const wrapped: WebpackFactory = function (this: unknown, module, exports, webpackRequire) {
-    try {
-      return original.apply(this, [module, exports, webpackRequire]);
-    } finally {
-      onExports(exports ?? module?.exports);
-    }
-  };
+  const installed = modules?.[factoryId];
+  if (!modules || typeof installed !== "function") return undefined;
+  const owned =
+    installed.__codexhostVoiceFactory === true &&
+    typeof installed.__codexhostVoiceOriginal === "function";
+  const original = owned ? (installed.__codexhostVoiceOriginal as WebpackFactory) : installed;
+  const wrapped: WebpackFactory = owned
+    ? installed
+    : function (this: unknown, module, exports, webpackRequire) {
+        try {
+          return original.apply(this, [module, exports, webpackRequire]);
+        } finally {
+          try {
+            wrapped.__codexhostVoiceSubscriber?.(exports ?? module?.exports);
+          } catch {
+            /* A hook failure must not change the native factory outcome. */
+          }
+        }
+      };
   wrapped.__codexhostVoiceFactory = true;
-  modules[factoryId] = wrapped;
-  return true;
+  wrapped.__codexhostVoiceOriginal = original;
+  wrapped.__codexhostVoiceSubscriber = onExports;
+  if (!owned) modules[factoryId] = wrapped;
+  return () => {
+    if (wrapped.__codexhostVoiceSubscriber !== onExports) return;
+    Reflect.deleteProperty(wrapped, "__codexhostVoiceSubscriber");
+    if (modules[factoryId] === wrapped) modules[factoryId] = original;
+  };
 }
 
 /** Instant Connect Host MCP client for hashed 26.1106. Does not wrap fetch. */
@@ -318,6 +340,7 @@ async function resolveHashedWebpackVoice(
       client,
       bridge: bridged,
       responseError: responseError as (response: Response, url: string) => Promise<unknown>,
+      require: req,
     };
   if (typeof req.m?.[HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId] !== "function") return null;
   return {
@@ -348,6 +371,8 @@ export function installHashedOverlayVoiceHook(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let surfaceTimer: ReturnType<typeof setTimeout> | undefined;
   let restore: (() => void) | undefined;
+  let restoreFactory: (() => void) | undefined;
+  const wrappedClients = new WeakSet<object>();
   const started = Date.now();
   const activation: ClientOwnedVoiceActivation = {
     assetSeen: false,
@@ -367,6 +392,7 @@ export function installHashedOverlayVoiceHook(
       if (timer !== undefined) target.clearTimeout(timer);
       if (surfaceTimer !== undefined) target.clearTimeout(surfaceTimer);
       pointerTarget?.removeEventListener?.("pointerdown", onPointerDown, true);
+      restoreFactory?.();
       restore?.();
       if (target[HOOK_GLOBAL] === handle) Reflect.deleteProperty(target, HOOK_GLOBAL);
     },
@@ -384,7 +410,13 @@ export function installHashedOverlayVoiceHook(
     bridge: NativeVoiceBridge,
     responseError: (response: Response, url: string) => Promise<unknown>,
   ): void => {
-    restore = wrapClientOwnedVoiceFetch(
+    if (wrappedClients.has(client)) {
+      activation.wrapperActive = true;
+      handle.status = "active";
+      return;
+    }
+    wrappedClients.add(client);
+    const disposeWrap = wrapClientOwnedVoiceFetch(
       client,
       bridge,
       () => workGatewayPreference(target),
@@ -406,11 +438,16 @@ export function installHashedOverlayVoiceHook(
       () => false,
       () => nativeChatVoicePreferenceAllowsStart(target),
     );
+    const previous = restore;
+    restore = () => {
+      disposeWrap();
+      previous?.();
+    };
     activation.wrapperActive = true;
     handle.status = "active";
   };
   const attempt = async (): Promise<void> => {
-    if (disposed || handle.status === "active") return;
+    if (disposed || (activation.wrapperActive && activation.factoryHooked)) return;
     publishComposerLaunchExperience(target);
     const names = loadedAssetNames(target.document, target.performance);
     const hashedAssetSeen = names.some((name) => name.includes(HASHED_WEBPACK_VOICE_RUNTIME_ASSET));
@@ -419,42 +456,46 @@ export function installHashedOverlayVoiceHook(
       activation.importStarted = true;
       try {
         const resolved = await resolveHashedWebpackVoice(importModule);
-        if (disposed || activation.wrapperActive) return;
-        if (resolved?.client) {
-          activation.importResolved = true;
-          delete activation.importFailed;
-          activate(resolved.client, resolved.bridge, resolved.responseError);
-          return;
-        }
-        const webpackRequire = resolved?.require;
-        if (
-          webpackRequire &&
-          hookWebpackVoiceFactory(webpackRequire, (exports) => {
-            if (disposed || activation.wrapperActive) return;
+        if (disposed || !resolved) {
+          if (!disposed) activation.importFailed = "hashed-exports-missing";
+        } else {
+          const wrapExports = (exports: unknown): void => {
+            if (disposed) return;
             const client = nativeVoiceFetch(
               object(exports) ? exports[HASHED_OVERLAY_VOICE_ROLES.fetchExport] : undefined,
             );
             if (!client) {
-              unpoisonIncompleteWebpackModule(
-                webpackRequire,
-                HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId,
-                (value) =>
-                  Boolean(
-                    nativeVoiceFetch(
-                      object(value) ? value[HASHED_OVERLAY_VOICE_ROLES.fetchExport] : undefined,
+              if (resolved.require)
+                unpoisonIncompleteWebpackModule(
+                  resolved.require,
+                  HASHED_OVERLAY_VOICE_ROLES.fetchFactoryId,
+                  (value) =>
+                    Boolean(
+                      nativeVoiceFetch(
+                        object(value) ? value[HASHED_OVERLAY_VOICE_ROLES.fetchExport] : undefined,
+                      ),
                     ),
-                  ),
-              );
+                );
               return;
             }
             activate(client, resolved.bridge, resolved.responseError);
-          })
-        ) {
-          activation.importResolved = true;
-          activation.factoryHooked = true;
-          delete activation.importFailed;
-          return;
+          };
+          if (resolved.client) {
+            activation.importResolved = true;
+            delete activation.importFailed;
+            activate(resolved.client, resolved.bridge, resolved.responseError);
+          }
+          const disposeFactory = resolved.require
+            ? hookWebpackVoiceFactory(resolved.require, wrapExports)
+            : undefined;
+          if (disposeFactory) {
+            restoreFactory = disposeFactory;
+            activation.importResolved = true;
+            activation.factoryHooked = true;
+            delete activation.importFailed;
+          }
         }
+        if (activation.wrapperActive || activation.factoryHooked) return;
         activation.importFailed = "hashed-exports-missing";
       } catch {
         activation.importFailed = "hashed-import-failed";
