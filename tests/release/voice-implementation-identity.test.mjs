@@ -54,8 +54,16 @@ describe("voice implementation identity", () => {
 
   it("follows multiline re-exports and skips type-only module edges", async () => {
     const relative = "src/renderer-voice-start-capability.ts";
+    const from = (module) => `from ${JSON.stringify(module)};`;
     const replacements = {
-      [relative]: `export {\n value,\n} from "./runtime-edge.js";\nimport type { Value } from "./type-edge.js";\nexport type { Other } from "./type-export-edge.js";`,
+      [relative]: [
+        "export {\n value,\n}",
+        from("./runtime-edge.js"),
+        "import type { Value }",
+        from("./type-edge.js"),
+        "export type { Other }",
+        from("./type-export-edge.js"),
+      ].join(" "),
       "src/runtime-edge.ts": "export const value = true;",
     };
     const files = await listVoiceImplementationSourceFiles(packageRoot, replacements);
