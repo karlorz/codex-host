@@ -5906,12 +5906,20 @@ export class AppServerHost {
       while (
         thread.running &&
         thread.activeTurnId === turnId &&
-        this.#externalQueue.has(thread.id) &&
+        this.#externalQueue.canStartAutomatically(thread.id) &&
+        !this.#externalQueue.isPaused(thread.id) &&
         !this.#externalSteering.hasPending(thread.id)
       ) {
         if (!(await sessionCanNativeSteer(thread))) return;
-        // Capability reads can yield while the Turn ends or the user edits/deletes a row.
-        if (!thread.running || thread.activeTurnId !== turnId) return;
+        // Capability reads can yield while the Turn or queue admission changes.
+        if (
+          !thread.running ||
+          thread.activeTurnId !== turnId ||
+          !this.#externalQueue.canStartAutomatically(thread.id) ||
+          this.#externalQueue.isPaused(thread.id) ||
+          this.#externalSteering.hasPending(thread.id)
+        )
+          return;
         const peeked = this.#externalQueue.peek(thread.id);
         if (!peeked) return;
         const text = queuedSubmissionText(peeked.input);
@@ -5923,12 +5931,17 @@ export class AppServerHost {
             text,
             clientUserMessageId: taken.submission.clientUserMessageId,
           });
-          await this.#publishExternalQueue(thread.id);
         } catch (error) {
+          if (error instanceof ExternalSteerOutcomeUnknownError)
+            taken.automaticStartAllowed = false;
           this.#externalQueue.restore(thread.id, taken);
-          await this.#publishExternalQueue(thread.id);
+          if (error instanceof ExternalSteerOutcomeUnknownError)
+            this.#externalQueue.pause(thread.id, "outcome-unknown");
+          await this.#publishExternalQueue(thread.id).catch((failure) => this.#diagnose(failure));
           throw error;
         }
+        // Native acceptance survives a failed queue notification.
+        await this.#publishExternalQueue(thread.id).catch((error) => this.#diagnose(error));
       }
     } catch (error) {
       this.#diagnose(error);
@@ -6693,6 +6706,8 @@ export class AppServerHost {
       !ephemeralTurn &&
       (event.snapshot.item.type === "commandExecution" ||
         event.snapshot.item.type === "toolExecution" ||
+        event.snapshot.item.type === "mcpToolCall" ||
+        event.snapshot.item.type === "webSearch" ||
         event.snapshot.item.type === "agentMessage")
     ) {
       await this.#injectQueuedFollowUp(thread, event.turnId);

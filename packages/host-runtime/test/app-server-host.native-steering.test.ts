@@ -1,6 +1,7 @@
 import { FakeHarnessSession } from "@codexhost/harness-adapter/testing";
 import type { JsonObject } from "@codexhost/protocol-core";
-import { harnessCommandDescriptorSchema } from "@codexhost/shared-contracts";
+import type { HostItem } from "@codexhost/harness-adapter";
+import { harnessCommandDescriptorSchema, hostItemIdSchema } from "@codexhost/shared-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -108,68 +109,81 @@ describe("Native steering", () => {
     }
   });
 
-  it("injects a queued follow-up at the next command-execution gap without cancelling", async () => {
-    const fixture = createFixture();
-    fixture.adapter.supportsSteer = true;
-    try {
-      const threadId = await startPiThread(fixture);
-      const turnId = await startPiTurn(fixture, threadId);
-      const session = fixture.adapter.sessions[0];
-      if (!session) throw new Error("Fake Session was not opened");
-      await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
-      const commandId = session.startCommandExecution("sleep 25");
-      await fixture.collector.waitFor(
-        (message) =>
-          method(message, "item/started") &&
-          (message.params as { item?: { type?: string } }).item?.type === "commandExecution",
-      );
-      writeRequest(fixture.desktopInput, {
-        id: 40,
-        method: "thread/queue/add",
-        params: {
-          threadId,
-          clientUserMessageId: "queued-steer",
-          input: [{ type: "text", text: "skip remaining sleeps" }],
-        },
-      });
-      await expect(
-        fixture.collector.waitFor((message) => requestId(message, 40)),
-      ).resolves.not.toHaveProperty("error");
-      writeRequest(fixture.desktopInput, {
-        id: 41,
-        method: "thread/queue/list",
-        params: { threadId },
-      });
-      await expect(
-        fixture.collector.waitFor((message) => requestId(message, 41)),
-      ).resolves.toMatchObject({
-        result: { data: [expect.objectContaining({ clientUserMessageId: "queued-steer" })] },
-      });
-      expect(session.steers).toEqual([]);
-      expect(
-        fixture.collector.messages.some((message) => steeredUserMessage(message, turnId) !== null),
-      ).toBe(false);
-      session.completeItem(commandId, { status: "succeeded" });
-      const item = await fixture.collector.waitFor(
-        (message) => steeredUserMessage(message, turnId) !== null,
-      );
-      expect(steeredUserMessage(item, turnId)).toMatchObject({
-        clientId: "queued-steer",
-        content: [{ type: "text", text: "skip remaining sleeps" }],
-      });
-      expect(session.steers).toEqual([expect.objectContaining({ type: "turn.steer", turnId })]);
-      writeRequest(fixture.desktopInput, {
-        id: 42,
-        method: "thread/queue/list",
-        params: { threadId },
-      });
-      await expect(
-        fixture.collector.waitFor((message) => requestId(message, 42)),
-      ).resolves.toMatchObject({ result: { data: [], nextCursor: null } });
-    } finally {
-      await stopFixture(fixture);
-    }
-  });
+  it.each(["commandExecution", "toolExecution", "mcpToolCall", "webSearch"] as const)(
+    "injects a queued follow-up at the next %s gap without cancelling",
+    async (type) => {
+      const fixture = createFixture();
+      fixture.adapter.supportsSteer = true;
+      try {
+        const threadId = await startPiThread(fixture);
+        const turnId = await startPiTurn(fixture, threadId);
+        const session = fixture.adapter.sessions[0];
+        if (!session) throw new Error("Fake Session was not opened");
+        await fixture.collector.waitFor((message) => turnEvent(message, "turn/started", turnId));
+        const commandId = hostItemIdSchema.parse(`boundary-${type}`);
+        const boundary: HostItem =
+          type === "commandExecution"
+            ? { type, itemId: commandId, command: "sleep 25" }
+            : type === "toolExecution"
+              ? { type, itemId: commandId, toolName: "inspect", arguments: {} }
+              : type === "mcpToolCall"
+                ? { type, itemId: commandId, server: "test", tool: "inspect", arguments: {} }
+                : { type, itemId: commandId, query: "inspect" };
+        session.emitEvent({ type: "item.started", turnId, item: boundary });
+        writeRequest(fixture.desktopInput, {
+          id: 40,
+          method: "thread/queue/add",
+          params: {
+            threadId,
+            clientUserMessageId: "queued-steer",
+            input: [{ type: "text", text: "skip remaining sleeps" }],
+          },
+        });
+        await expect(
+          fixture.collector.waitFor((message) => requestId(message, 40)),
+        ).resolves.not.toHaveProperty("error");
+        writeRequest(fixture.desktopInput, {
+          id: 41,
+          method: "thread/queue/list",
+          params: { threadId },
+        });
+        await expect(
+          fixture.collector.waitFor((message) => requestId(message, 41)),
+        ).resolves.toMatchObject({
+          result: { data: [expect.objectContaining({ clientUserMessageId: "queued-steer" })] },
+        });
+        expect(session.steers).toEqual([]);
+        expect(
+          fixture.collector.messages.some(
+            (message) => steeredUserMessage(message, turnId) !== null,
+          ),
+        ).toBe(false);
+        session.emitEvent({
+          type: "item.completed",
+          turnId,
+          snapshot: { item: boundary, outcome: { status: "succeeded" } },
+        });
+        const item = await fixture.collector.waitFor(
+          (message) => steeredUserMessage(message, turnId) !== null,
+        );
+        expect(steeredUserMessage(item, turnId)).toMatchObject({
+          clientId: "queued-steer",
+          content: [{ type: "text", text: "skip remaining sleeps" }],
+        });
+        expect(session.steers).toEqual([expect.objectContaining({ type: "turn.steer", turnId })]);
+        writeRequest(fixture.desktopInput, {
+          id: 42,
+          method: "thread/queue/list",
+          params: { threadId },
+        });
+        await expect(
+          fixture.collector.waitFor((message) => requestId(message, 42)),
+        ).resolves.toMatchObject({ result: { data: [], nextCursor: null } });
+      } finally {
+        await stopFixture(fixture);
+      }
+    },
+  );
 
   it.each(["update", "delete", "multiple"] as const)(
     "honors pending queue %s before the next tool boundary",
