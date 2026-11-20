@@ -537,26 +537,33 @@ describe("production Desktop Controller", () => {
     expect(startAttachmentServer).toHaveBeenCalledOnce();
   });
 
-  it("does not inject the Renderer on Windows Desktop 26.1106", async () => {
+  it("injects the Renderer on Windows Desktop 26.1106.51428 after document load", async () => {
     const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
     if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
     const previous = process.env.CODEXHOST_DESKTOP_VERSION;
     process.env.CODEXHOST_DESKTOP_VERSION = "26.1106.51428";
     const abort = new AbortController();
-    const install = vi.fn<DesktopControllerDependencies["install"]>();
-    const publishStatus = vi.fn();
-    const readRenderer = vi.fn(async () => "production renderer");
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
     try {
       await runDesktopController(controllerOptions(), abort.signal, {
-        readRenderer,
+        readRenderer: vi.fn(async () => "production renderer"),
         install,
         startAttachmentServer: vi.fn(async () => attachmentServer()),
         ready: vi.fn(),
-        publishStatus,
-        sleep: vi.fn(async () => {
-          abort.abort();
-        }),
+        sleep: vi.fn(async () => {}),
         monitorIntervalMs: 1,
       });
     } finally {
@@ -565,16 +572,8 @@ describe("production Desktop Controller", () => {
       else process.env.CODEXHOST_DESKTOP_VERSION = previous;
     }
 
-    expect(install).not.toHaveBeenCalled();
-    expect(readRenderer).not.toHaveBeenCalled();
-    const states = publishStatus.mock.calls.map(([document]) => document.renderer);
-    expect(states).toEqual([
-      expect.objectContaining({
-        state: "unavailable",
-        error: "Desktop 26.1106.51428 is skipped until hashed Renderer bindings are requalified",
-        failures: 1,
-      }),
-    ]);
+    expect(install).toHaveBeenCalledOnce();
+    expect(install.mock.calls[0]?.[0]?.waitForDocumentLoad).toBe(true);
   });
 
   it("installs the Renderer on an owned isolated Windows 26.1106.51428 Controller", async () => {
@@ -665,7 +664,7 @@ describe("production Desktop Controller", () => {
     }
   });
 
-  it("keeps the Windows production skip when the isolated marker names WindowsApps", async () => {
+  it("installs production Windows 26.1106.51428 even when an isolated marker names WindowsApps", async () => {
     const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
     if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
@@ -699,8 +698,19 @@ describe("production Desktop Controller", () => {
       }),
     );
     const abort = new AbortController();
-    const install = vi.fn<DesktopControllerDependencies["install"]>();
-    const publishStatus = vi.fn();
+    const snapshot = controllerSnapshot();
+    const session: RendererCdpControlSession = {
+      snapshot,
+      ensureInstalled: vi.fn(async () => {
+        abort.abort();
+        return snapshot;
+      }),
+      activateDesktop: vi.fn(async () => 1),
+      attachVoiceHost: vi.fn(async () => {}),
+      executeRenderer: vi.fn(),
+      close: vi.fn(),
+    };
+    const install = vi.fn<DesktopControllerDependencies["install"]>(async () => session);
     try {
       await withDesktopIdentityEnv(
         {
@@ -719,21 +729,13 @@ describe("production Desktop Controller", () => {
               install,
               startAttachmentServer: vi.fn(async () => attachmentServer()),
               ready: vi.fn(),
-              publishStatus,
-              sleep: vi.fn(async () => {
-                abort.abort();
-              }),
+              sleep: vi.fn(async () => {}),
               monitorIntervalMs: 1,
             },
           ),
       );
-      expect(install).not.toHaveBeenCalled();
-      expect(publishStatus.mock.calls.map(([document]) => document.renderer)).toEqual([
-        expect.objectContaining({
-          state: "unavailable",
-          error: "Desktop 26.1106.51428 is skipped until hashed Renderer bindings are requalified",
-        }),
-      ]);
+      expect(install).toHaveBeenCalledOnce();
+      expect(install.mock.calls[0]?.[0]?.waitForDocumentLoad).toBe(true);
     } finally {
       Object.defineProperty(process, "platform", platformDescriptor);
       await rm(overlayDir, { recursive: true, force: true });

@@ -29,7 +29,10 @@ import {
   installRendererCdpControlSession,
   type RendererCdpControlSession,
 } from "./renderer-cdp-control-session.js";
-import { rendererInjectionSkipReason } from "./renderer-injection-skip.js";
+import {
+  hashedRendererWaitsForDocumentLoad,
+  rendererInjectionSkipReason,
+} from "./renderer-injection-skip.js";
 import { connectControllerVoiceHost, type ControllerVoiceHost } from "./controller-voice-host.js";
 import type { RendererVoiceHostOwner } from "./renderer-voice-host-binding.js";
 
@@ -59,6 +62,7 @@ export interface DesktopControllerDependencies {
     timeoutMs: number;
     signal?: AbortSignal;
     voiceHost?: RendererVoiceHostOwner;
+    waitForDocumentLoad?: boolean;
   }): Promise<RendererCdpControlSession>;
   startAttachmentServer(
     options: StartControllerAttachmentServerOptions,
@@ -353,6 +357,7 @@ export async function runDesktopController(
         ? `${RENDERER_CSP_BOOTSTRAP}\n${bootstrap}${overlayBootstrapBundle}`
         : undefined;
     startupTrace("installing Renderer Session");
+    const waitForDocumentLoad = hashedRendererWaitsForDocumentLoad(desktopVersion);
     if (!voiceHost && options.hostDataDirectory && !skipReason) {
       for (let attempt = 0; attempt < 8 && !voiceHost && !signal.aborted; attempt += 1) {
         if (attempt > 0) await dependencies.sleep(250);
@@ -374,6 +379,7 @@ export async function runDesktopController(
         // External Agents are discovered from each target Host after installation.
         timeoutMs: PRODUCTION_INSTALL_TIMEOUT_MS,
         signal,
+        ...(waitForDocumentLoad ? { waitForDocumentLoad } : {}),
       },
       dependencies,
     );

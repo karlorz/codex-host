@@ -81,6 +81,9 @@ export interface InstallRendererCdpControlOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   voiceHost?: RendererVoiceHostOwner;
+  /** Windows Store 26.1106.51428: Page load before Runtime.enable, so splash
+   * injection cannot stall the primary document. */
+  waitForDocumentLoad?: boolean;
 }
 
 interface CreateRendererCdpControlOptions extends InstallRendererCdpControlOptions {
@@ -102,6 +105,39 @@ function discoveryTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortS
 
 function abortFailure(signal: AbortSignal, fallback: string): Error {
   return signal.reason instanceof Error ? signal.reason : new Error(fallback);
+}
+
+function isRendererDocumentLoadEvent(params: unknown): boolean {
+  if (!isRecord(params) || typeof params.name !== "string") return false;
+  return (
+    params.name === "DOMContentLoaded" || params.name === "load" || params.name === "networkIdle"
+  );
+}
+
+async function waitForRendererDocumentLoad(
+  renderer: RendererCdpClient,
+  run: <T>(operation: () => Promise<T>) => Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMessage: string,
+): Promise<void> {
+  await run(() => renderer.command("Page.enable"));
+  let finished = false;
+  const loaded = new Promise<void>((resolve) => {
+    const complete = (): void => {
+      if (finished) return;
+      finished = true;
+      unsubscribeLoad();
+      unsubscribeLifecycle();
+      resolve();
+    };
+    const unsubscribeLoad = renderer.on("Page.loadEventFired", complete);
+    const unsubscribeLifecycle = renderer.on("Page.lifecycleEvent", (params) => {
+      if (isRendererDocumentLoadEvent(params)) complete();
+    });
+  });
+  await run(() => renderer.command("Page.setLifecycleEventsEnabled", { enabled: true }));
+  if (signal) await awaitWithSignal(loaded, signal, timeoutMessage);
+  else await loaded;
 }
 
 /** Checked immediately before a client is committed to a session-owned map, so a
@@ -838,16 +874,18 @@ async function installTarget(
   voiceHost?: RendererVoiceHostOwner,
   voiceHostDisposals?: VoiceHostDisposals,
   signal?: AbortSignal,
+  waitForDocumentLoad?: boolean,
 ): Promise<{
   renderer: RendererCdpClient;
   snapshot: RendererCdpControlSnapshot;
   disposeModules(): void;
 }> {
   const timeoutMessage = "Primary Renderer installation timed out";
+  const loadSignal = signal ?? (waitForDocumentLoad ? AbortSignal.timeout(timeoutMs) : undefined);
   const run = <T>(operation: () => Promise<T>): Promise<T> =>
-    signal ? runWithCdpSignal(signal, timeoutMessage, operation) : operation();
-  const renderer = signal
-    ? await connectRendererTarget(target, operations, signal, timeoutMessage)
+    loadSignal ? runWithCdpSignal(loadSignal, timeoutMessage, operation) : operation();
+  const renderer = loadSignal
+    ? await connectRendererTarget(target, operations, loadSignal, timeoutMessage)
     : await operations.connect(target.webSocketDebuggerUrl);
   let disposeModules: (() => void) | undefined;
   try {
@@ -857,6 +895,9 @@ async function installTarget(
           enableRuntime: false,
         }),
       );
+    if (waitForDocumentLoad) {
+      await waitForRendererDocumentLoad(renderer, run, loadSignal, timeoutMessage);
+    }
     disposeModules = await run(() => installRendererLoadedModules(renderer));
     await run(() => renderer.command("Page.enable"));
     await run(() =>
@@ -907,6 +948,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
     private disposeModules: () => void,
     private readonly voiceHost: RendererVoiceHostOwner | undefined,
     private readonly voiceHostDisposals: VoiceHostDisposals,
+    private readonly waitForDocumentLoad: boolean,
   ) {}
 
   get snapshot(): RendererCdpControlSnapshot {
@@ -988,6 +1030,7 @@ class InstalledRendererCdpControlSession implements RendererCdpControlSession {
       this.voiceHost,
       this.voiceHostDisposals,
       this.#shutdown.signal,
+      this.waitForDocumentLoad,
     );
     if (this.#closed) {
       // Everything this install acquired belongs to a closed session: release it
@@ -1201,6 +1244,8 @@ export async function createRendererCdpControlSession(
     operations,
     options.voiceHost,
     voiceHostDisposals,
+    options.signal,
+    options.waitForDocumentLoad,
   );
   const browserStyleClients = new Map<string, RendererCdpClient>();
   const overlayClients = new Map<string, RendererCdpClient>();
@@ -1233,6 +1278,7 @@ export async function createRendererCdpControlSession(
     installed.disposeModules,
     options.voiceHost,
     voiceHostDisposals,
+    options.waitForDocumentLoad === true,
   );
 }
 

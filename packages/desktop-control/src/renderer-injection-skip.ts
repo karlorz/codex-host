@@ -22,6 +22,13 @@ export type RendererInjectionSkipOptions = {
   identity?: RendererInjectionSkipIdentity;
 };
 
+export function hashedRendererWaitsForDocumentLoad(
+  desktopVersion: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === "win32" && desktopVersion?.trim() === HASHED_RENDERER_CANDIDATE_VERSION;
+}
+
 export function rendererInjectionSkipReason(
   desktopVersion: string | undefined,
   platform: NodeJS.Platform = process.platform,
@@ -29,7 +36,12 @@ export function rendererInjectionSkipReason(
 ): string | null {
   const version = desktopVersion?.trim();
   if (!version) return null;
-  if (platform === "darwin" && version === HASHED_RENDERER_CANDIDATE_VERSION) return null;
+  if (
+    version === HASHED_RENDERER_CANDIDATE_VERSION &&
+    (platform === "darwin" || platform === "win32")
+  ) {
+    return null;
+  }
   if (SKIPPED_DESKTOP_VERSION_PREFIXES.some((prefix) => version.startsWith(prefix))) {
     if (allowsIsolatedHashedInjection(version, platform, options)) return null;
     return `Desktop ${version} is skipped until hashed Renderer bindings are requalified`;

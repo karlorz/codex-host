@@ -322,6 +322,47 @@ describe("Renderer CDP Control Session", () => {
     session.close();
   });
 
+  it("waits for Page load before Runtime.enable when asked", async () => {
+    const client = rendererClient();
+    client.command.mockImplementation(async (method, params) => {
+      client.commands.push({ method, ...(params ? { params } : {}) });
+      if (method === "Page.setLifecycleEventsEnabled") {
+        queueMicrotask(() => client.emit("Page.lifecycleEvent", { name: "load" }));
+      }
+      if (method === "Runtime.evaluate") return { result: { type: "undefined" } };
+      if (method === "Page.addScriptToEvaluateOnNewDocument")
+        return { identifier: `script-${client.commands.length}` };
+      return {};
+    });
+    const source = "globalThis.__codexhostInstalled = true";
+    const session = await createRendererCdpControlSession({
+      rendererCdpEndpoint: "http://127.0.0.1:43123",
+      rendererSource: source,
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+      waitForDocumentLoad: true,
+      operations: {
+        listTargets: vi.fn(async () => [target("page-1")]),
+        connect: vi.fn(async () => client),
+        installDraftPrewarmPolicy: vi.fn(async () => ({
+          state: "ready" as const,
+          reason: "owned-request-bridge" as const,
+        })),
+      },
+    });
+    const methods = client.commands.map((command) => command.method);
+    expect(methods.indexOf("Page.enable")).toBeLessThan(
+      methods.indexOf("Page.setLifecycleEventsEnabled"),
+    );
+    expect(methods.indexOf("Page.setLifecycleEventsEnabled")).toBeLessThan(
+      methods.indexOf("Runtime.enable"),
+    );
+    expect(methods.indexOf("Runtime.enable")).toBeLessThan(
+      methods.indexOf("Page.addScriptToEvaluateOnNewDocument"),
+    );
+    session.close();
+  });
+
   it("injects the hook-only source into the avatar overlay page", async () => {
     const primary = rendererClient();
     const overlay = rendererClient();

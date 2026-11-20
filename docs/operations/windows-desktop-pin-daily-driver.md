@@ -20,12 +20,21 @@ Product **26.1106.51428** (MSIX **26.1106.6628.0**) remains the retained Windows
 pin. It is not a voice qualification. Do not treat **OpenAI.ChatGPT** as the
 current Appx identity.
 
-Observed 2026-11-15 on `msi-1` after Store auto-apply: current-user
-`Get-AppxPackage OpenAI.Codex` is **26.1111.2228.0** (product
-**26.1111.21308**). Package **26.1106.6628.0** is no longer installed for that
-user. That Store move is not a new pin and not a voice qualification. Do not
-DISM-rollback unless Karl asks. Production Renderer skip prefixes remain
-`26.1103.` and `26.1106.`; **26.1111** is not on that skip list.
+Current `msi-1` daily driver (2026-11-20): current-user and provisioned
+`OpenAI.Codex` are **26.1106.6628.0** (product **26.1106.51428**). Karl asked
+for the DISM restore after Store had auto-applied **26.1111.9664.0**. Cached
+MSIX: `C:\Users\karlchow\Downloads\ChatGPT-x64-26.1106.6628.0.msix`
+(1057680859 bytes). `codexhost inspect --json` reports Desktop
+**26.1106.51428 / 26.1106.6628.0**, launcher **0.22.0-2**,
+`runtime.running=true`. This restore is not a voice qualification. Exact
+Windows **26.1106.51428** injects after Page load; other `26.1103.` /
+`26.1106.` prefixes stay skipped. Do not DISM-rollback again unless Karl asks.
+
+Store auto-apply can still replace this pin when
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsStore\WindowsUpdate`
+`AutoDownload` is **4**, even if the Policies key is already **2** and
+`winget pin` gates `OpenAI.ChatGPT` **26.1106.6628.0**. Keep both AutoDownload
+values at **2**.
 
 Installer:
 
@@ -64,27 +73,23 @@ dism.exe /Online /Add-ProvisionedAppxPackage /PackagePath:<msix> /SkipLicense
 Session-0 SSH `Add-AppxPackage` is access-denied; interactive unelevated
 install can fail with `0x80073D28`.
 
-## Renderer injection skip on 26.1106
+## Renderer injection on Windows 26.1106.51428
 
-Product **26.1106.51428** (MSIX **26.1106.6628.0**, Chromium 157) loads as
-stock ChatGPT. CodexHost Renderer injection on that build leaves the window on
-the splash and times out `Runtime.enable`. The Desktop Controller skips
-injection on **26.1106.*** and **26.1103.*** product versions so Desktop stays
-usable. Host and Web are independent of that skip.
+Product **26.1106.51428** (MSIX **26.1106.6628.0**, Chromium 157) is the
+Windows hashed Renderer candidate. The Controller injects that exact product
+after `Page` load (`load` / `networkIdle` / `DOMContentLoaded`) so
+`Runtime.enable` does not run during splash. Other **26.1106.*** and
+**26.1103.*** product versions stay skipped. Host and Web are independent of
+that skip.
 
-The exact-version allow attempt on `msi-1` in interactive session **4**
-reproduces Controller injection during splash: the Controller can briefly
-report `installed` before recovery records `CDP command 'Runtime.enable' timed
-out`; the visible window remains on the splash. That initial status is not a
-successful attachment. Keep the Windows production skip.
+Hashed Chat/Work voice stays darwin-only
+(`hashedVoiceProfileSupported`). Windows 26.1106.51428 injection can show
+Harness UI; Chat/Work/Grok voice remains unqualified until attended evidence.
 
-An owned isolated copy of the current-user pin
-(`Local\.codexhost\update-impact\26.1106.51428\bundle`, asar digest distinct
-from the macOS scratch asar) launched in interactive session **1** with a
-separate Electron user-data directory is a different route. After
-`app://-/index.html` exists, `isolated-runtime-enable` `Runtime.enable` can
-succeed without overlay injection. That does not unskip production Controller
-injection and does not qualify Chat or Work voice.
+An earlier exact-version allow on `msi-1` session **4** injected during splash
+and timed out `Runtime.enable`. Current production waits for Page load before
+that command. Isolated `Runtime.enable` after `app://-/index.html` exists
+remains attachment-only and does not qualify Chat or Work voice.
 
 The three hashed 26.1106 voice webpack files
 (`webview/assets/348410.1a97dde15f.js`,
@@ -102,8 +107,7 @@ digest `d899da24efbef7c5` and collapse; darwin candidate fingerprint
 `6b8b598d03a2fb43` is structural only. `OWtl`/`Oj9r`/`Sd8U` own `AppScope`/`RouteScope`/
 `ComposerScope`. Idle CDP peek on PID **22472** / CDP **18765**: `pageCount=1`
 is not Chat compositor ready (Chat composer 0, Work composer 1); hashed runtime
-script is loaded; `req.e`/`m`/`c` are not window globals. Do not `import()`
-those chunks during splash. Do not drop the production skip.
+script is loaded; `req.e`/`m`/`c` are not window globals. Do not `import()` those chunks during splash.
 
 Launch isolated Desktop through the interactive session; a session-0 Host
 using production data can lock the Mapping Store. Isolated Host `--data` must
@@ -159,14 +163,16 @@ Desktop start (0x…)` and does not terminate Desktop.
   **24152** (parent **4724**) title ChatGPT, Shim **5500** under that root,
   Host chain ready at 6786 ms, `codexhost inspect --json`
   `runtime.running=true` (stable ~20 s later, 9 Desktop process IDs). Desktop
-  identity is OpenAI.Codex **26.1111.21308 / 26.1111.2228.0**.
+  identity was OpenAI.Codex **26.1111.21308 / 26.1111.2228.0**. 2026-11-20
+  daily driver is restored **26.1106.51428 / 26.1106.6628.0**.
 - zzapi-mes node **6672** was left running. Isolated 26.1106 leftovers remain
   stopped. User `.codex` credentials were not copied or rewritten.
 
 Shortcut startup is ready when Store **OpenAI.Codex** is the unique
 installation root, the Host chain is Shim plus bundled Node under the install
-root, and `codexhost inspect --json` reports `runtime.running`. Production
-injection skip on 26.1106 remains in source; 26.1111 is not skipped. Missing
+root, and `codexhost inspect --json` reports `runtime.running`. Exact Windows
+**26.1106.51428** injects after Page load; other `26.1106.*` and `26.1103.*`
+stay skipped. Missing
 `experimental_realtime_*` is recorded, not rewritten. `reviewedEvidence` stays
 empty.
 

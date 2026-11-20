@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { rendererInjectionSkipReason } from "../src/renderer-injection-skip.js";
+import {
+  hashedRendererWaitsForDocumentLoad,
+  rendererInjectionSkipReason,
+} from "../src/renderer-injection-skip.js";
 import type { IsolatedVoiceQualificationFile } from "../src/cpa-live-voice-hook.js";
 
 const isolatedWindowsApp =
@@ -49,8 +52,13 @@ function isolatedWindowsIdentity(
 }
 
 describe("rendererInjectionSkipReason", () => {
-  it.each(["win32", "linux"] as const)("keeps the 26.1106 skip on %s", (platform) => {
-    expect(rendererInjectionSkipReason("26.1106.51428", platform)).toContain("26.1106.51428");
+  it("keeps the 26.1106 skip on linux", () => {
+    expect(rendererInjectionSkipReason("26.1106.51428", "linux")).toContain("26.1106.51428");
+  });
+
+  it("allows Renderer installation on Windows 26.1106.51428", () => {
+    expect(rendererInjectionSkipReason("26.1106.51428", "win32")).toBeNull();
+    expect(rendererInjectionSkipReason(" 26.1106.51428 ", "win32")).toBeNull();
   });
 
   it("allows Renderer installation on macOS 26.1106.51428", () => {
@@ -76,7 +84,7 @@ describe("rendererInjectionSkipReason", () => {
     expect(rendererInjectionSkipReason("")).toBeNull();
   });
 
-  it("does not remove the Windows skip from environment path strings", () => {
+  it("does not treat environment path strings as a hashed Windows skip", () => {
     const previous = process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC;
     const previousApp = process.env.CODEXHOST_DESKTOP_APP_PATH;
     const previousData = process.env.CODEX_ELECTRON_USER_DATA_PATH;
@@ -86,7 +94,9 @@ describe("rendererInjectionSkipReason", () => {
     process.env.CODEX_ELECTRON_USER_DATA_PATH =
       "C:\\Users\\karl\\AppData\\Local\\Temp\\codexhost-isolated-voice-20261114";
     try {
-      expect(rendererInjectionSkipReason("26.1106.51428", "win32")).toContain("skipped");
+      expect(rendererInjectionSkipReason("26.1106.51428", "win32")).toBeNull();
+      expect(hashedRendererWaitsForDocumentLoad("26.1106.51428", "win32")).toBe(true);
+      expect(hashedRendererWaitsForDocumentLoad("26.1106.51428", "darwin")).toBe(false);
     } finally {
       if (previous === undefined) delete process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC;
       else process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC = previous;
@@ -106,37 +116,7 @@ describe("rendererInjectionSkipReason", () => {
     ).toBeNull();
   });
 
-  it("keeps the Windows skip for production, expired, missing, and mismatched markers", () => {
-    expect(rendererInjectionSkipReason("26.1106.51428", "win32")).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker({ appPath: productionWindowsApp }),
-        identity: isolatedWindowsIdentity({ appPath: productionWindowsApp }),
-      }),
-    ).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker({ expiresAt: new Date(Date.now() - 1).toISOString() }),
-        identity: isolatedWindowsIdentity(),
-      }),
-    ).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        identity: isolatedWindowsIdentity(),
-      }),
-    ).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker(),
-        identity: isolatedWindowsIdentity({ asarDigest: `sha256:${"cd".repeat(32)}` }),
-      }),
-    ).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker({ desktopPlatform: "darwin" }),
-        identity: isolatedWindowsIdentity({ desktopPlatform: "darwin" }),
-      }),
-    ).toContain("skipped");
+  it("keeps the Windows skip for other 26.1106 builds", () => {
     expect(
       rendererInjectionSkipReason("26.1106.51428", "linux", {
         isolated: isolatedWindowsMarker({ desktopPlatform: "linux" }),
@@ -153,15 +133,12 @@ describe("rendererInjectionSkipReason", () => {
 
   it("rejects a skip identity whose platform or version contradicts the Controller arguments", () => {
     expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker(),
-        identity: isolatedWindowsIdentity({ desktopPlatform: "darwin" }),
-      }),
-    ).toContain("skipped");
-    expect(
-      rendererInjectionSkipReason("26.1106.51428", "win32", {
-        isolated: isolatedWindowsMarker(),
-        identity: isolatedWindowsIdentity({ desktopVersion: "26.1106.99999" }),
+      rendererInjectionSkipReason("26.1106.99999", "win32", {
+        isolated: isolatedWindowsMarker({ desktopVersion: "26.1106.99999" }),
+        identity: isolatedWindowsIdentity({
+          desktopPlatform: "darwin",
+          desktopVersion: "26.1106.99999",
+        }),
       }),
     ).toContain("skipped");
     expect(
