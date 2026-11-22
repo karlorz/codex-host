@@ -89,8 +89,7 @@ describe("rendererInjectionSkipReason", () => {
     const previousApp = process.env.CODEXHOST_DESKTOP_APP_PATH;
     const previousData = process.env.CODEX_ELECTRON_USER_DATA_PATH;
     process.env.CODEXHOST_RENDERER_INJECTION_DIAGNOSTIC = "1";
-    process.env.CODEXHOST_DESKTOP_APP_PATH =
-      "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe";
+    process.env.CODEXHOST_DESKTOP_APP_PATH = productionWindowsApp;
     process.env.CODEX_ELECTRON_USER_DATA_PATH =
       "C:\\Users\\karl\\AppData\\Local\\Temp\\codexhost-isolated-voice-20261114";
     try {
