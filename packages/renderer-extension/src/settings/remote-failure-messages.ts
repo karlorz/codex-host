@@ -1,3 +1,4 @@
+import { DESKTOP_WINDOWS_SSH_PROBE_FAILURE } from "../codex-ssh-adapter.js";
 import type { RemoteText } from "./remote-connections-card.js";
 
 /**
@@ -111,6 +112,8 @@ export const REMOTE_FAILURE_CHINESE: Readonly<Record<string, string>> = Object.f
   "Invalid Codex SSH response": "Codex SSH 返回了无法识别的结果",
   "Codex SSH request timed out; refresh before retrying": "Codex SSH 请求超时，请刷新后重试",
   "Invalid Codex SSH connection list": "Codex 返回的 SSH 连接列表无法识别",
+  [DESKTOP_WINDOWS_SSH_PROBE_FAILURE]:
+    "Codex 桌面端无法完成到原生 Windows 电脑的 SSH。它发送 POSIX shell 探测，Windows OpenSSH 会在 cmd.exe 中执行。即使远程 codexhost 服务已在运行，这张卡片也不会变为已连接。",
   "This Codex version uses an unsupported SSH configuration; open native settings":
     "当前 Codex 版本的 SSH 配置格式不受支持，请在原生设置中管理",
   "This connection changed in Codex. Refresh and edit it again.":
@@ -123,10 +126,28 @@ export const REMOTE_FAILURE_CHINESE: Readonly<Record<string, string>> = Object.f
   "Invalid Codex connection state": "Codex 返回的连接状态无法识别",
 });
 
+export function isDesktopWindowsSshProbeFailure(message: string): boolean {
+  const text = message.replace(/^Error:\s*/u, "");
+  if (/AppServerSshSetupError|codex_path_probe/i.test(text)) return true;
+  if (/Missing statement block after if/i.test(text)) return true;
+  const bashEof = /unexpected end of file/i.test(text) && /from [`']if[`']/i.test(text);
+  const windowsShell =
+    /\/usr\/bin\/bash/i.test(text) ||
+    /'\[/u.test(text) ||
+    /不是內部或外部命令|不是内部或外部命令/u.test(text);
+  return bashEof && windowsShell;
+}
+
 /** Shows a known failure in the page's language; unknown text is returned unchanged. */
 export function localizeRemoteFailure(message: string, t: RemoteText): string {
   // Failures recorded with String(error) carry the error's class name.
   const text = message.replace(/^Error:\s*/u, "");
+  if (isDesktopWindowsSshProbeFailure(text)) {
+    const chinese = REMOTE_FAILURE_CHINESE[DESKTOP_WINDOWS_SSH_PROBE_FAILURE];
+    return chinese
+      ? t(chinese, DESKTOP_WINDOWS_SSH_PROBE_FAILURE)
+      : DESKTOP_WINDOWS_SSH_PROBE_FAILURE;
+  }
   const detail = text.indexOf(": ");
   const chinese =
     REMOTE_FAILURE_CHINESE[text] ??

@@ -20,6 +20,10 @@ type Operation =
   | "save-codex-managed-remote-ssh-connections"
   | "set-remote-connection-auto-connect"
   | "app-server-connection-state";
+
+/** Console copy when native Desktop reports its POSIX SSH probe against Windows cmd.exe. */
+export const DESKTOP_WINDOWS_SSH_PROBE_FAILURE =
+  "Codex Desktop cannot complete SSH to a native Windows computer. It sends a POSIX shell probe that Windows OpenSSH runs in cmd.exe. A running codexhost remote service does not make this card Connected.";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

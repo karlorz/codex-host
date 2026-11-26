@@ -99,7 +99,7 @@ codexhost remote status
 
 原生 Shim 请求将后台监督进程从 SSH 会话的 Windows Job Object 分离，再用自己的 Job Object 管理监听器与后代进程。若 Windows 拒绝脱离，启动会保留外层 Job 策略并重试；如果会话策略会终止 Job 的所有成员，SSH 断开时仍可能停止服务。生命周期命令在原生管理进程退出时释放捕获句柄，若该进程在 15 秒内未退出则报告超时。停止操作核对记录的进程创建时间与可执行文件，再终止监督进程，由其 Job Object 清理后代。启动诊断位于安装目录的 `runtime.log`。`remote stop` 会中断远程任务；`remote uninstall` 移除托管入口和 manifest，保留会话数据。Windows 服务更新使用下文的手动更新命令，不支持由运行中的远程服务自行更新。
 
-**Windows 远程服务正在运行，并不代表 Codex Desktop 已能连接。** SSH 登录 shell 检测及远程 Codex 入口的选择、启动命令由 Desktop 负责。若 Desktop 向 cmd.exe SSH shell 发送 POSIX `sh -c`、`[ ... ]`、`$SHELL` 和 `/bin/sh` 命令，连接会在服务接管前失败。即使公钥认证成功，也可能出现 `AppServerSshSetupError`、`codex_path_probe` / `remote_login_shell`、Bash 的 `unexpected end of file` 及 cmd.exe 的 `'[' is not recognized`。安装或修复 codexhost 不能修正 Desktop 的这一步，也不能使卡片变成「已连接」；Desktop 需要原生 Windows SSH 引导与托管入口选择支持。
+**Windows 远程服务正在运行，并不代表 Codex Desktop 已能连接。** SSH 登录 shell 检测及远程 Codex 入口的选择、启动命令由 Desktop 负责。若 Desktop 向 cmd.exe SSH shell 发送 POSIX `sh -c`、`[ ... ]`、`$SHELL` 和 `/bin/sh` 命令，连接会在服务接管前失败。即使公钥认证成功，也可能出现 `AppServerSshSetupError`、`codex_path_probe` / `remote_login_shell`、Bash 的 `unexpected end of file` 及 cmd.exe 的 `'[' is not recognized`。连接页会把这段原始输出换成说明该 Desktop 限制的文案。安装或修复 codexhost 不能修正 Desktop 的这一步，也不能使卡片变成「已连接」；Desktop 需要原生 Windows SSH 引导与托管入口选择支持。
 
 将 SSH 默认 shell 改为 Git Bash 可能通过该检测，但不能证明完整连接可用，也不是该服务的必需设置。
 
