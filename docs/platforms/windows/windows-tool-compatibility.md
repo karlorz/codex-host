@@ -10,13 +10,17 @@ again. With the primary runtime already running, it exits with `STORE_LOCKED`
 (`Another codexhost process owns Mapping Store`). A helper can surface only
 `codex app-server exited before returning response 1`.
 
-On Windows the managed launch tree is `launcher -> Desktop -> shim`. The shim
-now recognizes positively observed deeper descendants of the same launcher as
-helpers. It sends those calls to the validated official CLI, without acquiring
-a local Host Runtime lease or forwarding internal `CODEXHOST_*` environment.
-The direct Desktop child still enters the Host Runtime. Missing, stale, reused,
-or unresolvable ancestry does not opt a process into helper routing. Remote
-Unix listener behavior is unchanged.
+On Windows the primary launch tree is `launcher -> Desktop -> shim`, or
+`launcher -> Desktop -> Desktop utility -> shim`. The utility-process path
+enters the Host Runtime when both Desktop processes use the same normalized
+`ChatGPT.exe` path and the invocation carries Desktop's originator and local
+app-server flags, including its final app-tools configuration override.
+
+Other positively observed deeper descendants of the same launcher are helpers.
+The shim sends those calls to the validated official CLI, without acquiring a
+local Host Runtime lease or forwarding internal `CODEXHOST_*` environment.
+Missing, stale, reused, or unresolvable ancestry retains the existing explicit
+Host/remote invocation behavior. Remote Unix listener behavior is unchanged.
 
 ## Browser tool networking
 
@@ -66,7 +70,8 @@ forward using the existing proxy-environment normalization.
 
 Use a fresh candidate and preserve the current installation for rollback.
 
-1. Confirm the direct Desktop shim still owns the primary Host Runtime and can
+1. Confirm the primary Desktop shim owns the Host Runtime through the observed
+   direct or same-image utility-process chain and can
    submit a normal turn. Check another Harness and thread resume as appropriate.
 2. Inspect only routing/proxy environment keys in the tool process and its CLI
    child. Do not dump complete process environments, credentials, or auth files.
