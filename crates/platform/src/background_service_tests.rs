@@ -1,4 +1,4 @@
-use super::configure_detached_service_command;
+use super::spawn_detached_service;
 use crate::{process_snapshot, spawn_supervised};
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -8,6 +8,16 @@ use std::{env, fs, thread};
 
 #[test]
 fn detached_service_releases_callers_capture_pipes() {
+    detached_service_capture(false);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn detached_service_falls_back_when_an_enclosing_job_forbids_breakaway() {
+    detached_service_capture(true);
+}
+
+fn detached_service_capture(restrict_breakaway: bool) {
     const TEST: &str = "background::service_tests::detached_service_releases_callers_capture_pipes";
     let executable = env::current_exe().unwrap();
     let role = env::var("CODEXHOST_PIPE_TEST_ROLE").unwrap_or_default();
@@ -25,6 +35,9 @@ fn detached_service_releases_callers_capture_pipes() {
         while !root.join("admitted").exists() {
             thread::sleep(Duration::from_millis(20));
         }
+        #[cfg(target_os = "windows")]
+        let _restricted_job = env::var_os("CODEXHOST_PIPE_TEST_RESTRICT_BREAKAWAY")
+            .map(|_| crate::windows_process::restrict_current_process_breakaway().unwrap());
         let mut command = Command::new(&executable);
         command
             .args(["--exact", TEST, "--nocapture"])
@@ -32,8 +45,7 @@ fn detached_service_releases_callers_capture_pipes() {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        configure_detached_service_command(&mut command).unwrap();
-        drop(command.spawn().unwrap());
+        drop(spawn_detached_service(&mut command).unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
         while !root.join("ready").exists() {
             assert!(Instant::now() < deadline, "service did not start");
@@ -56,6 +68,9 @@ fn detached_service_releases_callers_capture_pipes() {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if restrict_breakaway {
+        command.env("CODEXHOST_PIPE_TEST_RESTRICT_BREAKAWAY", "1");
+    }
     let mut caller = spawn_supervised(&mut command).unwrap();
     fs::write(root.join("admitted"), "admitted").unwrap();
     let (sender, receiver) = mpsc::channel();

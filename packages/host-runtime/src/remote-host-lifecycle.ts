@@ -21,6 +21,7 @@ const PROBE_TIMEOUT_MS = 5_000;
 // A small server needs about ten seconds to bring the Host up when idle, and longer right
 // after an install; a tight deadline reports a failed start for a service that then comes up.
 const START_TIMEOUT_MS = 45_000;
+const WINDOWS_LIFECYCLE_TIMEOUT_MS = 15_000;
 
 export interface RemoteHostRuntimeStatus {
   state: "stopped" | "running" | "conflict" | "unknown";
@@ -351,12 +352,37 @@ async function runWindowsLifecycle(
     diagnostic = (diagnostic + chunk).slice(-2_000);
   });
   await new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(diagnostic.trim() || `Windows remote ${action} failed (${code})`)),
-    );
+    const finish = (error?: Error): void => {
+      clearTimeout(timeout);
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+      child.removeListener("close", onExit);
+      // Completion belongs to the short-lived manager, even if a descendant
+      // accidentally retains a capture handle. Do not keep the CLI alive on it.
+      child.stdout?.destroy();
+      child.stderr.destroy();
+      child.unref();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error: Error): void => finish(error);
+    const onExit = (code: number | null): void =>
+      finish(
+        code === 0
+          ? undefined
+          : new Error(diagnostic.trim() || `Windows remote ${action} failed (${code})`),
+      );
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(
+        new Error(
+          `Windows remote ${action} timed out after ${WINDOWS_LIFECYCLE_TIMEOUT_MS}ms${diagnostic.trim() ? `: ${diagnostic.trim()}` : ""}`,
+        ),
+      );
+    }, WINDOWS_LIFECYCLE_TIMEOUT_MS);
+    child.once("error", onError);
+    child.once("exit", onExit);
+    child.once("close", onExit);
   });
 }
 

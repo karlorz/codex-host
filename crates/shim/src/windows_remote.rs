@@ -200,18 +200,7 @@ pub(super) fn manage(arguments: &[OsString]) -> ShimResult<i32> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);
-    // Break out of sshd's job; the long-lived Shim owns its own child Job Object.
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-        command.creation_flags(
-            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
-        );
-    }
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = codexhost_platform::spawn_detached_service(&mut command).map_err(|error| {
         format!("Could not detach Windows remote supervisor from the SSH session: {error}")
     })?;
     let record = (|| -> ShimResult<()> {

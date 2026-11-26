@@ -42,7 +42,7 @@ fn detached_windows_supervisor_survives_start_and_stops_its_runtime_job() {
     let ready = directory.join("ready.json");
     let pipe = format!(r"\\.\pipe\codexhost-ssh-test-{}", std::process::id());
     fs::write(&runtime, format!(
-        "import net from 'node:net'; import fs from 'node:fs'; net.createServer(socket => socket.end()).listen({}, () => fs.writeFileSync({}, JSON.stringify({{pid:process.pid}})));",
+        "import net from 'node:net'; import fs from 'node:fs'; import {{spawn}} from 'node:child_process'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {{}}, 1000)'], {{stdio:'ignore'}}); net.createServer(socket => socket.end()).listen({}, () => fs.writeFileSync({}, JSON.stringify({{pid:process.pid, childPid:child.pid}})));",
         serde_json::to_string(&pipe).unwrap(), serde_json::to_string(&ready).unwrap()
     )).unwrap();
     let manifest = directory.join("manifest.json");
@@ -75,10 +75,10 @@ fn detached_windows_supervisor_survives_start_and_stops_its_runtime_job() {
     };
     let result = std::panic::catch_unwind(|| {
         wait_for(|| ready.is_file());
-        let pid =
-            serde_json::from_slice::<serde_json::Value>(&fs::read(&ready).unwrap()).unwrap()["pid"]
-                .as_u64()
-                .unwrap() as u32;
+        let ready_record =
+            serde_json::from_slice::<serde_json::Value>(&fs::read(&ready).unwrap()).unwrap();
+        let pid = ready_record["pid"].as_u64().unwrap() as u32;
+        let child_pid = ready_record["childPid"].as_u64().unwrap() as u32;
         assert!(
             OpenOptions::new()
                 .read(true)
@@ -99,6 +99,7 @@ fn detached_windows_supervisor_survives_start_and_stops_its_runtime_job() {
             String::from_utf8_lossy(&stop.stderr)
         );
         wait_for(|| codexhost_platform::process_snapshot(pid).is_err());
+        wait_for(|| codexhost_platform::process_snapshot(child_pid).is_err());
         assert!(
             OpenOptions::new()
                 .read(true)

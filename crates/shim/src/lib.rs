@@ -864,6 +864,12 @@ pub fn run_proxy_with_observer(
     arguments: &[OsString],
     observer: &impl ProxyObserver,
 ) -> ShimResult<i32> {
+    #[cfg(target_os = "windows")]
+    let _independent = if is_managed_remote_listener(arguments) {
+        Some(codexhost_platform::register_independent_service()?)
+    } else {
+        None
+    };
     let current_executable = env::current_exe()?;
     let stock_codex_path = resolve_stock_codex_path(&current_executable, arguments)?;
     observer.invocation(arguments, &stock_codex_path);

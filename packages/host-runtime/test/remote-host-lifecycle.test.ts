@@ -14,7 +14,10 @@ import { WebSocketServer } from "ws";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => {
-    const child = Object.assign(new EventEmitter(), { stderr: new PassThrough() });
+    const child = Object.assign(new EventEmitter(), {
+      stderr: new PassThrough(),
+      unref: vi.fn(),
+    });
     queueMicrotask(() => child.emit("close", 0, null));
     return child;
   }),
@@ -58,6 +61,7 @@ afterEach(() => {
   restore?.();
   restore = undefined;
   vi.mocked(spawn).mockClear();
+  vi.useRealTimers();
 });
 
 function runtime(
@@ -68,6 +72,39 @@ function runtime(
 }
 
 describe("remote Host lifecycle", () => {
+  it.each(["inherited-pipe", "timeout"])(
+    "bounds the Windows lifecycle command when %s prevents close",
+    async (mode) => {
+      vi.useFakeTimers();
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: vi.fn(),
+        unref: vi.fn(),
+      });
+      vi.mocked(spawn).mockReturnValueOnce(child as unknown as ReturnType<typeof spawn>);
+      restore = setRemoteHostLifecycleDependenciesForTest({
+        inspectInstallation: vi.fn().mockResolvedValue({
+          ...readyInstallation,
+          wrapperPath: `${manifest.wrapperPath}.exe`,
+        }),
+        probeProtocol: vi.fn().mockResolvedValue(runtime("stopped")),
+        waitForRuntime: vi.fn().mockResolvedValue(runtime("running", "codexhost")),
+      });
+      const result = startRemoteHost({ platform: "win32", environment: {} });
+      const assertion =
+        mode === "timeout"
+          ? expect(result).rejects.toThrow("Windows remote start timed out")
+          : expect(result).resolves.toMatchObject({ state: "running" });
+      await vi.advanceTimersByTimeAsync(0);
+      if (mode === "inherited-pipe") child.emit("exit", 0, null);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+      expect(child.stderr.destroyed).toBe(true);
+      expect(child.stdout.destroyed).toBe(true);
+    },
+  );
+
   it("starts and stops the native Windows supervisor using the installed manifest", async () => {
     const environment = { USERPROFILE: "C:\\Users\\developer" };
     const windowsManifest = {
