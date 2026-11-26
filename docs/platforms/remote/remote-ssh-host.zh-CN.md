@@ -103,6 +103,8 @@ codexhost remote status
 
 将 SSH 默认 shell 改为 Git Bash 可能通过该检测，但不能证明完整连接可用，也不是该服务的必需设置。
 
+Native Windows diagnostic exception: the [dedicated-key workaround](../../operations/windows-native-ssh-workaround.md) reached native Desktop **Connected** with CLI 0.172.0, retaining cmd.exe for other SSH keys. It uses a non-elevated stock Codex daemon; codexhost named-pipe routing and external Harness support remain unverified.
+
 ## 更新远程端
 
 「远程连接」页面会显示本机版本，以及远程的「已安装」和「运行中」版本。「运行中」表示远程当前正在使用的版本；如果页面提示需要重启，按提示操作即可。

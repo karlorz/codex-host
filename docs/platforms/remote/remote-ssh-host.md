@@ -93,7 +93,7 @@ The native Shim requests detachment from the SSH session's Windows Job Object, t
 
 **A running Windows remote service does not prove that Codex Desktop can connect.** Desktop owns the SSH login-shell probe and the command it uses to select and launch the remote Codex entrypoint. Desktop builds that send POSIX `sh -c`, `[ ... ]`, `$SHELL`, and `/bin/sh` commands to a cmd.exe SSH shell fail before this service can participate. Public-key authentication can succeed while this bootstrap fails with `AppServerSshSetupError`, `codex_path_probe` / `remote_login_shell`, a Bash `unexpected end of file` error, and a cmd.exe `'[' is not recognized` message. The connections page replaces that dump with copy that names this Desktop wall. Installing or repairing codexhost cannot fix that Desktop probe or make the card show **Connected**. Desktop needs native Windows SSH bootstrap and managed-entrypoint selection support.
 
-Changing the SSH default shell to Git Bash may get past that probe, but does not establish Windows service compatibility or a supported Desktop connection. A global OpenSSH shell change is not required setup for this service.
+Changing the SSH default shell to Git Bash may get past that probe, but does not establish Windows service compatibility or a supported Desktop connection. A global OpenSSH shell change is not required setup for this service. A manually configured [dedicated-key Windows workaround](../../operations/windows-native-ssh-workaround.md) reached native Desktop **Connected** with CLI 0.172.0 while retaining cmd.exe for other SSH keys. It uses a non-elevated stock Codex daemon and does not establish routing through this service's named pipe or external Harness support.
 
 ## Manage connections
 
