@@ -73,8 +73,12 @@ describe("remote Host lifecycle", () => {
     const windowsManifest = {
       ...readyInstallation,
       wrapperPath: path.join(home, "remote", "bin", "codex.exe"),
+      dataDirectory: "C:\\Users\\developer\\.codexhost\\remote\\data",
     };
-    const pipe = remoteHostSocketPath(environment, "win32");
+    const pipe = remoteHostSocketPath(
+      { ...environment, CODEX_HOME: windowsManifest.dataDirectory },
+      "win32",
+    );
     restore = setRemoteHostLifecycleDependenciesForTest({
       inspectInstallation: vi.fn().mockResolvedValue(windowsManifest),
       probeProtocol: vi.fn().mockResolvedValue({ state: "stopped", socketPath: pipe }),
@@ -127,7 +131,7 @@ describe("remote Host lifecycle", () => {
       expect.any(Object),
       expect.stringContaining("codexhost-ssh-"),
       "managed",
-      environment,
+      expect.objectContaining(environment),
     );
   });
 
@@ -159,7 +163,7 @@ describe("remote Host lifecycle", () => {
       expect.any(Object),
       expect.stringContaining("codexhost-ssh-"),
       "managed",
-      options.environment,
+      expect.objectContaining(options.environment),
     );
   });
 

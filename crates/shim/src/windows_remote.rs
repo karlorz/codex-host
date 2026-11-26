@@ -76,6 +76,8 @@ impl Manifest {
                 canonical_existing_file(&self.host_runtime_path)?,
             )
             .env("CODEXHOST_DATA_DIR", &self.data_directory)
+            .env("CODEX_HOME", &self.data_directory)
+            .env("CODEXHOST_EXTERNAL_CLIENT_PORT", "off")
             .env("CODEXHOST_REMOTE_SSH_MANAGED", "1")
             .env("CODEXHOST_REMOTE_EXECUTION_SESSION", "ssh")
             .env(
@@ -85,8 +87,17 @@ impl Manifest {
                     .ok_or("Managed Codex entrypoint has no directory")?,
             )
             .env_remove("CODEXHOST_LAUNCHER_PID")
-            .env_remove("CODEXHOST_LAUNCHER_EXECUTABLE")
             .env_remove("CODEX_CLI_PATH");
+        let launcher = self
+            .host_runtime_path
+            .parent()
+            .and_then(Path::parent)
+            .map(|root| root.join("bin").join("codexhost.exe"));
+        if let Some(launcher) = launcher.filter(|path| path.is_file()) {
+            command.env("CODEXHOST_LAUNCHER_EXECUTABLE", launcher);
+        } else {
+            command.env_remove("CODEXHOST_LAUNCHER_EXECUTABLE");
+        }
         if let Some(home) = std::env::var_os("USERPROFILE") {
             command.env("HOME", home);
         }

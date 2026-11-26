@@ -85,15 +85,30 @@ interface RemoteHostLifecycleDependencies {
 
 let lifecycleDependencyOverrides: Partial<RemoteHostLifecycleDependencies> = {};
 
+function runtimeEnvironment(
+  environment: NodeJS.ProcessEnv,
+  manifest: Pick<RemoteHostManifestV1, "dataDirectory">,
+  platform: NodeJS.Platform | undefined,
+): NodeJS.ProcessEnv {
+  if ((platform ?? process.platform) !== "win32") return environment;
+  return { ...environment, CODEX_HOME: manifest.dataDirectory };
+}
+
 async function defaultSocketExists(socketPath: string): Promise<boolean> {
   if (socketPath.startsWith("\\\\.\\pipe\\")) {
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(socketPath);
+      const timeout = setTimeout(() => {
+        socket.destroy();
+        resolve(false);
+      }, 2_000);
       socket.once("connect", () => {
+        clearTimeout(timeout);
         socket.destroy();
         resolve(true);
       });
       socket.once("error", (error: NodeJS.ErrnoException) => {
+        clearTimeout(timeout);
         if (error.code === "ENOENT" || error.code === "ECONNREFUSED") resolve(false);
         else reject(error);
       });
@@ -411,13 +426,15 @@ export async function inspectRemoteHost(
   const environment = options.environment ?? process.env;
   const lifecycle = dependencies();
   const installation = await lifecycle.inspectInstallation(options);
-  const socketPath = remoteHostSocketPath(environment, options.platform);
   if (installation.state === "not-installed") {
+    const socketPath = remoteHostSocketPath(environment, options.platform);
     return { ...installation, runtime: { state: "stopped", socketPath } };
   }
+  const runtimeEnv = runtimeEnvironment(environment, installation, options.platform);
+  const socketPath = remoteHostSocketPath(runtimeEnv, options.platform);
   return {
     ...installation,
-    runtime: await lifecycle.probeProtocol(installation, socketPath, environment),
+    runtime: await lifecycle.probeProtocol(installation, socketPath, runtimeEnv),
   };
 }
 
@@ -437,8 +454,9 @@ export async function startRemoteHost(
   ) {
     throw new Error("Desktop execution session requires macOS");
   }
-  const socketPath = remoteHostSocketPath(environment, options.platform);
-  const current = await lifecycle.probeProtocol(manifest, socketPath, environment);
+  const runtimeEnv = runtimeEnvironment(environment, manifest, options.platform);
+  const socketPath = remoteHostSocketPath(runtimeEnv, options.platform);
+  const current = await lifecycle.probeProtocol(manifest, socketPath, runtimeEnv);
   if (current.state === "running") {
     return { state: "running", changed: false, socketPath };
   }
@@ -449,15 +467,15 @@ export async function startRemoteHost(
         current.message ?? "Windows remote Host pipe is occupied by an unrecognized service",
       );
     }
-    await lifecycle.runTerminator(manifest, socketPath, "stock", environment);
+    await lifecycle.runTerminator(manifest, socketPath, "stock", runtimeEnv);
     replacedStockCodex = true;
   }
-  await lifecycle.launch(manifest, environment);
+  await lifecycle.launch(manifest, runtimeEnv);
   try {
-    await lifecycle.waitForRuntime(manifest, socketPath, environment);
+    await lifecycle.waitForRuntime(manifest, socketPath, runtimeEnv);
   } catch (error) {
     if ((options.platform ?? process.platform) === "win32") {
-      await lifecycle.runTerminator(manifest, socketPath, "managed", environment);
+      await lifecycle.runTerminator(manifest, socketPath, "managed", runtimeEnv);
     }
     throw error;
   }
@@ -473,11 +491,12 @@ export async function stopRemoteHost(
   // Stopping the existing listener does not launch either: protocol probing and the native
   // terminator's socket-owner/process-identity checks still gate termination.
   const manifest = installedManifest(await lifecycle.inspectInstallation(options));
-  const socketPath = remoteHostSocketPath(environment, options.platform);
-  const current = await lifecycle.probeProtocol(manifest, socketPath, environment);
+  const runtimeEnv = runtimeEnvironment(environment, manifest, options.platform);
+  const socketPath = remoteHostSocketPath(runtimeEnv, options.platform);
+  const current = await lifecycle.probeProtocol(manifest, socketPath, runtimeEnv);
   if (current.state === "stopped") {
     if ((options.platform ?? process.platform) === "win32") {
-      await lifecycle.runTerminator(manifest, socketPath, "managed", environment);
+      await lifecycle.runTerminator(manifest, socketPath, "managed", runtimeEnv);
     }
     return { state: "stopped", changed: false, socketPath };
   }
@@ -486,7 +505,7 @@ export async function stopRemoteHost(
       current.message ?? `Remote Host socket is not owned by codexhost: ${socketPath}`,
     );
   }
-  await lifecycle.runTerminator(manifest, socketPath, "managed", environment);
+  await lifecycle.runTerminator(manifest, socketPath, "managed", runtimeEnv);
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (await lifecycle.socketExists(socketPath)) {
     if (Date.now() >= deadline) throw new Error(`Remote Host socket did not close: ${socketPath}`);
