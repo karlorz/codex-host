@@ -7,7 +7,7 @@ Web 控制台的「其他电脑（SSH）」（`#remote-connections`）也提供�
 ## 开始前需要准备什么
 
 - **本机**：安装 Codex Desktop 和 codexhost，并能打开 Codex 的「设置 → 连接 → SSH」。
-- **远程电脑**：使用 Mac 或 Linux，已开启 SSH，并安装 Node.js、npm 和 Codex CLI。目前不支持将 Windows 作为远程电脑。
+- **远程电脑**：使用 Mac 或 Linux，已开启 SSH，并安装 Node.js、npm 和 Codex CLI。Windows 提供原生远程服务路径，但仍要求 Codex Desktop 支持对应的 SSH 引导；参见下文「Windows 远程服务与 Desktop SSH 前置条件」。
 - **要使用的工具**：已在远程电脑上安装并登录，例如 Claude Code。
 - **连接信息**：远程电脑的 SSH 地址，例如 `用户名@电脑地址`。如果连接需要指定端口或私钥文件，也请提前准备好。
 
@@ -29,7 +29,7 @@ Web 控制台的「其他电脑（SSH）」（`#remote-connections`）也提供�
    - **端口、私钥路径**：仅在你的连接需要时填写，否则留空。
 4. 点击「保存」，页面会检测这台电脑。未安装远程服务时，点击「安装并连接」；已经安装时，点击「连接」。
    - 安装过程中请等待页面显示结果，无需自己复制安装命令。
-   - 安装使用本机正在运行的正式发布版本；源码启动可按下文「指定版本从源码测试」设置正式格式的运行版本。
+   - 安装使用本机正在运行的已发布版本，包含 `0.22.0-2` 这类数字修订版本；开发版本需按下文「指定版本从源码测试」指定已发布的运行版本。
 5. 显示「已连接」后，在 Codex 中打开远程电脑上的项目。
 
 如果你已经在 Codex 中添加过 SSH 连接，这里会直接显示，不用重复添加。两处的连接设置共用，修改后也会同步显示。
@@ -82,6 +82,26 @@ codexhost remote start
 
 - **断开**：不再自动连接这台电脑；远程已开始的任务仍可继续运行。需要使用时，再点击「连接」。
 - **移除**：从连接列表中移除这台电脑，不会删除远程文件或会话。
+
+## Windows 远程服务与 Desktop SSH 前置条件
+
+Windows 远程服务使用 Windows Node.js、原生 Codex CLI `.exe`（0.161.0 及以上）、托管 `codex.exe` 入口和命名管道。安装程序通过 SSH 发送压缩、编码的 PowerShell 命令，支持 cmd.exe 和 PowerShell 默认 shell，不依赖 Git Bash，不修改 OpenSSH `DefaultShell`、登录 shell 配置或系统 PATH。npm 的 `codex.cmd` 会解析到包内的原生 Codex 二进制，不能直接作为 app-server 可执行文件。
+
+安装包含 Windows 远程服务支持的已发布 codexhost 软件包后，可在 Windows 终端执行：
+
+```powershell
+codexhost remote install
+codexhost remote start
+codexhost remote status
+```
+
+安装目录为 `%USERPROFILE%\.codexhost\remote`。`manifest.json` 与 `environment.json` 配置托管入口，也可显式执行 `& "$env:USERPROFILE\.codexhost\remote\bin\codex.exe"`。状态中的 `runtime.socketPath` 是命名管道地址；到原生 Codex 的内部连接使用带认证的回环 WebSocket。外部 Harness 会话沿用 Windows Desktop 与 Web 的独立共享 Host。
+
+原生 Shim 将后台监督进程从 SSH 会话的 Windows Job Object 分离，再用自己的 Job Object 管理监听器与后代进程。若系统策略禁止脱离原有 Job，启动会报错。停止操作核对记录的进程创建时间与可执行文件，再终止监督进程，由其 Job Object 清理后代。启动诊断位于安装目录的 `runtime.log`。`remote stop` 会中断远程任务；`remote uninstall` 移除托管入口和 manifest，保留会话数据。Windows 服务更新使用下文的手动更新命令，不支持由运行中的远程服务自行更新。
+
+**Windows 远程服务正在运行，并不代表 Codex Desktop 已能连接。** SSH 登录 shell 检测及远程 Codex 入口的选择、启动命令由 Desktop 负责。若 Desktop 向 cmd.exe SSH shell 发送 POSIX `sh -c`、`[ ... ]`、`$SHELL` 和 `/bin/sh` 命令，连接会在服务接管前失败。即使公钥认证成功，也可能出现 `AppServerSshSetupError`、`codex_path_probe` / `remote_login_shell`、Bash 的 `unexpected end of file` 及 cmd.exe 的 `'[' is not recognized`。安装或修复 codexhost 不能修正 Desktop 的这一步，也不能使卡片变成「已连接」；Desktop 需要原生 Windows SSH 引导与托管入口选择支持。
+
+将 SSH 默认 shell 改为 Git Bash 可能通过该检测，但不能证明完整连接可用，也不是该服务的必需设置。
 
 ## 更新远程端
 

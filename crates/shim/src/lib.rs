@@ -24,6 +24,8 @@ mod process_identity;
 mod remote_lifecycle;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod remote_listener_process;
+#[cfg(any(target_os = "windows", test))]
+mod windows_remote;
 
 use local_runtime_lease::{LocalRuntimeAdmission, admit_local_runtime};
 
@@ -688,10 +690,10 @@ fn is_managed_remote_listener(arguments: &[OsString]) -> bool {
         env::var_os(REMOTE_SSH_MANAGED_ENV).as_deref() == Some(std::ffi::OsStr::new("1"))
             && is_default_remote_unix_listener(arguments)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        let _ = arguments;
-        false
+        env::var_os(REMOTE_SSH_MANAGED_ENV).as_deref() == Some(OsStr::new("1"))
+            && windows_remote::is_listener(arguments)
     }
 }
 
@@ -989,6 +991,21 @@ pub fn run_proxy(arguments: &[OsString]) -> ShimResult<i32> {
 
 pub fn run_from_environment() -> ShimResult<i32> {
     let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    #[cfg(target_os = "windows")]
+    {
+        if arguments
+            .first()
+            .is_some_and(|argument| argument == "--codexhost-windows-remote")
+        {
+            return windows_remote::manage(&arguments[1..]);
+        }
+        if let Some(code) = windows_remote::bootstrap(&arguments)? {
+            return Ok(code);
+        }
+        if let Some(code) = windows_remote::proxy(&arguments)? {
+            return Ok(code);
+        }
+    }
     #[cfg(target_os = "macos")]
     if arguments.first().and_then(|argument| argument.to_str())
         == Some(codexhost_platform::AQUA_SPAWN_ARGUMENT)

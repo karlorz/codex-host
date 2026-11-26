@@ -66,6 +66,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import {
   createRemoteAppServerWebSocketListener,
   isRemoteUnixListenerInvocation,
+  isRemoteHostListenerInvocation,
   officialListenerArgumentsForRemoteListener,
   remoteAppServerSocketPath,
   withRemoteAppServerSocketInitializationLock,
@@ -112,6 +113,37 @@ async function withLegacyRemoteSocketInitializationLock<T>(
 }
 
 describe("remote SSH app-server transport", () => {
+  it("uses a per-user named pipe for Windows and preserves the Unix socket path", () => {
+    const arguments_ = ["app-server", "--listen", "pipe://"];
+    expect(isRemoteHostListenerInvocation(arguments_)).toBe(true);
+    expect(isRemoteUnixListenerInvocation(arguments_)).toBe(false);
+    const pipe = remoteAppServerSocketPath(
+      { USERPROFILE: "C:\\Users\\developer" },
+      "pipe://",
+      "win32",
+    );
+    expect(
+      remoteAppServerSocketPath(
+        { HOME: "/c/Users/developer", USERPROFILE: "C:\\Users\\developer" },
+        "pipe://",
+        "win32",
+      ),
+    ).toBe(pipe);
+    expect(pipe).toMatch(/^\\\\\.\\pipe\\codexhost-ssh-app-server-control-/u);
+    expect(
+      remoteAppServerSocketPath({ USERPROFILE: "c:\\users\\DEVELOPER" }, "pipe://", "win32"),
+    ).toBe(pipe);
+    expect(
+      remoteAppServerSocketPath({ USERPROFILE: "C:\\Users\\other" }, "pipe://", "win32"),
+    ).not.toBe(pipe);
+    expect(() =>
+      remoteAppServerSocketPath({ HOME: "/home/developer" }, "pipe://", "linux"),
+    ).toThrow("requires Windows");
+    expect(remoteAppServerSocketPath({ HOME: "/home/developer" }, "unix://", "linux")).toBe(
+      "/home/developer/.codex/app-server-control/app-server-control.sock",
+    );
+  });
+
   it("classifies only Unix listener app-server invocations", () => {
     expect(
       isRemoteUnixListenerInvocation([

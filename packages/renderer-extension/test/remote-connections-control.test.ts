@@ -4,6 +4,8 @@ import {
   createRemoteConnectionsControl,
   remoteUpdateTarget,
 } from "../src/remote-connections-control.js";
+import { remoteInstallVersion } from "../src/settings/remote-connections-card.js";
+
 const status = (version: string, changes: Partial<RuntimeStatus> = {}): RuntimeStatus => ({
   runningVersion: version,
   installedVersion: version,
@@ -14,6 +16,13 @@ const status = (version: string, changes: Partial<RuntimeStatus> = {}): RuntimeS
   ...changes,
 });
 describe("remote version policy", () => {
+  it("permits numeric published release revisions while rejecting development labels", () => {
+    expect(remoteInstallVersion(status("0.22.0-2"))).toBe("0.22.0-2");
+    expect(remoteInstallVersion(status("0.22.0"))).toBe("0.22.0");
+    for (const version of ["0.22.0-dev", "0.22.0-rc.1", "0.22.0-2;echo bad", "0.22.0-"]) {
+      expect(remoteInstallVersion(status(version))).toBeNull();
+    }
+  });
   it("updates older versions but never downgrades a newer remote", () => {
     expect(remoteUpdateTarget(status("0.11.0"), status("0.9.0"))).toBe("0.11.0");
     expect(remoteUpdateTarget(status("0.9.0"), status("0.11.0"))).toBeNull();

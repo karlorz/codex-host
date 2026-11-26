@@ -3,6 +3,7 @@ import net from "node:net";
 import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { remoteHostSocketPath } from "./remote-host-paths.js";
 import { attachRemoteAppServerSession } from "./remote-app-server-session.js";
 
 import { WebSocketServer } from "ws";
@@ -99,7 +100,7 @@ function appServerSubcommandIndex(arguments_: readonly string[]): number | null 
   return null;
 }
 
-export function remoteUnixListenerUrl(arguments_: readonly string[]): string | null {
+export function remoteHostListenerUrl(arguments_: readonly string[]): string | null {
   const appServerIndex = appServerSubcommandIndex(arguments_);
   if (appServerIndex === null) return null;
   let listener: string | null = null;
@@ -135,7 +136,16 @@ export function remoteUnixListenerUrl(arguments_: readonly string[]): string | n
     }
     return null;
   }
+  return listener && (listener.startsWith("unix://") || listener === "pipe://") ? listener : null;
+}
+
+export function remoteUnixListenerUrl(arguments_: readonly string[]): string | null {
+  const listener = remoteHostListenerUrl(arguments_);
   return listener?.startsWith("unix://") ? listener : null;
+}
+
+export function isRemoteHostListenerInvocation(arguments_: readonly string[]): boolean {
+  return remoteHostListenerUrl(arguments_) !== null;
 }
 
 export function isRemoteUnixListenerInvocation(arguments_: readonly string[]): boolean {
@@ -145,7 +155,12 @@ export function isRemoteUnixListenerInvocation(arguments_: readonly string[]): b
 export function remoteAppServerSocketPath(
   environment: NodeJS.ProcessEnv,
   listenUrl = "unix://",
+  platform: NodeJS.Platform = process.platform,
 ): string {
+  if (listenUrl === "pipe://") {
+    if (platform !== "win32") throw new Error("Remote named-pipe listener requires Windows");
+    return remoteHostSocketPath(environment, platform);
+  }
   if (!listenUrl.startsWith("unix://")) {
     throw new Error("Remote app-server listener must use a Unix URL");
   }

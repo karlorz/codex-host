@@ -16,7 +16,7 @@ export const REMOTE_FAILURE_CHINESE: Readonly<Record<string, string>> = Object.f
   "Invalid remote connection request": "远程连接请求无效",
   // SSH helper: installing, updating and repairing over SSH.
   "Invalid SSH address or port": "SSH 地址或端口无效",
-  "Install requires a published stable version": "只能安装已发布的正式版本",
+  "Install requires a published release version": "只能安装已发布的正式版本",
   "SSH operation timed out; check the remote computer before retrying":
     "SSH 操作超时，请检查远程电脑后重试",
   "Remote service is already installed. Connect and use its update button":

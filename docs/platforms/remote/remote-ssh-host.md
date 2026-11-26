@@ -7,7 +7,7 @@ Use Claude Code, Pi, and other Harnesses (AI coding tools) installed and signed 
 ## Before you start
 
 - **Local computer**: install Codex Desktop and codexhost, and make sure you can open **Settings → Connections → SSH** in Codex.
-- **Remote computer**: use a Mac or Linux computer with SSH enabled and Node.js, npm, and Codex CLI installed. Windows remote computers are not currently supported.
+- **Remote computer**: use a Mac or Linux computer with SSH enabled and Node.js, npm, and Codex CLI installed. Windows has a native remote-service path, but Codex Desktop must support its SSH bootstrap; see **Windows remote service and the Desktop SSH prerequisite** below.
 - **Your coding tool**: install it and sign in on the remote computer—for example, Claude Code.
 - **Connection details**: have the SSH address ready, such as `username@computer-address`. If your connection needs a specific port or identity file, have those details ready too.
 
@@ -17,7 +17,7 @@ Update local codexhost to the latest version before installing the remote end be
 
 Log in to the remote computer once through SSH from your local terminal and confirm its identity. The page uses your existing SSH key or alias and does not show a password prompt.
 
-The remote computer needs Node.js, npm and Codex CLI, with permission for your user to install npm packages. Use Node.js 22.19 or later, except 23.x. Installation loads your interactive login shell, including configured version managers such as nvm. Existing installations prefer the executable Node.js path recorded by codexhost; an unsupported recorded version must be updated before maintenance. On a remote Mac, keep the desktop user logged in when using Claude Code.
+The remote computer needs Node.js, npm and Codex CLI, with permission for your user to install npm packages. Use Node.js 22.19 or later, except 23.x. On Mac and Linux, installation loads your interactive login shell, including configured version managers such as nvm. Windows installation uses compressed, encoded PowerShell commands through the existing SSH shell. Existing installations prefer the executable Node.js path recorded by codexhost; an unsupported recorded version must be updated before maintenance. On a remote Mac, keep the desktop user logged in when using Claude Code.
 
 ## Step 2: Add an SSH connection
 
@@ -30,7 +30,7 @@ The remote computer needs Node.js, npm and Codex CLI, with permission for your u
    - **Port and identity file**: fill these in only if your connection requires them; otherwise, leave them blank.
 4. Click **Save**. The page checks the computer. Choose **Install and connect** if the remote service is missing, or **Connect** if it is already installed.
    - Wait for the installation result; you do not need to copy installation commands.
-   - Installation uses the published stable version running locally. Development builds require a stable runtime version as described in **Test from source with a specified version** below.
+   - Installation uses the published version running locally, including numeric release revisions such as `0.22.0-2`. Development builds require a release runtime version as described in **Test from source with a specified version** below.
 5. Once it shows **Connected**, open a project on that computer in Codex.
 
 Existing Codex SSH connections appear here automatically; you do not need to add them again. Both pages share the same connection settings, so changes appear in both places.
@@ -75,6 +75,26 @@ The desktop user must match the SSH user and remain logged in. Screen lock, a sc
 
 The native startup bridge runs once in the desktop session, then exits and unloads its temporary LaunchAgent. Arguments, the SSH environment and the working directory pass through an owner-private local socket; they are not written into the plist. The managed listener retains its own native supervisor and existing verified stop path. Explicit desktop mode reports an unavailable desktop session rather than falling back to SSH. Existing Harness Aqua Brokers remain separate.
 
+## Windows remote service and the Desktop SSH prerequisite
+
+Windows service installation uses Windows Node.js, the native Codex CLI `.exe` (0.161.0 or later), a managed `codex.exe` entrypoint, and a named pipe. It does not require Git Bash, change OpenSSH `DefaultShell`, modify shell startup files, or change the system PATH. The SSH installer detects PowerShell and sends a compressed, encoded command compatible with cmd.exe and PowerShell SSH shells. A native npm Codex binary is resolved behind `codex.cmd`; a `.cmd` file cannot serve as the native app-server executable.
+
+Run these commands in a Windows terminal after installing a published codexhost package containing Windows remote-service support:
+
+```powershell
+codexhost remote install
+codexhost remote start
+codexhost remote status
+```
+
+The installation is under `%USERPROFILE%\.codexhost\remote`. Its `environment.json` and `manifest.json` configure the managed entrypoint, which can also be invoked explicitly as `& "$env:USERPROFILE\.codexhost\remote\bin\codex.exe"`. Status reports the named-pipe path in `runtime.socketPath`. The service's stock Codex connection uses an authenticated loopback WebSocket. External Harness Threads use the same independent Host as Windows Desktop and Web.
+
+The native Shim detaches the supervisor from the SSH session's Windows Job Object, then supervises the listener and its descendants in its own Job Object. A Windows policy that forbids job breakaway produces a startup error. Stop checks the recorded process creation time and executable before terminating that supervisor; closing its Job Object stops the runtime tree. Startup diagnostics are in `runtime.log` beside the manifest. `codexhost remote stop` interrupts remote work; `codexhost remote uninstall` removes the managed entrypoint and manifest while retaining conversation data. Service updates on Windows use the manual update commands below; self-update through a running remote service is unavailable.
+
+**A running Windows remote service does not prove that Codex Desktop can connect.** Desktop owns the SSH login-shell probe and the command it uses to select and launch the remote Codex entrypoint. Desktop builds that send POSIX `sh -c`, `[ ... ]`, `$SHELL`, and `/bin/sh` commands to a cmd.exe SSH shell fail before this service can participate. Public-key authentication can succeed while this bootstrap fails with `AppServerSshSetupError`, `codex_path_probe` / `remote_login_shell`, a Bash `unexpected end of file` error, and a cmd.exe `'[' is not recognized` message. Installing or repairing codexhost cannot fix that Desktop probe or make the card show **Connected**. Desktop needs native Windows SSH bootstrap and managed-entrypoint selection support.
+
+Changing the SSH default shell to Git Bash may get past that probe, but does not establish Windows service compatibility or a supported Desktop connection. A global OpenSSH shell change is not required setup for this service.
+
 ## Manage connections
 
 While the connections page is visible, it checks stable state every 30 seconds and checks every 5 seconds during operations, updates, or failed checks. Periodic checks pause while hidden or after leaving the page. Returning to the page refreshes immediately; manual refresh and post-operation checks remain available.
@@ -106,7 +126,7 @@ If the remote version is newer, update the local computer first. Reconnect if th
 
 ### When you need to update manually
 
-Older remote installations cannot report their version; the page shows **Update remote service**, which is usually all you need. If the button is unavailable (the local build is not a published release) or the update fails:
+Older remote installations cannot report their version; the page shows **Update remote service**, which is usually all you need. If the button is unavailable (the local build has a development or named prerelease label) or the update fails:
 
 1. Update local codexhost to the latest version.
 2. Run these commands in order in a terminal on the remote computer:

@@ -11,7 +11,10 @@ import { AppServerHost, officialEnvironment } from "./app-server-host.js";
 import { prepareLocalCodex } from "./native-account-host.js";
 import { SingleNativeCodexAccount } from "./account/codex-account-control.js";
 import { OfficialRuntimeScope } from "./codex-runtime/official-runtime-scope.js";
-import { createOwnedUnixBackend } from "./codex-runtime/owned-official-backends.js";
+import {
+  createOwnedLoopbackBackend,
+  createOwnedUnixBackend,
+} from "./codex-runtime/owned-official-backends.js";
 import { DelegationControlRegistry } from "./delegation-control-registry.js";
 import {
   FileDelegationWatchStore,
@@ -63,11 +66,11 @@ import {
 } from "./remote-control-app-server.js";
 import {
   createRemoteAppServerWebSocketListener,
-  isRemoteUnixListenerInvocation,
+  isRemoteHostListenerInvocation,
   officialListenerArgumentsForRemoteListener,
   prepareRemoteAppServerSocketDirectory,
   remoteAppServerSocketPath,
-  remoteUnixListenerUrl,
+  remoteHostListenerUrl,
 } from "./remote-app-server.js";
 import { watchRemoteListenerSupervisor } from "./remote-listener-supervisor.js";
 import { remoteOfficialAppServerSocketPath } from "./remote-official-app-server.js";
@@ -393,7 +396,7 @@ export async function runHostRuntime(input: {
     maintenanceRuntimePath &&
     input.environment.CODEXHOST_LAUNCHER_EXECUTABLE &&
     input.environment.CODEXHOST_REMOTE_SSH_MANAGED !== "1" &&
-    !isRemoteUnixListenerInvocation(input.arguments)
+    !isRemoteHostListenerInvocation(input.arguments)
   ) {
     return runLocalDesktopBridge(
       input.environment,
@@ -405,7 +408,7 @@ export async function runHostRuntime(input: {
   const runtimeMaintenance = maintenanceRuntimePath
     ? new RuntimeMaintenance({
         runtimePath: maintenanceRuntimePath,
-        remote: isRemoteUnixListenerInvocation(input.arguments),
+        remote: isRemoteHostListenerInvocation(input.arguments),
         environment: input.environment,
       })
     : undefined;
@@ -444,7 +447,7 @@ export async function runHostRuntime(input: {
   // The local console reads the statistics; read the native storage ahead of its first visit.
   if (consoleOpener) usageStatistics.warm();
 
-  if (!isRemoteUnixListenerInvocation(input.arguments)) {
+  if (!isRemoteHostListenerInvocation(input.arguments)) {
     const webOpener = createHostWebOpener(input.environment);
     const remoteControlPlan = createRemoteControlAppServerPlan({
       arguments: input.arguments,
@@ -567,17 +570,20 @@ export async function runHostRuntime(input: {
     });
   }
 
-  if (process.platform === "win32") {
-    throw new Error("Remote Unix app-server listener is unavailable on Windows");
+  const listenUrl = remoteHostListenerUrl(input.arguments);
+  if (process.platform === "win32" && listenUrl !== "pipe://") {
+    throw new Error("Windows remote app-server requires a named-pipe listener");
   }
-  const listenUrl = remoteUnixListenerUrl(input.arguments);
   if (!listenUrl) throw new Error("Remote app-server listener URL is unavailable");
   return prepareDelegationRuntime({
     environment: input.environment,
     ...(hostRuntimePath ? { hostRuntimePath } : {}),
     createHost: async (delegationEnvironment, _onDelegationApi, registry, enrollment) => {
       const socketPath = remoteAppServerSocketPath(delegationEnvironment, listenUrl);
-      const officialPlan = createRemoteOfficialAppServerPlan(input.arguments, socketPath);
+      const officialPlan =
+        process.platform === "win32"
+          ? null
+          : createRemoteOfficialAppServerPlan(input.arguments, socketPath);
       const officialRuntimeScope = new OfficialRuntimeScope({
         permanentHome: path.resolve(
           delegationEnvironment.CODEX_HOME ?? path.join(homedir(), ".codex"),
@@ -587,13 +593,19 @@ export async function runHostRuntime(input: {
         // reconnect, so a failed official generation must be replaced here.
         recovery: {},
         createBackend: () =>
-          createOwnedUnixBackend({
-            stockCodexPath,
-            arguments: officialPlan.listenerArguments,
-            socketPath: officialPlan.socketPath,
-            environment: officialEnvironment(delegationEnvironment),
-            diagnosticOutput: process.stderr,
-          }),
+          officialPlan === null
+            ? createOwnedLoopbackBackend({
+                stockCodexPath,
+                arguments: input.arguments,
+                environment: officialEnvironment(delegationEnvironment),
+              })
+            : createOwnedUnixBackend({
+                stockCodexPath,
+                arguments: officialPlan.listenerArguments,
+                socketPath: officialPlan.socketPath,
+                environment: officialEnvironment(delegationEnvironment),
+                diagnosticOutput: process.stderr,
+              }),
       });
       const accountControl = new SingleNativeCodexAccount(() => ({
         version: 2,
@@ -692,8 +704,12 @@ export async function runHostRuntime(input: {
         supervisorRequired: true,
       });
       try {
-        await prepareRemoteAppServerSocketDirectory(socketPath);
-        await prepareRemoteAppServerSocketDirectory(sharedThreadSocketPath(delegationEnvironment));
+        if (process.platform !== "win32") {
+          await prepareRemoteAppServerSocketDirectory(socketPath);
+          await prepareRemoteAppServerSocketDirectory(
+            sharedThreadSocketPath(delegationEnvironment),
+          );
+        }
         // Also covers a loss reported while the directory was being prepared.
         if (supervisorLost) return 0;
         // Native Codex failure never closes this listener: external Harness

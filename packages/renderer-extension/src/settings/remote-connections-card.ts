@@ -33,7 +33,7 @@ export interface RemoteConnectionRow {
   notice: { tone: "success" | "danger"; text: string } | null;
 }
 
-const STABLE_VERSION = /^\d+\.\d+\.\d+$/u;
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:-\d+(?:\.\d+)*)?$/u;
 
 export function remoteErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error);
@@ -61,7 +61,7 @@ export function remoteElement<K extends keyof HTMLElementTagNameMap>(
 /** Version the local Host can install on a remote that has no service yet. */
 export function remoteInstallVersion(local: RuntimeStatus | null): string | null {
   const version = local?.runningVersion;
-  return version && STABLE_VERSION.test(version) ? version : null;
+  return version && RELEASE_VERSION.test(version) ? version : null;
 }
 
 /** Version an update or restart would bring the remote service to, if either applies. */

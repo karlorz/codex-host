@@ -1,3 +1,4 @@
+import { remoteHostSocketPath } from "./remote-host-paths.js";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
@@ -18,6 +19,7 @@ import { createRemoteOfficialAppServerConnection } from "./remote-official-conne
 import { object, StreamThreadPeer, type SharedThreadPeer } from "./shared-thread-peer.js";
 
 export function sharedThreadSocketPath(environment: NodeJS.ProcessEnv): string {
+  if (process.platform === "win32") return remoteHostSocketPath(environment, "win32", "threads");
   return path.join(
     environment.CODEX_HOME ?? path.join(environment.HOME ?? homedir(), ".codex"),
     "app-server-control",

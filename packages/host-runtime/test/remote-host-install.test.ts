@@ -55,6 +55,45 @@ function shellQuote(value: string): string {
 }
 
 describe("remote SSH Host installation", () => {
+  it("installs a Windows native entrypoint without modifying a login shell or registry", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "remote-windows-"));
+    try {
+      const options = {
+        platform: "win32" as const,
+        environment: { USERPROFILE: home, HOME: "/c/Users/incorrect-home" },
+        stockCodexPath: await executable(path.join(home, "stock-codex.exe")),
+        nodePath: await executable(path.join(home, "node.exe")),
+        shimPath: await executable(path.join(home, "shim.exe")),
+        hostRuntimePath: await regularFile(path.join(home, "runtime.mjs")),
+      };
+      const installed = await installRemoteHost(options);
+      expect(installed.wrapperPath).toBe(
+        path.join(home, ".codexhost", "remote", "bin", "codex.exe"),
+      );
+      expect(await readFile(installed.wrapperPath)).toEqual(await readFile(options.shimPath));
+      expect(JSON.parse(await readFile(installed.profilePath, "utf8"))).toMatchObject({
+        CODEXHOST_STOCK_CODEX_PATH: options.stockCodexPath,
+        CODEXHOST_REMOTE_SSH_MANAGED: "1",
+      });
+      await expect(lstat(path.join(home, ".profile"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(inspectRemoteHostInstallation(options)).resolves.toMatchObject({
+        state: "ready",
+        issues: [],
+      });
+      await installRemoteHost(options);
+      await uninstallRemoteHost(options);
+      await expect(inspectRemoteHostInstallation(options)).resolves.toMatchObject({
+        state: "not-installed",
+      });
+      expect(await readFile(options.stockCodexPath, "utf8")).toBe("fixture\n");
+      await expect(
+        installRemoteHost({ ...options, stockCodexPath: path.join(home, "codex.cmd") }),
+      ).rejects.toThrow("native Codex .exe");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("preserves the shared directory and desktop session across updates and switching back to SSH", async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), "remote-session-"));
     try {

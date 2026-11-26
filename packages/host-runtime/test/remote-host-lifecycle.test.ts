@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import net, { type AddressInfo } from "node:net";
 import path from "node:path";
 import { PassThrough } from "node:stream";
+import { remoteHostSocketPath } from "../src/remote-host-paths.js";
 import { runRemoteHostCli } from "../src/remote-host-cli.js";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +68,101 @@ function runtime(
 }
 
 describe("remote Host lifecycle", () => {
+  it("starts and stops the native Windows supervisor using the installed manifest", async () => {
+    const environment = { USERPROFILE: "C:\\Users\\developer" };
+    const windowsManifest = {
+      ...readyInstallation,
+      wrapperPath: path.join(home, "remote", "bin", "codex.exe"),
+    };
+    const pipe = remoteHostSocketPath(environment, "win32");
+    restore = setRemoteHostLifecycleDependenciesForTest({
+      inspectInstallation: vi.fn().mockResolvedValue(windowsManifest),
+      probeProtocol: vi.fn().mockResolvedValue({ state: "stopped", socketPath: pipe }),
+      waitForRuntime: vi
+        .fn()
+        .mockResolvedValue({ state: "running", socketPath: pipe, protocol: "codexhost" }),
+    });
+    await expect(startRemoteHost({ platform: "win32", environment })).resolves.toMatchObject({
+      state: "running",
+      changed: true,
+      socketPath: pipe,
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      manifest.shimPath,
+      ["--codexhost-windows-remote", "start", path.join(home, "remote", "manifest.json")],
+      expect.objectContaining({ windowsHide: true }),
+    );
+    restore();
+    restore = setRemoteHostLifecycleDependenciesForTest({
+      inspectInstallation: vi.fn().mockResolvedValue(windowsManifest),
+      probeProtocol: vi
+        .fn()
+        .mockResolvedValue({ state: "running", socketPath: pipe, protocol: "codexhost" }),
+      socketExists: vi.fn().mockResolvedValue(false),
+    });
+    await expect(stopRemoteHost({ platform: "win32", environment })).resolves.toEqual({
+      state: "stopped",
+      changed: true,
+      socketPath: pipe,
+    });
+    expect(spawn).toHaveBeenLastCalledWith(
+      manifest.shimPath,
+      ["--codexhost-windows-remote", "stop", path.join(home, "remote", "manifest.json")],
+      expect.any(Object),
+    );
+  });
+
+  it("stops a recorded Windows supervisor even when startup has not bound its pipe", async () => {
+    const terminate = vi.fn();
+    restore = setRemoteHostLifecycleDependenciesForTest({
+      inspectInstallation: vi.fn().mockResolvedValue(readyInstallation),
+      probeProtocol: vi.fn().mockResolvedValue(runtime("stopped")),
+      runTerminator: terminate,
+    });
+    const environment = { USERPROFILE: "C:\\Users\\developer" };
+    await expect(stopRemoteHost({ platform: "win32", environment })).resolves.toMatchObject({
+      state: "stopped",
+    });
+    expect(terminate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.stringContaining("codexhost-ssh-"),
+      "managed",
+      environment,
+    );
+  });
+
+  it("refuses an unrecognized Windows pipe and cleans up a failed startup", async () => {
+    const terminate = vi.fn();
+    const launch = vi.fn();
+    restore = setRemoteHostLifecycleDependenciesForTest({
+      inspectInstallation: vi.fn().mockResolvedValue(readyInstallation),
+      probeProtocol: vi.fn().mockResolvedValue(runtime("unknown")),
+      launch,
+      runTerminator: terminate,
+    });
+    const options = {
+      platform: "win32" as const,
+      environment: { USERPROFILE: "C:\\Users\\developer" },
+    };
+    await expect(startRemoteHost(options)).rejects.toThrow("unrecognized service");
+    expect(launch).not.toHaveBeenCalled();
+    restore();
+    restore = setRemoteHostLifecycleDependenciesForTest({
+      inspectInstallation: vi.fn().mockResolvedValue(readyInstallation),
+      probeProtocol: vi.fn().mockResolvedValue(runtime("stopped")),
+      launch,
+      runTerminator: terminate,
+      waitForRuntime: vi.fn().mockRejectedValue(new Error("startup failed")),
+    });
+    await expect(startRemoteHost(options)).rejects.toThrow("startup failed");
+    expect(terminate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.stringContaining("codexhost-ssh-"),
+      "managed",
+      options.environment,
+    );
+  });
+
   it.each(["ssh", "desktop"] as const)(
     "uses the installed %s execution session instead of an inherited selection",
     async (executionSession) => {

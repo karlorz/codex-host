@@ -256,6 +256,8 @@ dependencies = [
  "codexhost-platform",
  "fs2",
  "nix",
+ "serde",
+ "serde_json",
  "signal-hook",
 ]
 
@@ -263,7 +265,9 @@ dependencies = [
 name = "codexhost-updater"
 version = "0.22.0-2"
 dependencies = [
+ "base64",
  "codexhost-platform",
+ "flate2",
  "serde",
  "serde_json",
  "sha2",

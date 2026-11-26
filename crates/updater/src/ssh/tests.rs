@@ -688,3 +688,19 @@ fn node_version_gate_follows_the_npm_engine_range() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn installs_numeric_release_revisions_without_accepting_development_labels() {
+    let mut request = request();
+    request.action = "install".into();
+    request.version = Some("0.22.0-2".into());
+    assert!(
+        script(&request)
+            .unwrap()
+            .contains("@karlorz/codexhost-cli@0.22.0-2")
+    );
+    for version in ["0.22.0-dev", "0.22.0-2;echo bad", "0.22.0-", "0.22.0-2..1"] {
+        request.version = Some(version.into());
+        assert!(script(&request).is_err());
+    }
+}
