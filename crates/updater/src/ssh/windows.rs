@@ -213,7 +213,7 @@ function global:codexhost.cmd {
                 uninstall_package: false,
             };
             all.push_str(&script(&request).unwrap());
-            all.push_str("\n");
+            all.push('\n');
         }
         all.push_str("[Console]::WriteLine(($global:calls | ConvertTo-Json -Compress))");
         let output = std::process::Command::new("cmd.exe")
