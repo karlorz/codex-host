@@ -145,8 +145,11 @@ does not claim that npm publication occurred in the original run.
 标签推送使用标签提交里的工作流定义，新校验不会追溯改写旧标签的发布逻辑。这不是不可绕过的权限控制；未设置分支、标签或发布环境保护。
 
 Windows native Mapping Store lock queries run in a dedicated step after the
-cross-platform suite. This retains their actual PowerShell/CIM behavior and
-production query deadlines without competing with the full suite's worker load.
+cross-platform suite. Identity and encoding cases execute the actual PowerShell/CIM
+query with a 15-second test-only budget for hosted-runner shell startup. The native
+timeout safety case retains the production five-second deadline and verifies that
+the live owner's lock survives, including timeouts before the script starts.
+Queries run once without retries, and stage timings remain in the CI log.
 
 ## 验证
 
