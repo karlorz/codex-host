@@ -216,7 +216,7 @@ Tasks run on the other machine while the UI stays in your local Codex Desktop. B
 | Remote machine | How to connect |
 | --- | --- |
 | macOS / Linux | [SSH](#ssh) |
-| Windows | [Remote Control](#remote-control-experimental) (experimental) |
+| Windows | [Remote Control](#remote-control-experimental) (experimental). A [Windows SSH Host service](docs/platforms/remote/remote-ssh-host.md) exists; native Desktop **Connected** still needs the [dedicated-key workaround](docs/operations/windows-native-ssh-workaround.md). |
 
 #### SSH
 

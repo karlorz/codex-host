@@ -42,6 +42,8 @@ shared clients must not inherit administrator privileges
 
 After a reboot or daemon stop, start it again without elevation before connecting. Automatic cold startup from the elevated SSH session is not established by this workaround. Do not stop a daemon that has active work just to test this limitation.
 
+Cold start on `msi-1` after a 2026-11-28 reboot: OpenSSH `DefaultShell` was still unset (cmd.exe). The dedicated-key POSIX wrapper still returned `POSIX_OK SHELL=/bin/bash`. `codex app-server daemon version` failed with os error 10061 (nothing listening on the AF_UNIX socket). Elevated SSH `daemon start` still returned `start the Windows daemon from a non-elevated terminal`. A later interactive `RunLevel Limited` scheduled task started CLI 0.172.0 (`status: "running"`, PID 16320).
+
 Inspect the control directory when startup reports an ACL error:
 
 ```powershell
