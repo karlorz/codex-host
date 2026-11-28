@@ -38,7 +38,7 @@ import {
 } from "../src/remote-host-lifecycle.js";
 
 const home = "/home/developer";
-const socketPath = path.join(home, ".codex", "app-server-control", "app-server-control.sock");
+const socketPath = path.posix.join(home, ".codex", "app-server-control", "app-server-control.sock");
 const manifest: RemoteHostManifestV1 = {
   format: 1,
   wrapperPath: "/home/developer/.codexhost/remote/bin/codex",
