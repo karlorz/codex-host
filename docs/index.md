@@ -178,6 +178,7 @@
 | [`operations/cpa-live-voice-desktop-hook-history.md`](operations/cpa-live-voice-desktop-hook-history.md) | Historical voice export mappings, older pins and incident notes; not a current support claim. |
 | [`operations/macos-desktop-pin-daily-driver.md`](operations/macos-desktop-pin-daily-driver.md) | Keep production `/Applications/ChatGPT.app` on 26.1027.61615; unaudited Sparkle skipped; pin-drift opens a new issue per surface and supersedes the previous tracker. |
 | [`operations/windows-desktop-pin-daily-driver.md`](operations/windows-desktop-pin-daily-driver.md) | msi-1 daily driver is Store OpenAI.Codex 26.1106.6628.0 (product 26.1106.51428). Controller injects that exact Windows hashed build after Page load; hashed voice stays darwin-only and attended Windows voice stays unverified. |
+| [`operations/windows-native-ssh-workaround.md`](operations/windows-native-ssh-workaround.md) | Verified native Windows SSH connection using a dedicated forced-command key, Git Bash and a non-elevated stock daemon; setup, failed experiments, cold-start after reboot, evidence and rollback. |
 | [`operations/browser-annotation-cursor.md`](operations/browser-annotation-cursor.md) | Built-in browser Annotate cursor recovery when page CSP blocks its stylesheet; scoped Host shim, persistence, ownership, and regression checks. |
 
 ## 平台、进程与远程运行

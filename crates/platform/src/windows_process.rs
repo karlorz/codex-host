@@ -344,14 +344,26 @@ pub fn atomic_replace_file(source: &std::path::Path, target: &std::path::Path) -
 }
 
 pub fn guard_child(child: &Child) -> io::Result<ChildJob> {
+    guard_process(
+        child.as_raw_handle() as Handle,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn restrict_current_process_breakaway() -> io::Result<ChildJob> {
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    guard_process(unsafe { GetCurrentProcess() }.0, 0)
+}
+
+fn guard_process(process: Handle, limit_flags: u32) -> io::Result<ChildJob> {
     unsafe {
         let job = CreateJobObjectW(null(), null());
         if job.is_null() {
             return Err(io::Error::last_os_error());
         }
         let mut information: ExtendedLimitInformation = zeroed();
-        information.basic_limit_information.limit_flags =
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+        information.basic_limit_information.limit_flags = limit_flags;
         let configured = SetInformationJobObject(
             job,
             JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
@@ -359,7 +371,7 @@ pub fn guard_child(child: &Child) -> io::Result<ChildJob> {
             size_of::<ExtendedLimitInformation>() as u32,
         );
         let assigned = if configured != 0 {
-            AssignProcessToJobObject(job, child.as_raw_handle() as Handle)
+            AssignProcessToJobObject(job, process)
         } else {
             0
         };

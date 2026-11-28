@@ -2,9 +2,14 @@
 //! private app-servers must not become another owner of the Host Runtime.
 
 #[cfg(any(target_os = "windows", test))]
-use codexhost_platform::ProcessSnapshot;
+use codexhost_platform::{ProcessSnapshot, node_entrypoint_path};
+#[cfg(any(target_os = "windows", test))]
+use std::ffi::OsStr;
 
-pub(crate) fn is_desktop_helper(_stock_codex_path: &std::path::Path) -> bool {
+pub(crate) fn is_desktop_helper(
+    _stock_codex_path: &std::path::Path,
+    _arguments: &[std::ffi::OsString],
+) -> bool {
     #[cfg(target_os = "windows")]
     {
         let Some(launcher_id) = std::env::var(super::LAUNCHER_PID_ENV)
@@ -14,7 +19,10 @@ pub(crate) fn is_desktop_helper(_stock_codex_path: &std::path::Path) -> bool {
         else {
             return false;
         };
-        is_helper_descendant(std::process::id(), launcher_id, |id| {
+        let desktop_app_server = has_local_app_server_signature(_arguments)
+            && std::env::var_os(super::INTERNAL_ORIGINATOR_OVERRIDE_ENV).as_deref()
+                == Some(OsStr::new(super::DESKTOP_ORIGINATOR));
+        is_helper_descendant(std::process::id(), launcher_id, desktop_app_server, |id| {
             codexhost_platform::process_snapshot(id).ok()
         })
     }
@@ -102,18 +110,41 @@ fn is_macos_desktop_helper(stock_codex_path: &std::path::Path) -> Option<bool> {
     None
 }
 
+// The local app-server adds its app-tools override after the shared startup flags.
+#[cfg(target_os = "windows")]
+fn has_local_app_server_signature(arguments: &[std::ffi::OsString]) -> bool {
+    let [config, code_mode, subcommand, analytics, overrides @ ..] = arguments else {
+        return false;
+    };
+    const APP_TOOLS: &str = "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=";
+    config == "-c"
+        && code_mode == "features.code_mode_host=true"
+        && subcommand == "app-server"
+        && analytics == "--analytics-default-enabled"
+        && overrides.len().is_multiple_of(2)
+        && overrides.chunks_exact(2).all(|pair| pair[0] == "-c")
+        && matches!(
+            overrides
+                .last()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.strip_prefix(APP_TOOLS)),
+            Some("true" | "false")
+        )
+}
+
 #[cfg(any(target_os = "windows", test))]
 fn is_helper_descendant(
     shim_id: u32,
     launcher_id: u32,
+    desktop_app_server: bool,
     mut inspect: impl FnMut(u32) -> Option<ProcessSnapshot>,
 ) -> bool {
     let Some(mut child) = inspect(shim_id) else {
         return false;
     };
-    // Windows launch is launcher -> Desktop -> shim. Only a positively observed
-    // deeper descendant is a helper; stale/missing launch metadata keeps the
-    // existing explicit Host/remote invocation behavior. Bound ancestry work.
+    // The main app-server can run directly under Desktop or through one
+    // same-image Desktop utility process. Other deeper descendants are helpers.
+    let mut same_desktop_image = false;
     for depth in 1..=32 {
         if child.parent_id == 0 || child.parent_id == child.id {
             return false;
@@ -125,7 +156,15 @@ fn is_helper_descendant(
             return false; // Parent PID was reused.
         }
         if parent.id == launcher_id {
-            return depth > 2;
+            return depth > 2 && !(depth == 3 && same_desktop_image);
+        }
+        if depth == 2 && desktop_app_server {
+            same_desktop_image = parent.executable.file_name().is_some_and(|name| {
+                name.eq_ignore_ascii_case(OsStr::new("ChatGPT.exe"))
+                    && node_entrypoint_path(&parent.executable)
+                        .as_os_str()
+                        .eq_ignore_ascii_case(node_entrypoint_path(&child.executable).as_os_str())
+            });
         }
         child = parent;
     }
@@ -148,26 +187,44 @@ mod tests {
 
     #[test]
     fn distinguishes_desktop_from_nested_helpers() {
-        let inspect = |id| (id >= 1).then(|| snapshot(id, id - 1));
-        assert!(!is_helper_descendant(3, 1, inspect));
-        assert!(is_helper_descendant(4, 1, inspect));
-        assert!(is_helper_descendant(5, 1, inspect));
-        assert!(!is_helper_descendant(3, 99, inspect));
+        let inspect = |id| {
+            (id >= 1).then(|| {
+                let mut process = snapshot(id, id - 1);
+                if matches!(id, 2..=4) {
+                    process.executable = "desktop/ChatGPT.exe".into();
+                }
+                process
+            })
+        };
+        assert!(!is_helper_descendant(3, 1, false, inspect));
+        assert!(is_helper_descendant(4, 1, false, inspect));
+        assert!(!is_helper_descendant(4, 1, true, inspect));
+        assert!(is_helper_descendant(5, 1, true, inspect));
+        assert!(!is_helper_descendant(3, 99, false, inspect));
+        assert!(is_helper_descendant(4, 1, true, |id| {
+            let mut process = inspect(id)?;
+            if id == 3 {
+                process.executable = "different/ChatGPT.exe".into();
+            }
+            Some(process)
+        }));
     }
 
     #[test]
     fn rejects_missing_reused_and_unbounded_ancestry() {
-        assert!(!is_helper_descendant(4, 1, |_| None));
-        assert!(!is_helper_descendant(4, 1, |id| {
+        assert!(!is_helper_descendant(4, 1, false, |_| None));
+        assert!(!is_helper_descendant(4, 1, false, |id| {
             let mut value = snapshot(id, id - 1);
             if id == 2 {
                 value.started_at_micros = 99;
             }
             Some(value)
         }));
-        assert!(!is_helper_descendant(4, 1, |id| Some(snapshot(id, id))));
+        assert!(!is_helper_descendant(4, 1, false, |id| Some(snapshot(
+            id, id
+        ))));
         let mut calls = 0;
-        assert!(!is_helper_descendant(100, 1, |id| {
+        assert!(!is_helper_descendant(100, 1, false, |id| {
             calls += 1;
             Some(snapshot(id, id - 1))
         }));

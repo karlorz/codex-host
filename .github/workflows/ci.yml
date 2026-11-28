@@ -208,8 +208,9 @@ jobs:
           --exclude 'packages/mapping-store/test/windows-lock-native.test.ts'
           && npm run test:web
 
-      # Native PowerShell startup deadlines are part of the behavior under test.
-      # Run these queries without the full suite competing for the Windows runner.
+      # Isolate native queries from the full suite's Windows runner load.
+      # Identity/encoding cases allow slow shell startup; timeout safety retains
+      # the production deadline and requires the live owner's lock to survive.
       - name: Test Windows native lock ownership
         if: runner.os == 'Windows'
         run: >

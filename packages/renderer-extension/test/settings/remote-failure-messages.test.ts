@@ -25,4 +25,13 @@ describe("remote failure messages", () => {
     expect(localizeRemoteFailure(native, zh)).toBe(native);
     expect(localizeRemoteFailure("远程服务已修复，正在连接", zh)).toBe("远程服务已修复，正在连接");
   });
+
+  it("replaces the Desktop POSIX Windows SSH probe dump with Console copy", () => {
+    const dump =
+      "OpenSSH_9.9p2 Authenticated to 100.103.147.52 using publickey. /usr/bin/bash: -c: line 2: syntax error: unexpected end of file from `if' command on line 1 '[' is not recognized";
+    expect(localizeRemoteFailure(dump, zh)).toContain("无法完成到原生 Windows 电脑的 SSH");
+    expect(
+      localizeRemoteFailure("AppServerSshSetupError: operation=codex_path_probe", (_cn, en) => en),
+    ).toContain("does not make this card Connected");
+  });
 });

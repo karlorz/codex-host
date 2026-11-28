@@ -24,6 +24,8 @@ mod process_identity;
 mod remote_lifecycle;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod remote_listener_process;
+#[cfg(any(target_os = "windows", test))]
+mod windows_remote;
 
 use local_runtime_lease::{LocalRuntimeAdmission, admit_local_runtime};
 
@@ -688,10 +690,10 @@ fn is_managed_remote_listener(arguments: &[OsString]) -> bool {
         env::var_os(REMOTE_SSH_MANAGED_ENV).as_deref() == Some(std::ffi::OsStr::new("1"))
             && is_default_remote_unix_listener(arguments)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        let _ = arguments;
-        false
+        env::var_os(REMOTE_SSH_MANAGED_ENV).as_deref() == Some(OsStr::new("1"))
+            && windows_remote::is_listener(arguments)
     }
 }
 
@@ -862,13 +864,19 @@ pub fn run_proxy_with_observer(
     arguments: &[OsString],
     observer: &impl ProxyObserver,
 ) -> ShimResult<i32> {
+    #[cfg(target_os = "windows")]
+    let _independent = if is_managed_remote_listener(arguments) {
+        Some(codexhost_platform::register_independent_service()?)
+    } else {
+        None
+    };
     let current_executable = env::current_exe()?;
     let stock_codex_path = resolve_stock_codex_path(&current_executable, arguments)?;
     observer.invocation(arguments, &stock_codex_path);
 
     let started = Instant::now();
     let shutdown_signals = ShutdownSignals::install()?;
-    let mut desktop_helper = desktop_invocation::is_desktop_helper(&stock_codex_path);
+    let mut desktop_helper = desktop_invocation::is_desktop_helper(&stock_codex_path, arguments);
     let mut local_host_runtime = !desktop_helper
         && should_start_host_runtime(arguments)
         && host_runtime_paths_are_configured()
@@ -989,6 +997,21 @@ pub fn run_proxy(arguments: &[OsString]) -> ShimResult<i32> {
 
 pub fn run_from_environment() -> ShimResult<i32> {
     let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    #[cfg(target_os = "windows")]
+    {
+        if arguments
+            .first()
+            .is_some_and(|argument| argument == "--codexhost-windows-remote")
+        {
+            return windows_remote::manage(&arguments[1..]);
+        }
+        if let Some(code) = windows_remote::bootstrap(&arguments)? {
+            return Ok(code);
+        }
+        if let Some(code) = windows_remote::proxy(&arguments)? {
+            return Ok(code);
+        }
+    }
     #[cfg(target_os = "macos")]
     if arguments.first().and_then(|argument| argument.to_str())
         == Some(codexhost_platform::AQUA_SPAWN_ARGUMENT)

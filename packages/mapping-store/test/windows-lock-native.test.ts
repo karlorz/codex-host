@@ -46,11 +46,13 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   let store: MappingStore;
   let processStartedAt: string;
   let queryPrelude: string;
+  let retainProductionDeadline: boolean;
 
   beforeEach(async () => {
     vi.mocked(execFileSync).mockReset();
     directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-windows-native-lock-"));
     queryPrelude = "";
+    retainProductionDeadline = false;
     const execFile = await nativeExecFileSync();
     vi.mocked(execFileSync).mockImplementation((file, args, options) => {
       const originalQuery = Array.isArray(args) ? args.at(-1) : undefined;
@@ -64,10 +66,15 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
       const diagnosticsPath = path.join(directory, "identity-query.stderr");
       const diagnostics = openSync(diagnosticsPath, "w");
       const startedAt = Date.now();
+      // Native identity/encoding assertions need the script to run even when a
+      // hosted runner spends over five seconds starting Windows PowerShell.
+      // The timeout safety case below retains the unmodified production deadline.
+      const timeout = retainProductionDeadline ? options?.timeout : 15_000;
       let failure: unknown;
       try {
         return execFile(file, [...args.slice(0, -1), query], {
           ...options,
+          timeout,
           stdio: ["ignore", "pipe", diagnostics],
         });
       } catch (error) {
@@ -84,6 +91,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
           });
         const timing = {
           elapsedMs: Date.now() - startedAt,
+          timeoutMs: timeout,
           stages,
           ...(failure && typeof failure === "object" && "code" in failure
             ? { errorCode: failure.code }
@@ -211,6 +219,7 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
   });
 
   it("preserves the live owner's lock when the native query times out", async () => {
+    retainProductionDeadline = true;
     prependQuery("Start-Sleep -Seconds 6");
     const content = await writeLock(processStartedAt);
     await expect(store.initialize()).rejects.toMatchObject({ code: "STORE_LOCKED" });
@@ -220,7 +229,8 @@ describe.skipIf(process.platform !== "win32")("Windows native Mapping Store lock
       type: "throw",
       value: {
         code: "ETIMEDOUT",
-        identityQueryTiming: { stages: [{ stage: "script-start", elapsedMs: expect.any(Number) }] },
+        // A timeout before script-start must preserve ownership too.
+        identityQueryTiming: { timeoutMs: 5_000, errorCode: "ETIMEDOUT" },
       },
     });
     if (owner.pid === undefined) throw new Error("Missing fixture process PID");

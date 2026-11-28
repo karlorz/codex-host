@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { resolveOfficialCodexExecutable } from "./codex-runtime/command.js";
 
 const MANIFEST_FORMAT = 1;
 // Kept only so status/install can identify and migrate preview installs.
@@ -66,7 +67,9 @@ interface ResolvedRemoteHostPaths {
 
 function resolvePaths(options: RemoteHostInstallOptions): ResolvedRemoteHostPaths {
   const environment = options.environment ?? process.env;
-  const configuredHome = options.home ?? environment.HOME;
+  const windows = (options.platform ?? process.platform) === "win32";
+  const configuredHome =
+    options.home ?? (windows ? (environment.USERPROFILE ?? environment.HOME) : environment.HOME);
   if (!configuredHome) {
     throw new Error("A non-root HOME is required for remote Host installation");
   }
@@ -77,21 +80,26 @@ function resolvePaths(options: RemoteHostInstallOptions): ResolvedRemoteHostPath
   const installRoot = path.resolve(options.installRoot ?? path.join(home, ".codexhost", "remote"));
   const profilePath = path.resolve(
     options.profilePath ??
-      path.join(
-        home,
-        path.basename(environment.SHELL ?? "") === "zsh"
-          ? ".zshenv"
-          : path.basename(environment.SHELL ?? "") === "bash"
-            ? ".bashrc"
-            : ".profile",
-      ),
+      ((options.platform ?? process.platform) === "win32"
+        ? path.join(installRoot, "environment.json")
+        : path.join(
+            home,
+            path.basename(environment.SHELL ?? "") === "zsh"
+              ? ".zshenv"
+              : path.basename(environment.SHELL ?? "") === "bash"
+                ? ".bashrc"
+                : ".profile",
+          )),
   );
   const binDirectory = path.join(installRoot, "bin");
   return {
     home,
     installRoot,
     binDirectory,
-    wrapperPath: path.join(binDirectory, "codex"),
+    wrapperPath: path.join(
+      binDirectory,
+      (options.platform ?? process.platform) === "win32" ? "codex.exe" : "codex",
+    ),
     manifestPath: path.join(installRoot, "manifest.json"),
     dataDirectory: path.join(installRoot, "data"),
     profilePath,
@@ -237,6 +245,21 @@ function removeManagedProfileBlock(contents: string): string {
 }
 
 function installManagedProfileBlock(contents: string, manifest: RemoteHostManifestV1): string {
+  if (manifest.wrapperPath.endsWith(".exe")) {
+    return `${JSON.stringify(
+      {
+        CODEX_INSTALL_DIR: path.dirname(manifest.wrapperPath),
+        CODEXHOST_STOCK_CODEX_PATH: manifest.stockCodexPath,
+        CODEXHOST_HOST_NODE_PATH: manifest.nodePath,
+        CODEXHOST_HOST_RUNTIME_PATH: manifest.hostRuntimePath,
+        CODEXHOST_DATA_DIR: manifest.dataDirectory,
+        CODEXHOST_SHARED_DATA_DIR: manifest.sharedDataDirectory,
+        CODEXHOST_REMOTE_SSH_MANAGED: "1",
+      },
+      null,
+      2,
+    )}\n`;
+  }
   const base = removeManagedProfileBlock(contents);
   const environment = [
     `export CODEX_INSTALL_DIR=${shellQuote(path.dirname(manifest.wrapperPath))}`,
@@ -382,11 +405,17 @@ export async function installRemoteHost(
   options: RemoteHostInstallOptions,
 ): Promise<RemoteHostManifestV1> {
   const platform = options.platform ?? process.platform;
-  if (platform === "win32") {
-    throw new Error("Remote Host installation must run on the macOS or Linux SSH host");
-  }
   const environment = options.environment ?? process.env;
   const paths = resolvePaths(options);
+  if (
+    platform === "win32" &&
+    options.profilePath !== undefined &&
+    paths.profilePath !== path.join(paths.installRoot, "environment.json")
+  ) {
+    throw new Error(
+      "Windows remote Host uses its managed environment file; shell profiles are not supported",
+    );
+  }
   const previousManifest = await readManifest(paths.manifestPath);
   const executionSession = options.executionSession ?? previousManifest?.executionSession ?? "ssh";
   if (executionSession !== "ssh" && executionSession !== "desktop") {
@@ -436,8 +465,13 @@ export async function installRemoteHost(
   const discoveredStock =
     options.stockCodexPath ??
     previousManifest?.stockCodexPath ??
-    (await discoverExecutable("codex", environment));
+    (platform === "win32"
+      ? await resolveOfficialCodexExecutable("", environment)
+      : await discoverExecutable("codex", environment));
   if (!discoveredStock) throw new Error("Could not locate the existing Codex entrypoint");
+  if (platform === "win32" && !discoveredStock.toLowerCase().endsWith(".exe")) {
+    throw new Error("Windows remote Host requires the native Codex .exe, not an npm command shim");
+  }
   const stockCodexPath = await executable(discoveredStock, "Existing Codex entrypoint");
   if (stockCodexPath === paths.wrapperPath) {
     throw new Error("Existing Codex entrypoint resolves to the managed remote entrypoint");
@@ -604,10 +638,6 @@ export async function inspectRemoteHostInstallation(
 }
 
 export async function uninstallRemoteHost(options: RemoteHostInstallOptions): Promise<void> {
-  const platform = options.platform ?? process.platform;
-  if (platform === "win32") {
-    throw new Error("Remote Host uninstallation must run on the macOS or Linux SSH host");
-  }
   const paths = resolvePaths(options);
   const manifest = await readManifest(paths.manifestPath);
   if (!manifest) return;
@@ -625,7 +655,9 @@ export async function uninstallRemoteHost(options: RemoteHostInstallOptions): Pr
     throw new Error("Refusing to remove a modified remote Codex entrypoint");
   }
   const profile = (await existingText(manifest.profilePath)) ?? "";
-  const nextProfile = removeManagedProfileBlock(profile);
+  const nextProfile = manifest.wrapperPath.endsWith(".exe")
+    ? ""
+    : removeManagedProfileBlock(profile);
   if (nextProfile !== profile) {
     await backupProfile(manifest.profilePath, profile, "uninstall");
     const metadata = await stat(manifest.profilePath).catch(() => null);

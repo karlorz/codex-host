@@ -109,6 +109,28 @@ pub fn configure_detached_service_command(
     Ok(())
 }
 
+/// Spawn a native service, requesting Job breakaway where Windows policy permits it.
+/// A restrictive enclosing Job remains in force on fallback; descendants still
+/// belong to the service supervisor's own cleanup Job.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub fn spawn_detached_service(
+    command: &mut std::process::Command,
+) -> Result<std::process::Child, PlatformError> {
+    configure_detached_service_command(command)?;
+    let result = command.spawn();
+    #[cfg(target_os = "windows")]
+    if result
+        .as_ref()
+        .is_err_and(|error| error.raw_os_error() == Some(5))
+    {
+        use std::os::windows::process::CommandExt;
+        use windows::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS};
+        command.creation_flags((CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS).0);
+        return command.spawn().map_err(PlatformError::from);
+    }
+    result.map_err(PlatformError::from)
+}
+
 #[cfg(target_os = "windows")]
 pub fn configure_detached_service_command(
     command: &mut std::process::Command,

@@ -86,7 +86,7 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it.skipIf(process.platform === "win32").each([".codexhost/remote/bin", "custom-remote/bin"])(
+it.each([".codexhost/remote/bin", "custom-remote/bin"])(
   "rejects the managed Remote proxy in %s even with a stale stock environment variable",
   async (binDirectory) => {
     const remote = await installation(binDirectory);

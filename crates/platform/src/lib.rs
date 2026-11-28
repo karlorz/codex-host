@@ -61,6 +61,8 @@ mod windows_proxy;
 #[allow(unsafe_code)]
 mod windows_ui;
 
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub use background::spawn_detached_service;
 pub use background::{configure_detached_service_command, detach_from_terminal};
 pub use desktop_launch::{
     DesktopProcess, launch_desktop, launch_stock_desktop, open_external_url,

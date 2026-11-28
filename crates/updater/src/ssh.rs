@@ -10,6 +10,8 @@ use std::{
 
 use crate::install::NPM_PACKAGE_NAME;
 
+mod windows;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Request {
@@ -21,19 +23,30 @@ struct Request {
     #[serde(default)]
     uninstall_package: bool,
 }
-/// Only published stable releases are installed over SSH; the value is interpolated into a script.
+/// Numeric release versions are safe to interpolate into the fixed npm command.
 fn release_version(request: &Request) -> Result<&str, Box<dyn Error>> {
     let version = request
         .version
         .as_deref()
         .ok_or("A release version is required")?;
-    let parts: Vec<_> = version.split('.').collect();
+    let (core, revision) = version
+        .split_once('-')
+        .map_or((version, None), |(core, revision)| (core, Some(revision)));
+    if revision.is_some_and(|revision| {
+        revision.is_empty()
+            || revision
+                .split('.')
+                .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    }) {
+        return Err("Install requires a published release version".into());
+    }
+    let parts: Vec<_> = core.split('.').collect();
     if parts.len() != 3
         || parts
             .iter()
             .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
     {
-        return Err("Install requires a published stable version".into());
+        return Err("Install requires a published release version".into());
     }
     Ok(version)
 }
@@ -129,6 +142,10 @@ node -e 'const fs = require("node:fs"), path = require("node:path"); try {{ cons
     }
 }
 fn arguments(request: &Request, script: &str) -> Vec<String> {
+    command_arguments(request, remote_command(request, script))
+}
+
+fn command_arguments(request: &Request, command: String) -> Vec<String> {
     let mut args = vec![
         "-o".into(),
         "BatchMode=yes".into(),
@@ -145,11 +162,7 @@ fn arguments(request: &Request, script: &str) -> Vec<String> {
     if let Some(identity) = &request.identity {
         args.extend(["-i".into(), identity.clone()]);
     }
-    args.extend([
-        "--".into(),
-        request.hostname.clone(),
-        remote_command(request, script),
-    ]);
+    args.extend(["--".into(), request.hostname.clone(), command]);
     args
 }
 fn shell_quote(value: &str) -> String {
@@ -206,9 +219,50 @@ pub fn apply() -> Result<(), Box<dyn Error>> {
     let mut bytes = Vec::new();
     io::stdin().take(16 * 1024).read_to_end(&mut bytes)?;
     let request: Request = serde_json::from_slice(&bytes)?;
-    let script = script(&request)?;
+    let unix_script = script(&request)?;
+    let probe_command = windows::command("[Console]::WriteLine('__CODEXHOST_WINDOWS__')");
+    let mut probe = Command::new("ssh")
+        .args(command_arguments(&request, probe_command))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let probe_stdout = probe
+        .stdout
+        .take()
+        .ok_or("SSH platform probe output unavailable")?;
+    let probe_output = thread::spawn(move || read_output_tail(probe_stdout));
+    let probe_started = Instant::now();
+    let windows = loop {
+        if let Some(status) = probe.try_wait()? {
+            let output = probe_output
+                .join()
+                .map_err(|_| "SSH platform probe reader failed")??;
+            break status.success()
+                && String::from_utf8_lossy(&output)
+                    .lines()
+                    .any(|line| line.trim() == "__CODEXHOST_WINDOWS__");
+        }
+        if probe_started.elapsed() > Duration::from_secs(60) {
+            let _ = probe.kill();
+            let _ = probe.wait();
+            return Err(
+                "SSH platform detection timed out; check the remote computer before retrying"
+                    .into(),
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let args = if windows {
+        command_arguments(
+            &request,
+            windows::script_command(&windows::script(&request)?)?,
+        )
+    } else {
+        arguments(&request, &unix_script)
+    };
     let mut child = Command::new("ssh")
-        .args(arguments(&request, &script))
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

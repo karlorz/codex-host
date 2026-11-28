@@ -94,7 +94,11 @@ function isDesktopProxy(command: string, environment: NodeJS.ProcessEnv): boolea
   if (typeof routed === "string" && routed !== "" && canonical(routed) === canonicalCommand)
     return true;
   for (const candidate of [command, canonicalCommand]) {
-    if (basename(candidate) !== "codex" || basename(dirname(candidate)) !== "bin") continue;
+    if (
+      !["codex", "codex.exe"].includes(basename(candidate)) ||
+      basename(dirname(candidate)) !== "bin"
+    )
+      continue;
     try {
       const manifest = JSON.parse(
         readFileSync(resolve(dirname(candidate), "..", "manifest.json"), "utf8"),
